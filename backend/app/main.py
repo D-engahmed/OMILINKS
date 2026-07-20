@@ -8,12 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.domains.access.routes.access import router as access_router
 from app.domains.tenants.routes.auth import router as auth_router
+from app.domains.tenants.routes.team import router as team_router
 from app.domains.tenants.routes.tenant import router as tenant_router
+from app.domains.tenants.routes.user import router as user_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start Kafka consumer group on boot (events/consumer.py)
     from app.events.consumer import start_consumer
 
     task = await start_consumer()
@@ -40,9 +41,13 @@ def create_app() -> FastAPI:
     async def health():
         return {"status": "ok", "service": settings.app_name}
 
-    app.include_router(auth_router)
-    app.include_router(tenant_router)
-    app.include_router(access_router)
+    # Domain routers — each has its own prefix
+    app.include_router(auth_router)      # /auth/login, /auth/register
+    app.include_router(tenant_router)    # /tenants/me, /tenants/me/usage
+    app.include_router(team_router)      # /teams, /teams/{id}, /teams/{id}/members
+    app.include_router(user_router)      # /users, /users/invites, /users/{id}
+    app.include_router(access_router)    # /access/roles, /access/permissions
+
     return app
 
 

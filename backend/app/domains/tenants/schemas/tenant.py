@@ -1,21 +1,11 @@
-"""Pydantic schemas for tenant + team + user API (ch.13 Appendix B)."""
+"""Tenant schemas."""
 
+from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
-from app.domains.tenants.models.enums import (
-    TenantStatus,
-    TenantType,
-    UserStatus,
-)
-
-
-class TenantCreate(BaseModel):
-    name: str
-    slug: str
-    email: str
-    type: TenantType = TenantType.INDIVIDUAL
+from app.domains.tenants.models.enums import TenantStatus, TenantType
 
 
 class TenantOut(BaseModel):
@@ -24,42 +14,15 @@ class TenantOut(BaseModel):
     slug: str
     type: TenantType
     status: TenantStatus
-    country: str | None
+    country: str | None = None
+    industry: str | None = None
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 
 
-class TeamCreate(BaseModel):
-    name: str
-    settings: dict = {}
-
-
-class TeamOut(BaseModel):
-    id: UUID
-    tenant_id: UUID
-    name: str
-    is_default: bool
-    status: str
-
-    model_config = {"from_attributes": True}
-
-
-class TeamMemberAdd(BaseModel):
-    user_id: UUID
-    role_id: UUID
-
-
-class UserInvite(BaseModel):
-    email: EmailStr
-    full_name: str = ""
-    team_id: UUID
-
-
-class UserOut(BaseModel):
-    id: UUID
-    tenant_id: UUID
-    email: str
-    full_name: str
-    status: UserStatus
-
-    model_config = {"from_attributes": True}
+class TenantUpdate(BaseModel):
+    name: str | None = None
+    country: str | None = None
+    industry: str | None = None
+    settings: dict | None = None

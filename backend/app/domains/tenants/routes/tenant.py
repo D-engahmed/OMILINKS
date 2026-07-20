@@ -1,116 +1,54 @@
-"""Tenant + Team + User routers (ch.13 Appendix B API surface)."""
+"""Tenant profile routes: /tenants/me (GET, PATCH)."""
 
-from uuid import UUID
-
-from fastapi import APIRouter, Depends, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_request_context, require
 from app.core.context import RequestContext
 from app.db.session import get_db
-from app.domains.access.services.seed import seed_rbac
-from app.domains.tenants.models.tenant import Team, Tenant, User
-from app.domains.tenants.schemas.tenant import (
-    TeamCreate,
-    TeamMemberAdd,
-    TeamOut,
-    TenantCreate,
-    TenantOut,
-    UserInvite,
-    UserOut,
-)
-from app.domains.tenants.services.provisioning import provision_tenant
+from app.domains.tenants.models.tenant import Tenant
+from app.domains.tenants.schemas.tenant import TenantOut, TenantUpdate
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
 
-@router.post("/seed", dependencies=[Depends(require("role.manage"))])
-async def seed(db: AsyncSession = Depends(get_db)):
-    await seed_rbac(db)
-    return {"status": "seeded"}
-
-
-@router.post("", response_model=TenantOut, status_code=status.HTTP_201_CREATED)
-async def create_tenant(
-    payload: TenantCreate, db: AsyncSession = Depends(get_db)
-):
-    # provisioning also seeds RBAC if not present
-    await seed_rbac(db)
-    tenant = await provision_tenant(
-        db=db,
-        name=payload.name,
-        slug=payload.slug,
-        email=payload.email,
-        tenant_type=payload.type,
-    )
-    return tenant
-
-
-@router.get("/current", response_model=TenantOut, dependencies=[Depends(require("tenant.view"))])
-async def get_current_tenant(
+@router.get("/me", response_model=TenantOut, dependencies=[Depends(require("tenant.view"))])
+async def get_my_tenant(
     db: AsyncSession = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context),
 ):
     tenant = await db.get(Tenant, ctx.tenant_id)
+    if tenant is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant not found")
     return tenant
 
 
-@router.get("/teams", response_model=list[TeamOut], dependencies=[Depends(require("team.view.all"))])
-async def list_teams(
+@router.patch("/me", response_model=TenantOut, dependencies=[Depends(require("tenant.manage"))])
+async def update_my_tenant(
+    payload: TenantUpdate,
     db: AsyncSession = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context),
 ):
-    rows = (
-        await db.scalars(select(Team).where(Team.tenant_id == ctx.tenant_id))
-    ).all()
-    return list(rows)
-
-
-@router.post("/teams", response_model=TeamOut, dependencies=[Depends(require("team.create"))])
-async def create_team(
-    payload: TeamCreate,
-    db: AsyncSession = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context),
-):
-    team = Team(tenant_id=ctx.tenant_id, name=payload.name, settings=payload.settings)
-    db.add(team)
+    tenant = await db.get(Tenant, ctx.tenant_id)
+    if tenant is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant not found")
+    update_data = payload.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(tenant, field, value)
     await db.commit()
-    await db.refresh(team)
-    return team
+    await db.refresh(tenant)
+    return tenant
 
 
-@router.post(
-    "/teams/{team_id}/members",
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require("team.members.manage.all"))],
+@router.get(
+    "/me/usage",
+    dependencies=[Depends(require("billing.view"))],
 )
-async def add_member(
-    team_id: UUID,
-    payload: TeamMemberAdd,
-    db: AsyncSession = Depends(get_db),
-):
-    from app.domains.tenants.models.membership import TeamMembership
-
-    member = TeamMembership(team_id=team_id, user_id=payload.user_id, role_id=payload.role_id)
-    db.add(member)
-    await db.commit()
-    return {"status": "added"}
-
-
-@router.post("/users/invites", response_model=UserOut, dependencies=[Depends(require("user.invite"))])
-async def invite_user(
-    payload: UserInvite,
-    db: AsyncSession = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context),
-):
-    user = User(
-        tenant_id=ctx.tenant_id,
-        email=payload.email,
-        full_name=payload.full_name,
-        password_hash="INVITED",  # set on first login
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
+async def get_usage(ctx: RequestContext = Depends(get_request_context)):
+    # TODO: implement seat/message/credit usage from billing domain
+    return {
+        "tenant_id": str(ctx.tenant_id),
+        "seats_used": 0,
+        "messages_used": 0,
+        "ai_credits_used": 0,
+    }
