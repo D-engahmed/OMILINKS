@@ -1,0 +1,83 @@
+"""Authoritative permission catalog (ch.13 §5).
+
+Codes only — roles are bundles of these. All authorization checks test codes,
+never role names. Scope suffixes: `.team` = within joined teams, `.all` = tenant-wide.
+"""
+
+PERMISSION_CATALOG: list[tuple[str, str, str]] = [
+    # Tenant, billing & organization
+    ("tenant.view", "tenant", "View tenant profile & settings"),
+    ("tenant.manage", "tenant", "Edit tenant profile, security, retention"),
+    ("billing.view", "billing", "View subscription, usage, invoices"),
+    ("billing.manage", "billing", "Change plan, payment, add-ons"),
+    ("integration.view", "integration", "View external integrations"),
+    ("integration.manage", "integration", "Manage external integrations"),
+    ("audit.view", "audit", "View tenant audit log"),
+    # Teams
+    ("team.create", "team", "Create new teams"),
+    ("team.view.team", "team", "View team structure (joined teams)"),
+    ("team.view.all", "team", "View all teams"),
+    ("team.update.team", "team", "Rename/configure joined teams"),
+    ("team.update.all", "team", "Rename/configure any team"),
+    ("team.delete.team", "team", "Delete joined teams"),
+    ("team.delete.all", "team", "Delete any team"),
+    ("team.members.manage.team", "team", "Manage members of joined teams"),
+    ("team.members.manage.all", "team", "Manage members of any team"),
+    ("team.settings.manage.team", "team", "Manage settings of joined teams"),
+    ("team.settings.manage.all", "team", "Manage settings of any team"),
+    # Users & roles
+    ("user.invite", "user", "Invite new users (consumes a seat)"),
+    ("user.view.team", "user", "List users (joined teams)"),
+    ("user.view.all", "user", "List all users"),
+    ("user.update.team", "user", "Edit profiles (joined teams)"),
+    ("user.update.all", "user", "Edit any user profile"),
+    ("user.delete", "user", "Permanently remove a user"),
+    ("role.assign.team", "user", "Change team role assignments"),
+    ("role.assign.all", "user", "Change any role assignment"),
+    ("role.manage", "user", "Create/edit custom roles (Enterprise)"),
+    # Channels
+    ("channel.view", "channel", "View connected channels & health"),
+    ("channel.configure", "channel", "Connect/configure channels"),
+    # Conversations & contacts
+    ("conversation.view.team", "conversation", "Read conversations (team queue)"),
+    ("conversation.view.all", "conversation", "Read all conversations"),
+    ("conversation.reply", "conversation", "Send replies (billable seat)"),
+    ("conversation.assign.team", "conversation", "Assign conversations (joined teams)"),
+    ("conversation.assign.all", "conversation", "Assign any conversation"),
+    ("conversation.transfer", "conversation", "Transfer to agent/team"),
+    ("conversation.takeover", "conversation", "Join/take over live conversation"),
+    ("conversation.escalate", "conversation", "Escalate to supervisor"),
+    ("conversation.close", "conversation", "Close/resolve conversations"),
+    ("conversation.note", "conversation", "Internal notes"),
+    ("conversation.export", "conversation", "Export conversation data"),
+    ("contact.view.team", "contact", "View contacts (joined teams)"),
+    ("contact.view.all", "contact", "View all contacts"),
+    ("contact.manage", "contact", "Edit/tag/merge contacts"),
+    ("contact.export", "contact", "Export contact data (PDPL-sensitive)"),
+    # AI, knowledge & automation
+    ("ai.reply.approve", "ai", "Review/approve AI drafts"),
+    ("ai.configure.team", "ai", "Configure AI (joined teams)"),
+    ("ai.configure.all", "ai", "Configure AI (any team)"),
+    ("ai.agent.manage", "ai", "Create/configure AI agents"),
+    ("kb.view", "kb", "Search/read knowledge bases"),
+    ("kb.manage.team", "kb", "Manage KB (joined teams)"),
+    ("kb.manage.all", "kb", "Manage any KB"),
+    ("workflow.view", "workflow", "View automation rules"),
+    ("workflow.manage", "workflow", "Manage automation rules"),
+    # Tickets & analytics
+    ("ticket.view.team", "ticket", "View tickets (joined teams)"),
+    ("ticket.view.all", "ticket", "View all tickets"),
+    ("ticket.create", "ticket", "Create tickets"),
+    ("ticket.update", "ticket", "Update tickets"),
+    ("analytics.view.team", "analytics", "Dashboards (team scope)"),
+    ("analytics.view.all", "analytics", "Dashboards (tenant-wide)"),
+    ("analytics.export", "analytics", "Export reports/raw data"),
+    ("analytics.financial.view", "analytics", "Financial dashboards (restricted)"),
+    # Platform namespace (PlatformUsers only — never assigned to tenant roles)
+    ("platform.tenant.view", "platform", "List/inspect tenants"),
+    ("platform.tenant.suspend", "platform", "Suspend/reinstate tenants"),
+    ("platform.infrastructure.manage", "platform", "Services/queues/deployments"),
+    ("platform.logs.view", "platform", "Cross-tenant infra logs"),
+    ("platform.support.access", "platform", "Break-glass tenant access"),
+    ("platform.billing.manage", "platform", "Plans/coupons/invoices"),
+]
