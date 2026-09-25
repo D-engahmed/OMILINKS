@@ -1,4 +1,4 @@
-# OmniLinks on Echo — Branch Documentation Index
+# OMNILINKS Architecture Documentation Index
 
 This doc set answers one question per Echo tutorial branch: **what does the tutorial actually build here, and what (if anything) do we need to do differently to get to OmniLinks?**
 
@@ -18,7 +18,12 @@ Every doc in `branches/` and `new-branches/` follows the same shape:
 
 Docs for purely cosmetic branches (theme, layout polish) are intentionally short — padding them with invented architecture would make the set less useful, not more.
 
-## Decision legend
+## Canonical architecture documents
+
+- [00-PRD.md](00-PRD.md) — product and operating model.
+- [01-system-design.md](01-system-design.md) — current software architecture baseline.
+
+The branch-by-branch Echo notes below are implementation references, not the OMNILINKS system architecture.
 
 - 🟢 **Keep** — no material difference. Follow the tutorial.
 - 🟡 **Extend** — tutorial code is the right foundation, but needs additions (new fields, new adapters, new guardrails) to satisfy OmniLinks.
