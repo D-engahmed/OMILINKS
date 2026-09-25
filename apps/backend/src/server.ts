@@ -11,22 +11,33 @@ if (!Number.isInteger(port) || port < 1 || port > 65_535) {
 const server = createServer(async (incoming, outgoing) => {
   try {
     const host = incoming.headers.host ?? `localhost:${port}`
+    const headers = new Headers()
+
+    for (const [key, value] of Object.entries(incoming.headers)) {
+      if (Array.isArray(value)) {
+        headers.set(key, value.join(", "))
+      } else if (value !== undefined) {
+        headers.set(key, value)
+      }
+    }
+
     const request = new Request(
       `http://${host}${incoming.url ?? "/"}`,
       {
         method: incoming.method ?? "GET",
-        headers: Object.entries(incoming.headers).flatMap(([key, value]) =>
-          value === undefined
-            ? []
-            : [[key, Array.isArray(value) ? value.join(", ") : value]]
-        ),
+        headers,
       }
     )
 
     const response = await handle(request)
+    const body = await response.text()
 
-    outgoing.writeHead(response.status, Object.fromEntries(response.headers))
-    outgoing.end(await response.text())
+    outgoing.writeHead(response.status, {
+      "content-type":
+        response.headers.get("content-type") ??
+        "application/json; charset=utf-8",
+    })
+    outgoing.end(body)
   } catch (error) {
     console.error(error)
     outgoing.writeHead(500, {
@@ -44,5 +55,5 @@ const server = createServer(async (incoming, outgoing) => {
 })
 
 server.listen(port, () => {
-  console.log(`OMILINKS backend listening on http://localhost:${port}`)
+  console.log(`OMNILINKS backend listening on http://localhost:${port}`)
 })
