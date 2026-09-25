@@ -23,6 +23,139 @@ Echo already solves a narrower version of this problem for one channel (a websit
 - A no-code visual workflow builder — v1's automation engine is rule rows (trigger/condition/action), not a drag-and-drop canvas.
 - Building a proprietary LLM — OmniLinks routes to existing providers (OpenAI, Anthropic, others), it doesn't train models.
 
+## 4A. Operating model
+
+OMNILINKS supports two commercial operating modes on the same platform.
+
+### Direct operator mode
+
+A business buys OMNILINKS and operates its own customer operations directly.
+
+```
+Business Tenant
+  ├── Sectors
+  ├── Teams
+  ├── Human workforce
+  └── AI workforce
+```
+
+### Service-provider mode
+
+A BPO, contact-center, or managed-service company buys OMNILINKS to operate customer programs for multiple client businesses.
+
+```
+Service Provider Tenant
+  ├── Client Accounts
+  │    ├── Programs
+  │    │    ├── Sectors
+  │    │    └── Teams
+  │    └── Client users
+  └── Provider operations
+```
+
+The same tenant platform, identity model, workforce model, channel layer, AI layer, quality controls, analytics, and billing foundations support both modes.
+
+OMNILINKS itself may also operate customer programs as a managed service. Platform administration and managed-service execution are separate concerns: platform staff do not automatically inherit customer-data access.
+
+## 4B. Business hierarchy
+
+The canonical business hierarchy is:
+
+```
+OMNILINKS Platform
+        │
+      Tenant
+        │
+   ┌────┴───────────────────────────────┐
+   │                                    │
+Direct operator                 Service provider
+   │                                    │
+   │                             Client Account
+   │                                    │
+   └───────────────┐              Program
+                   │                 │
+                 Sector            Sector
+                   │                 │
+                 Team              Team
+                   │                 │
+          Human / AI workforce members
+```
+
+Definitions:
+
+- **Tenant** — the organization that contracts with OMNILINKS and owns an isolated data boundary.
+- **Client Account** — a business served by a service-provider tenant.
+- **Program** — an operational engagement for a client account, such as customer care for a telecom client.
+- **Sector** — an operational discipline/workspace such as customer service, sales, collections, quality, workforce management, or back office.
+- **Team** — an execution unit inside a sector/program.
+- **Workforce member** — a human employee, contractor, or AI agent that can receive work according to policy and permissions.
+
+A tenant can have many users and many sectors. Users may belong to multiple sectors and teams subject to explicit permissions.
+
+## 4C. Product workspaces
+
+OMNILINKS applications are organized around stable user workspaces, not around individual tenants.
+
+The platform must support:
+
+- **Tenant Administration** — organization, users, teams, permissions, channels, configuration, billing, and governance.
+- **Platform Administration** — internal OMNILINKS operations, platform health, security, provider operations, and cross-tenant controls.
+- **Sector Workspaces** — specialized applications for operational domains such as customer service, sales, quality, workforce, collections, and back office.
+- **Customer Experience** — widget/embed and other customer-facing channel experiences.
+
+Sector applications are shared products. A tenant receives access to the relevant sector applications based on its enabled sectors and each user's memberships/permissions.
+
+## 4D. Workforce model
+
+OMNILINKS treats AI as part of the operational workforce rather than only as a chat feature.
+
+A workforce can contain:
+
+- human agents
+- supervisors
+- quality staff
+- workforce-management users
+- AI agents
+
+AI and human work must use the same operational concepts where practical: assignment, queue/routing, permissions, context, escalation, auditability, quality measurement, and performance analytics.
+
+The platform must therefore support hybrid operations:
+
+```
+Customer
+   ↓
+AI workforce
+   ↓
+resolution OR escalation
+   ↓
+Human workforce
+   ↓
+Supervisor / Quality
+```
+
+## 4E. BPO substitution objective
+
+OMNILINKS has two related value propositions:
+
+1. **BPO enablement:** give BPO/service-provider companies the operating system required to run multi-client customer operations.
+2. **BPO substitution:** allow businesses to run a materially larger portion of customer operations directly through OMNILINKS's AI-native workforce and automation, using human operators where required.
+
+The product must not encode a requirement that every tenant is a BPO. Direct businesses and service providers share the same core platform.
+
+## 4F. Business-model implications
+
+The current subscription model must eventually support more than a binary active/inactive state. Commercial design must be capable of representing:
+
+- tenant plan and entitlements
+- usage-based consumption
+- workforce scale
+- channel costs
+- AI/model costs
+- optional managed-service operations
+- client/program-level commercial reporting for service providers
+
+Exact pricing remains a later commercial decision; the software must preserve these dimensions rather than hard-code a single pricing model.
+
 ## 4. Personas
 
 - **End customer** — messages the business on whichever channel they already use; expects the business to "remember" them across channels.
