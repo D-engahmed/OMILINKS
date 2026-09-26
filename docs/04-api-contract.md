@@ -10,12 +10,21 @@ Webhook endpoints are versioned and isolated from user commands.
 
 ## Request context
 
-Every request must establish:
+Every request must establish the following context, except for the login bootstrap described below:
 - requestId
 - authenticated principal
 - organization
 - optional client/program/sector/team scope
 - permission context
+
+### Login bootstrap
+
+`POST /auth/login` is exempt from requiring an existing authenticated principal, organization, or permission context on entry; it still requires a `requestId`.
+
+1. The server authenticates the credentials or validates an external identity token, then loads eligible organization memberships for the verified identity from trusted server-side identity and membership data.
+2. With one eligible membership and no organization selection, the server selects that organization. With multiple eligible memberships and no selection, login returns an organization-selection-required result containing only that identity's eligible organizations, without issuing a tenant session or access token. The client repeats `POST /auth/login` with authentication proof and its selected `organizationId`.
+3. A client-supplied `organizationId` is only a selection hint. The server must authenticate the identity and validate its membership in the selected organization against trusted data on every login attempt. No eligible membership or an invalid selection causes login to fail without granting tenant access.
+4. Only after membership validation does the server establish the authenticated principal, organization, and membership-scoped permission context and issue a session or access token bound to that context. Subsequent protected requests require this context.
 
 ## Responses
 
