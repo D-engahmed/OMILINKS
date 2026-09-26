@@ -24,6 +24,8 @@ OmniLinks is a multi-tenant Customer Operations Platform for direct businesses a
 | 13-roadmap.md | Ordered engineering PR sequence |
 | 14-adr.md | Architecture decisions |
 | 15-glossary.md | Canonical product terminology |
+| 16-srs.md | Testable software requirements |
+| 17-repository-structure.md | Current and target repository boundaries |
 
 ## Documentation discipline
 
