@@ -1,21 +1,28 @@
-# Documentation Scaffold
+# Agent Runtime
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+An AI agent is a bounded execution loop with explicit identity, policy, context, model, tools, budgets, and termination rules.
 
-## Scope
+## Contract
 
-TODO.
+Execution: policy -> context -> retrieval -> model -> guardrails -> tool authorization -> tool execution -> domain validation -> response/handoff. Store model, prompt, tool, source, latency, token and outcome metadata.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+stateDiagram-v2
+[*] --> Policy
+Policy --> Context
+Context --> Model
+Model --> Guardrail
+Guardrail --> Tool
+Tool --> Model
+Model --> Completed
+Model --> Handoff
+Model --> Blocked
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+External inputs are untrusted, tenant scope is mandatory, and side effects require explicit authorization and idempotency where duplicate execution could matter.

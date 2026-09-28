@@ -1,21 +1,24 @@
-# Documentation Scaffold
+# Telegram Integration
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Normalize Telegram bot updates, users, chats, and media into channel-neutral conversation facts.
 
-## Scope
+## Contract
 
-TODO.
+Store update IDs for dedupe. Bot credentials are server-side and can be rotated independently.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart LR
+U[Telegram Update] --> D[Dedupe]
+D --> I[Identity]
+I --> M[Message]
+M --> R[Routing]
+R --> A[Bot Adapter]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+External inputs are untrusted, tenant scope is mandatory, and side effects require explicit authorization and idempotency where duplicate execution could matter.

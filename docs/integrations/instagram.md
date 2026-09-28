@@ -1,21 +1,26 @@
-# Documentation Scaffold
+# Instagram Integration
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Map Instagram business identities and message threads to the canonical CustomerIdentity and Conversation model.
 
-## Scope
+## Contract
 
-TODO.
+Business/page credentials stay server-side. Webhook events are verified before normalization. Provider retries are expected and must be idempotent.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+sequenceDiagram
+participant P as Instagram
+participant A as Adapter
+participant C as Conversation
+P->>A: Webhook
+A->>A: Verify + normalize
+A->>C: Persist canonical event
+C-->>A: Outcome
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+External inputs are untrusted, tenant scope is mandatory, and side effects require explicit authorization and idempotency where duplicate execution could matter.

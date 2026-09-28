@@ -1,21 +1,24 @@
-# Documentation Scaffold
+# Facebook Messenger Integration
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Use Page-scoped configuration and canonical conversations while retaining Facebook page/thread/message identifiers for reconciliation.
 
-## Scope
+## Contract
 
-TODO.
+Invalid webhook verification produces no mutation. Outbound failures update delivery state instead of rewriting message history.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart LR
+P[Facebook] --> V[Verify]
+V --> N[Normalize]
+N --> C[Conversation]
+C --> R[Routing]
+R --> S[Send Adapter]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+External inputs are untrusted, tenant scope is mandatory, and side effects require explicit authorization and idempotency where duplicate execution could matter.

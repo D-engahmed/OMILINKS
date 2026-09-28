@@ -1,21 +1,24 @@
-# Documentation Scaffold
+# AI Guardrails
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Guardrails cover input, context, tool access, output, action approval, and budget.
 
-## Scope
+## Contract
 
-TODO.
+Security/authorization constraints outrank prompts. Retrieved documents and tool outputs are untrusted. On policy violation or uncertainty, stop autonomous action, respond safely, or hand off.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart LR
+IN[Input] --> CTX[Context Policy]
+CTX --> M[Model]
+M --> OUT[Output Policy]
+OUT --> TOOL[Tool Policy]
+TOOL --> ACT[Action / Handoff]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+External inputs are untrusted, tenant scope is mandatory, and side effects require explicit authorization and idempotency where duplicate execution could matter.

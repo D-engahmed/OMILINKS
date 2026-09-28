@@ -1,21 +1,26 @@
-# Documentation Scaffold
+# Model Routing
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Select compatible models using task capability, tenant policy, provider health, latency, quality, and cost.
 
-## Scope
+## Contract
 
-TODO.
+Filter unsupported models, then tenant-disallowed models, then unhealthy providers; apply budget checks; rank by configured policy; define compatible fallback. Routing decisions are versioned and observable.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart TD
+TASK[Task] --> CAP[Capability]
+CAP --> TEN[Tenant Policy]
+TEN --> HEALTH[Provider Health]
+HEALTH --> COST[Budget]
+COST --> RANK[Policy Ranking]
+RANK --> MODEL[Model]
+MODEL --> FALL[Compatible Fallback]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+External inputs are untrusted, tenant scope is mandatory, and side effects require explicit authorization and idempotency where duplicate execution could matter.

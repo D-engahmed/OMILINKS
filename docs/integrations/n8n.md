@@ -1,21 +1,23 @@
-# Documentation Scaffold
+# n8n Integration
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Integrate n8n for external automation while OMILINKS remains authoritative for customers, conversations, authorization, and billing.
 
-## Scope
+## Contract
 
-TODO.
+n8n-triggered actions call the same application services used by first-party UI. Inbound callbacks are authenticated, correlated, and replay-safe.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart LR
+OMI[OMILINKS Event] --> N8N[n8n]
+N8N --> EXT[External Automation]
+EXT --> CB[Signed Callback]
+CB --> WF[OMILINKS Workflow]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+External inputs are untrusted, tenant scope is mandatory, and side effects require explicit authorization and idempotency where duplicate execution could matter.

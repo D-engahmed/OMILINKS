@@ -1,21 +1,31 @@
-# Documentation Scaffold
+# AI Tool Runtime
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Tools are the controlled action plane between AI and business/external systems. Models never receive raw credentials and never directly mutate the database.
 
-## Scope
+## Contract
 
-TODO.
+Validate schema -> authorize -> check entitlement -> resolve credential -> execute with timeout/idempotency -> sanitize result -> audit. High-impact tools can require durable human approval.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+sequenceDiagram
+participant M as Model
+participant P as Policy
+participant V as Validator
+participant T as Tool Runtime
+participant D as Domain
+M->>P: Tool intent
+P-->>M: Allow
+M->>V: Args
+V->>T: Valid
+T->>D: Execute
+D-->>T: Result
+T-->>M: Sanitized result
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+External inputs are untrusted, tenant scope is mandatory, and side effects require explicit authorization and idempotency where duplicate execution could matter.

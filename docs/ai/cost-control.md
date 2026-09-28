@@ -1,21 +1,25 @@
-# Documentation Scaffold
+# AI Cost Control
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Control AI spend per run, tenant, task and provider without degrading business correctness silently.
 
-## Scope
+## Contract
 
-TODO.
+Meter tokens, calls, embeddings, retrieval and tools where measurable. Enforce per-run and tenant budgets, concurrency limits and model tiers. Overages follow explicit warn/degrade/pause/handoff policy.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart LR
+RUN[AI Run] --> METER[Usage Meter]
+METER --> BUDGET[Budget]
+BUDGET -->|allow| EXEC[Execute]
+BUDGET -->|near| DEG[Degrade]
+BUDGET -->|exceeded| STOP[Stop / Handoff]
+METER --> BILL[Usage]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+External inputs are untrusted, tenant scope is mandatory, and side effects require explicit authorization and idempotency where duplicate execution could matter.

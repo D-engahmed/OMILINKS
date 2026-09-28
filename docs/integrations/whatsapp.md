@@ -1,21 +1,30 @@
-# Documentation Scaffold
+# WhatsApp Integration
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Normalize verified WhatsApp events into canonical customer, conversation, message, attachment, and delivery facts. Keep provider identifiers alongside internal IDs.
 
-## Scope
+## Contract
 
-TODO.
+Webhook verification -> durable ingest -> normalize -> route -> human/AI -> send -> delivery status
 
-## Invariants and Decisions
+Provider outage must degrade only WhatsApp, not the whole conversation system.
 
-TODO.
+## Mermaid Flow
 
-## Interfaces / Dependencies
+```mermaid
+sequenceDiagram
+participant P as WhatsApp
+participant A as Adapter
+participant DB as Core DB
+participant W as Worker
+P->>A: Signed webhook
+A->>DB: Durable event + dedupe
+A->>W: Async processing
+W->>DB: Canonical message
+W->>A: Send when required
+```
 
-TODO.
+## Engineering Rule
 
-## Open Questions
-
-TODO.
+External inputs are untrusted, tenant scope is mandatory, and side effects require explicit authorization and idempotency where duplicate execution could matter.

@@ -1,21 +1,24 @@
-# Documentation Scaffold
+# Paymob Integration
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Implement payment creation, verified server-side webhook processing, subscription transition, reconciliation, and entitlement refresh.
 
-## Scope
+## Contract
 
-TODO.
+Browser redirects never become authoritative payment proof. Payment webhook effects are idempotent by provider transaction/event identifier.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart LR
+P[Checkout] --> PM[Paymob]
+PM --> WH[Verified Webhook]
+WH --> PAY[Payment Fact]
+PAY --> SUB[Subscription]
+SUB --> ENT[Entitlements]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+External inputs are untrusted, tenant scope is mandatory, and side effects require explicit authorization and idempotency where duplicate execution could matter.

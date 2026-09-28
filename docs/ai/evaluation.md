@@ -1,21 +1,25 @@
-# Documentation Scaffold
+# AI Evaluation
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Evaluate AI on correctness, grounding, tool correctness, safety, conversation quality, and operational outcome.
 
-## Scope
+## Contract
 
-TODO.
+Use versioned datasets and traces. Combine automated scoring with human evaluation for high-impact dimensions. Production corrections can become evaluation examples only after classification; they are not automatically ground truth.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart TD
+TRACE[Trace] --> DATA[Dataset]
+DATA --> AUTO[Automated Metrics]
+DATA --> HUMAN[Human Review]
+AUTO --> SCORE[Score]
+HUMAN --> SCORE
+SCORE --> REG[Regression Gate]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+External inputs are untrusted, tenant scope is mandatory, and side effects require explicit authorization and idempotency where duplicate execution could matter.
