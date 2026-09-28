@@ -341,3 +341,6 @@ async function route(
 
   throw new AppError(404, "NOT_FOUND", "Route not found.")
 }
+
+
+export const handle = await createApp()
