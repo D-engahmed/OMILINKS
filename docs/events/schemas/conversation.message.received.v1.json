@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.omnilinks.example/events/conversation.message.received.v1.json",
+  "title": "conversation.message.received v1",
+  "allOf": [
+    {
+      "$ref": "./event-envelope.v1.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "event_type": {
+          "const": "conversation.message.received"
+        },
+        "version": {
+          "const": 1
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "conversation_id",
+            "message_id",
+            "customer_id",
+            "channel",
+            "direction",
+            "occurred_at"
+          ],
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "message_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "customer_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "channel": {
+              "type": "string",
+              "enum": [
+                "whatsapp",
+                "instagram",
+                "facebook",
+                "telegram",
+                "sms",
+                "widget"
+              ]
+            },
+            "direction": {
+              "const": "inbound"
+            },
+            "occurred_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "provider_message_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 255
+            },
+            "content_type": {
+              "type": "string",
+              "enum": [
+                "text",
+                "media",
+                "interactive",
+                "event"
+              ]
+            },
+            "attachment_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 100
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

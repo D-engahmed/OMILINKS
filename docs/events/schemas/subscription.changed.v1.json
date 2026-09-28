@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.omnilinks.example/events/subscription.changed.v1.json",
+  "title": "subscription.changed v1",
+  "allOf": [
+    {
+      "$ref": "./event-envelope.v1.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "event_type": {
+          "const": "subscription.changed"
+        },
+        "version": {
+          "const": 1
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "subscription_id",
+            "previous_state",
+            "new_state",
+            "plan_id"
+          ],
+          "properties": {
+            "subscription_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "previous_state": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "trialing",
+                "active",
+                "past_due",
+                "suspended",
+                "canceled",
+                null
+              ]
+            },
+            "new_state": {
+              "type": "string",
+              "enum": [
+                "trialing",
+                "active",
+                "past_due",
+                "suspended",
+                "canceled"
+              ]
+            },
+            "plan_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "effective_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "reason_code": {
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

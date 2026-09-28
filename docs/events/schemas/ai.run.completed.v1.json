@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.omnilinks.example/events/ai.run.completed.v1.json",
+  "title": "ai.run.completed v1",
+  "allOf": [
+    {
+      "$ref": "./event-envelope.v1.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "event_type": {
+          "const": "ai.run.completed"
+        },
+        "version": {
+          "const": 1
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "run_id",
+            "conversation_id",
+            "agent_id",
+            "outcome",
+            "duration_ms"
+          ],
+          "properties": {
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "conversation_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "agent_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "completed",
+                "handoff",
+                "blocked",
+                "failed",
+                "timed_out"
+              ]
+            },
+            "duration_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "input_tokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "output_tokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "estimated_cost_usd": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "provider": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 100
+            },
+            "model": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 200
+            },
+            "policy_version": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

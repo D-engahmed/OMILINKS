@@ -1,0 +1,27 @@
+{
+  "event_id": "11111111-1111-4111-8111-111111111111",
+  "event_type": "conversation.message.received",
+  "version": 1,
+  "occurred_at": "2026-09-28T20:00:00Z",
+  "organization_id": "22222222-2222-4222-8222-222222222222",
+  "actor": {
+    "type": "service",
+    "id": "whatsapp-webhook"
+  },
+  "correlation_id": "corr-001",
+  "causation_id": null,
+  "data": {
+    "conversation_id": "33333333-3333-4333-8333-333333333333",
+    "message_id": "44444444-4444-4444-8444-444444444444",
+    "customer_id": "55555555-5555-4555-8555-555555555555",
+    "channel": "whatsapp",
+    "direction": "inbound",
+    "occurred_at": "2026-09-28T20:00:00Z",
+    "provider_message_id": "wamid.example",
+    "content_type": "text",
+    "attachment_ids": []
+  },
+  "metadata": {
+    "source": "fixture"
+  }
+}

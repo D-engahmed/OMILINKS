@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.omnilinks.example/events/usage.recorded.v1.json",
+  "title": "usage.recorded v1",
+  "allOf": [
+    {
+      "$ref": "./event-envelope.v1.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "event_type": {
+          "const": "usage.recorded"
+        },
+        "version": {
+          "const": 1
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "usage_record_id",
+            "metric",
+            "quantity",
+            "unit",
+            "occurred_at"
+          ],
+          "properties": {
+            "usage_record_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "metric": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "quantity": {
+              "type": "number",
+              "minimum": 0
+            },
+            "unit": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "source_event_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 200
+            },
+            "run_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            },
+            "conversation_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            },
+            "agent_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            },
+            "provider": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 100
+            },
+            "model": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 200
+            },
+            "pricing_version": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 100
+            },
+            "occurred_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}
