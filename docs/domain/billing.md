@@ -1,301 +1,257 @@
-# Billing Domain
+# Billing Domain — Implementation Specification
 
-> Status: **Target production domain contract**
+> Status: **Target implementation blueprint**
 
-Billing is a financial control plane for OMILINKS. It determines subscription state, entitlements, usage, payment lifecycle and reconciliation.
+## 1. Financial Responsibility
 
-Billing must be independent of UI assumptions and must not depend on browser redirects as financial truth.
+Billing owns plan, entitlement, subscription, payment, usage and reconciliation state.
 
-## 1. Core Model
+The browser is never the financial authority.
+
+## 2. Data Model
 
 ~~~mermaid
 erDiagram
-ORGANIZATION ||--o{ SUBSCRIPTION : has
-PLAN ||--o{ ENTITLEMENT : grants
-SUBSCRIPTION }o--|| PLAN : uses
-ORGANIZATION ||--o{ USAGE_RECORD : produces
-SUBSCRIPTION ||--o{ PAYMENT : receives
-PAYMENT ||--o{ PAYMENT_WEBHOOK : reconciles
-ORGANIZATION ||--o{ INVOICE : owns
+    ORGANIZATION ||--o{ SUBSCRIPTION : has
+    PLAN ||--o{ ENTITLEMENT : grants
+    SUBSCRIPTION }o--|| PLAN : uses
+    ORGANIZATION ||--o{ USAGE_RECORD : produces
+    ORGANIZATION ||--o{ INVOICE : owns
+    INVOICE ||--o{ PAYMENT : receives
+    PAYMENT ||--o{ PAYMENT_EVENT : records
 ~~~
 
-## 2. Main Entities
+## 3. Plan
 
-| Entity | Purpose |
-|---|---|
-| Plan | commercial offering |
-| Entitlement | allowed capability/limit |
-| Subscription | organization's current commercial state |
-| UsageMeter | measurement definition |
-| UsageRecord | immutable usage fact |
-| Invoice | billed amount/period |
-| Payment | payment lifecycle |
-| PaymentWebhook | provider event/reconciliation record |
+Plan contains commercial configuration:
 
-## 3. Subscription Lifecycle
-
-~~~mermaid
-stateDiagram-v2
-    [*] --> TRIALING
-    TRIALING --> ACTIVE
-    ACTIVE --> PAST_DUE
-    PAST_DUE --> ACTIVE
-    PAST_DUE --> SUSPENDED
-    ACTIVE --> CANCELED
-    TRIALING --> CANCELED
-    SUSPENDED --> ACTIVE
-    SUSPENDED --> CANCELED
+~~~text
+plan_id
+name
+status
+effective_from
+effective_to
+currency
+price_policy_version
 ~~~
 
-The exact transition rules must be explicit and event-driven.
+Do not hardcode commercial limits into frontend components.
 
-## 4. Plan and Entitlement
+## 4. Entitlement
 
-A Plan is commercial configuration.
-
-Entitlements are machine-enforceable capabilities.
-
-Examples:
+Machine-enforceable limits:
 
 ~~~text
 users.max
 sites.max
 customers.max
-conversations.month
-ai.tokens.month
-workflow_runs.month
-storage.gb
+ai.tokens.period
+workflow_runs.period
+storage.bytes
 channels.max
 ~~~
 
-Do not encode limits directly in UI code.
+Each entitlement specifies unit, limit and reset semantics.
 
-## 5. Entitlement Evaluation
+## 5. Subscription Lifecycle
 
-A backend request checks:
-
-~~~text
-organization
- -> active subscription
- -> plan
- -> entitlement
- -> current usage
- -> requested operation
- -> allow / deny
+~~~mermaid
+stateDiagram-v2
+    [*] --> TRIALING
+    TRIALING --> ACTIVE
+    TRIALING --> CANCELED
+    ACTIVE --> PAST_DUE
+    PAST_DUE --> ACTIVE
+    PAST_DUE --> SUSPENDED
+    ACTIVE --> CANCELED
+    SUSPENDED --> ACTIVE
+    SUSPENDED --> CANCELED
 ~~~
+
+Transitions are domain commands driven by verified billing facts.
+
+## 6. Entitlement Evaluation
 
 ~~~mermaid
 flowchart TD
-REQ[Governed Operation] --> SUB[Subscription State]
-SUB --> PLAN[Plan]
+REQUEST[Governed Operation] --> SUB[Current Subscription]
+SUB --> PLAN[Effective Plan]
 PLAN --> ENT[Entitlement]
 ENT --> USAGE[Current Usage]
-USAGE --> LIMIT{Within Limit?}
-LIMIT -->|yes| ALLOW[Allow]
-LIMIT -->|no| DENY[Deny / Upgrade / Queue]
+USAGE --> RESERVE[Reserve / Check]
+RESERVE --> ALLOW[Allow]
+RESERVE --> DENY[Deny / Queue / Upgrade]
 ~~~
 
-The frontend may display the result but never determines it.
+## 7. Reservation vs Measurement
 
-## 6. Usage Metering
-
-Usage records should be append-oriented.
-
-Example dimensions:
-
-- organization;
-- client/program;
-- feature;
-- agent;
-- conversation;
-- run;
-- provider;
-- model;
-- quantity;
-- unit;
-- timestamp;
-- pricing version.
-
-Usage should be attributable to the operation that produced it.
-
-## 7. Usage Lifecycle
-
-~~~mermaid
-sequenceDiagram
-participant APP as Application
-participant M as Metering
-participant DB as Billing DB
-participant ENT as Entitlement
-APP->>M: Operation completed
-M->>DB: Record usage fact
-DB-->>M: Stored
-M->>ENT: Refresh effective usage
-ENT-->>APP: Future authorization uses updated state
-~~~
-
-For expensive operations, preflight estimation can happen before execution, but final usage comes from actual runtime/provider facts.
-
-## 8. Idempotent Metering
-
-Metering can be duplicated by retries.
-
-Use a semantic usage event ID:
+For hard limits:
 
 ~~~text
-usage_event_id
-= source_event_id + meter_version
+reservation = admission control
+usage_record = historical fact
 ~~~
 
-or another deterministic key appropriate to the operation.
+Do not use a delayed usage aggregate as the sole concurrency control for expensive operations.
 
-A retry must not count the same usage twice.
+## 8. Usage Record
 
-## 9. Payment Lifecycle
+Conceptual fields:
 
-Payment state comes from verified server-side provider interaction.
+~~~text
+usage_record_id
+organization_id
+metric
+quantity
+unit
+source_event_id
+agent_id
+conversation_id
+run_id
+provider
+model
+pricing_version
+occurred_at
+~~~
+
+Usage records are append-oriented and idempotent.
+
+## 9. Usage Idempotency
+
+Semantic key example:
+
+~~~text
+organization
++ source event
++ meter version
+~~~
+
+Duplicate event processing must not double count usage.
+
+## 10. Payment Flow
 
 ~~~mermaid
 sequenceDiagram
-participant U as User
+participant U as Browser
 participant API as OMILINKS API
-participant PM as Paymob
-participant WH as Webhook Receiver
-participant BILL as Billing
-U->>API: Start checkout
-API->>PM: Create payment session
-PM-->>U: Provider checkout
-U->>PM: Pay
-PM->>WH: Verified payment event
-WH->>BILL: Reconcile transaction
-BILL->>BILL: Update payment
-BILL->>BILL: Update subscription
-BILL-->>API: Entitlements refreshed
+participant P as Payment Provider
+participant W as Webhook
+participant B as Billing
+U->>API: Checkout request
+API->>P: Create payment
+P-->>U: Provider checkout
+P->>W: Verified provider event
+W->>B: Reconcile payment
+B->>B: Transition subscription
+B->>B: Recalculate entitlement
 ~~~
 
-A browser redirect is not sufficient proof of payment.
+Browser redirect is informational.
 
-## 10. Webhook Reconciliation
+## 11. Payment Event
 
-Every payment webhook stores:
-
-- provider event ID;
-- provider transaction ID;
-- signature verification result;
-- received timestamp;
-- payload reference;
-- processing state;
-- associated payment;
-- processing outcome.
-
-Duplicate events must be harmless.
-
-## 11. Reconciliation
-
-Financial state can diverge because:
-
-- webhook delivery failed;
-- payment provider retried;
-- browser was closed;
-- database transaction failed;
-- provider state advanced while OMILINKS was unavailable.
-
-Provide a reconciliation operation:
+Store:
 
 ~~~text
-OMILINKS payment
-      vs
-provider payment
-      |
-      v
-match / missing / conflicting
-      |
-      v
-repair workflow
+provider_event_id
+provider_transaction_id
+organization_id
+internal_payment_id
+verification_result
+provider_status
+received_at
+processed_at
+processing_state
 ~~~
 
-Never "repair" by deleting historical payment facts.
+Unique provider event identity prevents duplicate state transitions.
 
-## 12. Subscription Suspension
+## 12. Reconciliation
 
-Suspension must define capabilities independently.
+Reconciliation compares local and provider states.
 
-Example:
+~~~mermaid
+flowchart TD
+LOCAL[Local Payment State] --> COMPARE[Reconciliation]
+PROVIDER[Provider State] --> COMPARE
+COMPARE --> MATCH[Consistent]
+COMPARE --> MISSING[Missing Local Event]
+COMPARE --> CONFLICT[Conflicting State]
+MISSING --> REPAIR[Repair]
+CONFLICT --> REVIEW[Manual Review]
+~~~
 
-| Capability | Suspended behavior |
+Never delete historical events to hide a mismatch.
+
+## 13. Pricing
+
+Historical records retain pricing version.
+
+~~~text
+usage -> pricing_version
+invoice -> calculation_policy_version
+payment -> amount/currency at creation
+~~~
+
+Plan price changes do not rewrite past financial facts.
+
+## 14. Subscription Suspension
+
+Suspension is capability-specific.
+
+Potential behavior:
+
+| Capability | Suspended |
 |---|---|
-| login | allowed |
-| historical read | allowed |
-| new AI runs | blocked |
-| new workflow executions | blocked |
-| outbound automation | policy-dependent |
-| billing access | allowed |
-| export | policy-dependent |
+| historical reads | allowed |
+| billing reads | allowed |
+| new AI runs | denied |
+| workflow starts | denied |
+| new channel sends | policy-dependent |
+| administration | policy-dependent |
 
-This is preferable to a single global boolean that breaks every operation.
+## 15. Concurrency
 
-## 13. Proration and Plan Changes
+Quota enforcement must protect:
 
-If plan changes alter billing period or quotas, store the effective time.
+~~~text
+request A checks 9/10
+request B checks 9/10
+A consumes 1
+B consumes 1
+=> must not become 11/10 silently
+~~~
 
-Do not retroactively reinterpret historical usage under the new plan.
+Use atomic reservation, locking or equivalent strongly consistent mechanism.
 
-Historical usage references the entitlement/pricing context used when measured.
+## 16. Refund/Credit
 
-## 14. Pricing Versioning
+Refunds/credits are distinct financial records:
 
-Provider prices and OMILINKS commercial terms may change.
+~~~text
+refund_id
+payment_id
+provider_reference
+amount
+currency
+reason
+actor/source
+created_at
+~~~
 
-Persist:
-
-- price version;
-- currency;
-- effective_from;
-- effective_to where applicable;
-- unit prices;
-- calculation policy.
-
-Historical invoices/usage must remain reproducible.
-
-## 15. Billing Concurrency
-
-Two simultaneous requests can both observe available quota.
-
-For hard limits, enforcement must use a concurrency-safe mechanism:
-
-- transaction/lock;
-- atomic counter;
-- reservation;
-- database constraint;
-- or equivalent strongly consistent mechanism.
-
-Soft warnings can remain eventually consistent.
-
-## 16. Cross-Domain Contracts
-
-**Tenancy:** organization owns billing.
-
-**AI:** AI usage consumes entitlements and generates usage records.
-
-**Tools:** governed actions can be entitlement checked.
-
-**Workflows:** execution can consume workflow/run limits.
-
-**Integrations:** Paymob provides payment events; OMILINKS remains billing source of truth after verified reconciliation.
-
-**Analytics:** usage facts feed financial/operational reporting.
+Never mutate the original payment amount to simulate a refund.
 
 ## 17. Failure Modes
 
 | Failure | Behavior |
 |---|---|
-| payment webhook invalid | reject/no mutation |
-| payment webhook duplicate | return existing processing outcome |
-| provider says paid, local says unpaid | reconcile |
-| entitlement unavailable | fail closed for expensive/high-risk action |
-| usage duplicate | idempotent dedupe |
-| concurrent quota check | strongly consistent reservation/constraint |
-| subscription suspended | apply capability-specific suspension |
-| pricing config invalid | reject publication/change |
+| invalid webhook | reject/no mutation |
+| duplicate webhook | idempotent |
+| provider/local mismatch | reconcile |
+| unknown transaction | no automatic entitlement activation |
+| quota race | reservation/constraint |
+| pricing invalid | reject configuration |
+| subscription suspended | capability policy |
 
 ## 18. Observability
 
@@ -303,36 +259,26 @@ Track:
 
 - payment success/failure;
 - webhook lag;
+- pending payment age;
 - reconciliation mismatch count;
 - entitlement denials;
-- usage rate;
+- usage ingestion lag;
 - quota exhaustion;
-- subscription state distribution;
-- invoice failures;
-- provider errors.
+- subscription transitions.
 
-Financial alerts should have stronger severity handling than ordinary UX errors.
+## 19. Tests
 
-## 19. Audit
+- duplicate payment event;
+- delayed webhook;
+- unknown status;
+- amount mismatch;
+- quota race;
+- usage duplicate;
+- plan change;
+- suspension;
+- refund;
+- reconciliation.
 
-Audit:
+## 20. Acceptance
 
-- plan changes;
-- entitlement changes;
-- subscription transitions;
-- payment reconciliation;
-- invoice adjustments;
-- manual billing overrides;
-- refunds/credits where supported.
-
-Never erase original financial facts to make the current state look correct.
-
-## 20. Acceptance Criteria
-
-- Backend entitlement checks are authoritative.
-- Duplicate payment events do not duplicate financial state.
-- Usage is attributable and idempotent.
-- Historical billing remains reproducible.
-- Quota enforcement is concurrency-safe.
-- Subscription suspension is capability-specific.
-- Payment state is not derived from browser redirect alone.
+Billing is complete when subscription, payment, entitlement and usage state are authoritative, idempotent, concurrency-safe and historically reproducible.

@@ -1,118 +1,80 @@
-# Quality Domain
+# Quality Domain — Implementation Specification
 
-> Status: **Target production domain contract**
+> Status: **Target implementation blueprint**
 
-The Quality domain measures operational quality across conversations, human agents, AI agents, teams, programs and clients. It creates evidence for improvement without rewriting the operational source of truth.
+## 1. Responsibility
 
-## 1. Quality Responsibility
+Quality evaluates conversations and operational outcomes using versioned scorecards and evidence.
 
-The domain owns:
+It must be analytically rich without mutating operational source records.
 
-- quality programs;
-- sampling policies;
-- scorecards;
-- scorecard versions;
-- evaluation assignments;
-- criteria;
-- findings;
-- reviewer decisions;
-- remediation references;
-- calibration metadata.
-
-It does not mutate the conversation transcript to "fix" a quality score.
-
-## 2. Quality Model
+## 2. Data Model
 
 ~~~mermaid
 erDiagram
-ORGANIZATION ||--o{ QUALITY_PROGRAM : owns
-QUALITY_PROGRAM ||--o{ SCORECARD : uses
-SCORECARD ||--o{ SCORECARD_VERSION : versions
-SCORECARD_VERSION ||--o{ CRITERION : defines
-CONVERSATION ||--o{ EVALUATION : evaluated
-QUALITY_PROGRAM ||--o{ EVALUATION : produces
-USER ||--o{ EVALUATION : reviews
-EVALUATION ||--o{ FINDING : contains
-FINDING ||--o{ REMEDIATION : creates
+    ORGANIZATION ||--o{ QUALITY_PROGRAM : owns
+    QUALITY_PROGRAM ||--o{ SCORECARD : uses
+    SCORECARD ||--o{ SCORECARD_VERSION : versions
+    SCORECARD_VERSION ||--o{ CRITERION : defines
+    QUALITY_PROGRAM ||--o{ SAMPLING_RULE : uses
+    QUALITY_PROGRAM ||--o{ QUALITY_EVALUATION : creates
+    QUALITY_EVALUATION ||--o{ EVALUATION_FINDING : contains
+    EVALUATION_FINDING ||--o{ REMEDIATION : creates
 ~~~
 
-## 3. Quality Program
+## 3. Scorecard Version
 
-A Quality Program defines:
-
-- population to sample;
-- channels/programs/teams in scope;
-- sampling rate or schedule;
-- scorecard version;
-- reviewer assignment policy;
-- evaluation SLA;
-- calibration policy;
-- remediation workflow.
-
-Example:
+Fields:
 
 ~~~text
-Program: Egyptian Customer Support
-Sampling: 5% of resolved conversations
-Scorecard: Support-v7
-Reviewer: QA Team
-Evaluation SLA: 48 hours
+scorecard_id
+version
+status
+published_at
+criteria[]
+calculation_policy_version
 ~~~
 
-## 4. Scorecard Versioning
+Published scorecards are immutable.
 
-A scorecard is a logical identity. A scorecard version is immutable.
+## 4. Criterion Contract
 
-~~~text
-Support Quality
-  v5 -> historical
-  v6 -> historical
-  v7 -> current
-~~~
+A criterion should define:
 
-Completed evaluations reference the exact version used.
-
-Changing criterion meaning requires a new version.
-
-## 5. Criterion Model
-
-A criterion should have:
-
-- criterion ID;
-- description;
-- weight;
-- pass/fail or scaled scoring rule;
+- criterion_id;
+- name;
+- applicability;
 - evidence requirement;
-- applicability conditions;
+- scoring method;
+- weight;
 - criticality;
 - remediation mapping.
 
-Avoid criteria such as "good conversation" without measurable interpretation.
+Avoid criteria that cannot be evaluated consistently.
 
-## 6. Sampling
+## 5. Sampling
 
-Sampling can be:
+Sampling may be:
 
 - random;
-- stratified by channel;
-- weighted toward high-risk conversations;
-- weighted toward new agents;
-- triggered by customer dissatisfaction;
-- triggered by AI handoff;
-- triggered by policy blocks.
+- stratified;
+- risk-weighted;
+- channel-weighted;
+- agent-tenure weighted;
+- triggered by policy block/handoff/customer complaint.
 
 ~~~mermaid
 flowchart TD
-CONV[Resolved Conversation] --> ELIGIBLE[Sampling Eligibility]
-ELIGIBLE --> STRATIFY[Channel / Program / Risk Stratification]
-STRATIFY --> SAMPLE[Sampling Policy]
+CONV[Eligible Conversation] --> RULES[Sampling Rules]
+RULES --> STRATA[Risk / Channel / Program]
+STRATA --> SAMPLE[Sample Decision]
 SAMPLE --> ASSIGN[Reviewer Assignment]
 ASSIGN --> EVAL[Evaluation]
 ~~~
 
-Sampling logic must be reproducible enough to explain why a conversation was selected.
+Sampling stores the rule/version that selected the case.
 
-## 7. Evaluation Lifecycle
+## 6. Evaluation State
 
 ~~~mermaid
 stateDiagram-v2
@@ -127,165 +89,180 @@ stateDiagram-v2
     IN_REVIEW --> CANCELED
 ~~~
 
-The exact state set can evolve, but completed evaluations should not be silently rewritten.
+## 7. Evaluation Record
 
-## 8. Evidence
-
-Every important finding should point to evidence.
-
-Evidence can reference:
-
-- conversation message;
-- tool invocation;
-- AI run step;
-- policy decision;
-- workflow step;
-- customer outcome;
-- provider delivery event.
-
-A reviewer should be able to answer:
+Conceptual:
 
 ~~~text
-Why did this criterion receive this result?
-What evidence supports it?
-Which version of the scorecard was used?
-Who reviewed it?
+evaluation_id
+organization_id
+program_id
+conversation_id
+scorecard_version_id
+reviewer_id
+status
+total_score
+critical_failure
+started_at
+completed_at
+version
 ~~~
 
-## 9. Human vs AI Evaluation
+## 8. Evidence Model
 
-AI can propose evaluation findings.
+Evidence must reference durable source records:
 
-It should not automatically become authoritative for high-impact quality records unless the quality policy explicitly permits it.
+~~~text
+message_id
+tool_invocation_id
+ai_run_step_id
+workflow_step_run_id
+provider_delivery_id
+~~~
 
-Conceptual flow:
+The evaluation stores evidence references and reviewer interpretation, not a rewritten copy of the source record.
+
+## 9. Score Calculation
+
+A score should be reproducible:
+
+~~~text
+criterion_result
+ -> criterion weight
+ -> calculation policy version
+ -> total
+~~~
+
+If score calculations change, create a new policy/version rather than silently recomputing history.
+
+## 10. Critical Failures
+
+Critical findings may bypass aggregate score logic.
+
+Examples:
+
+- unauthorized data exposure;
+- unauthorized tool;
+- fabricated successful financial action;
+- mandatory escalation missed;
+- security policy violation.
+
+A quality report can therefore be:
+
+~~~text
+score = 93
+critical_failure = true
+~~~
+
+The critical failure must remain visible.
+
+## 11. AI-Assisted Evaluation
+
+AI may create proposed findings:
 
 ~~~mermaid
 sequenceDiagram
-participant Q as Sampling
+participant S as Sampler
 participant AI as AI Evaluator
 participant H as Human Reviewer
 participant DB as Quality DB
-Q->>AI: Evaluation case
-AI-->>Q: Proposed findings
-Q->>H: Review case
-H-->>DB: Accepted / corrected evaluation
-DB-->>Q: Final quality result
+S->>AI: Evaluation case
+AI-->>S: Proposed findings
+S->>H: Reviewer package
+H->>DB: Final evaluation
 ~~~
 
-## 10. Calibration
+For high-impact records, the AI proposal is not authoritative unless policy explicitly allows it.
 
-Reviewers may disagree because criteria are ambiguous.
+## 12. Calibration
 
-Calibration sessions compare:
+Calibration record contains:
 
-- same conversation;
-- same scorecard version;
-- different reviewers;
-- evidence basis;
-- final adjudication.
+~~~text
+case_id
+scorecard_version
+reviewer_a
+reviewer_b
+criterion_disagreement
+adjudication
+rubric_change_reference
+~~~
 
-Store rubric version and adjudication outcome.
+Persistent disagreement is a signal that the rubric may be ambiguous.
 
-Do not hide systematic disagreement by averaging scores blindly.
+## 13. Remediation
 
-## 11. Critical Findings
-
-Some findings should trigger actions independent of average score:
-
-- data leakage;
-- unauthorized tool use;
-- false financial/customer action claim;
-- prohibited content;
-- missed mandatory escalation;
-- security-policy breach.
-
-Critical findings can start a workflow for remediation or incident review.
-
-## 12. Remediation
-
-A quality finding may create:
+Finding can create:
 
 - coaching task;
-- knowledge correction;
+- knowledge update;
 - prompt update;
 - routing policy change;
 - guardrail update;
-- workflow adjustment;
-- training case;
+- workflow correction;
 - engineering defect.
 
-The remediation reference should preserve causality:
+Preserve causal linkage:
 
 ~~~text
-Conversation
- -> Evaluation
-   -> Finding
-     -> Remediation
-       -> Change
+conversation
+ -> evaluation
+ -> finding
+ -> remediation
+ -> change
 ~~~
 
-## 13. Appeals and Corrections
+## 14. Concurrency
 
-A reviewer correction should preserve the prior record rather than deleting history.
+Two reviewers should not both finalize the same evaluation.
 
-Possible pattern:
+Use:
 
-~~~text
-evaluation v1 submitted
-evaluation correction v2
-final adjudication
-~~~
+- evaluation version;
+- row lock;
+- assignment ownership.
 
-The implementation may instead use immutable events/version records.
+Stale reviewer submission returns conflict.
 
-## 14. Cross-Domain Contracts
+## 15. Retention
 
-**Conversations:** provides evidence and operational outcome.
+Evaluation may outlive message access depending on policy. Evidence references must indicate unavailable/expired source state rather than inventing missing evidence.
 
-**Workforce:** supplies agent/team identity for evaluation.
-
-**AI:** AI runs and policies become evaluation dimensions.
-
-**Routing:** routing quality can be measured from assignment/SLA outcomes.
-
-**Knowledge:** grounding findings can reference source/document versions.
-
-**Tools:** incorrect tool calls become findings.
-
-**Workflows:** remediation can create workflow tasks.
-
-## 15. Failure Modes
+## 16. Failure Modes
 
 | Failure | Behavior |
 |---|---|
-| scorecard invalid | do not publish |
-| scorecard changed during review | evaluation keeps original version |
-| reviewer loses scope | evaluation becomes inaccessible until reassigned |
-| evidence deleted by retention | preserve allowed evidence metadata/reference state |
-| AI evaluator unavailable | queue for human review |
-| duplicate sampling trigger | one evaluation assignment for same sampling event |
+| invalid scorecard | reject publication |
+| scorecard changed mid-review | preserve original version |
+| reviewer scope revoked | assignment invalid/reassign |
+| evidence deleted | mark evidence unavailable |
+| AI evaluator down | human queue |
+| duplicate sampling trigger | one sampling/evaluation identity |
 
-## 16. Observability
+## 17. Observability
 
 Track:
 
 - sample rate;
-- evaluation backlog;
+- queue age;
 - evaluation SLA;
-- reviewer workload;
+- reviewer utilization;
 - critical finding rate;
-- disagreement rate;
-- remediation closure time;
-- quality by team/program/channel;
-- AI vs human quality dimensions.
+- disagreement;
+- remediation age.
 
-## 17. Acceptance Criteria
+## 18. Tests
 
-- Completed evaluations retain immutable scorecard version.
-- Every important score has explainable evidence.
-- Sampling can be explained.
-- AI evaluations can remain proposals.
-- Critical findings can trigger remediation.
-- Reviewer corrections preserve history.
-- Quality data is tenant/scope isolated.
+- score calculation;
+- scorecard immutability;
+- duplicate sample;
+- stale reviewer submission;
+- evidence authorization;
+- AI proposal vs final human result;
+- critical failure;
+- remediation linkage;
+- cross-tenant evaluation access.
+
+## 19. Acceptance
+
+Quality is complete when every score is reproducible from its scorecard version and evidence, and every critical finding can produce a traceable remediation path.
