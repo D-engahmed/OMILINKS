@@ -1,149 +1,105 @@
-# Facebook Messenger Integration
+# Facebook Messenger Integration — Implementation Specification
 
-> Status: **Target production integration contract**
+> Status: **Target provider-adapter blueprint**
 
-## 1. Purpose
+## 1. Boundary
 
-The Facebook integration connects Page-scoped messaging to the canonical OMILINKS conversation system.
+Page-scoped provider behavior remains inside FacebookAdapter.
 
-The integration owns provider identity, webhook validation, outbound transport and provider delivery semantics.
+## 2. Connection State
 
-## 2. Page Connection
+~~~mermaid
+stateDiagram-v2
+    [*] --> CONFIGURING
+    CONFIGURING --> VERIFYING
+    VERIFYING --> ACTIVE
+    VERIFYING --> FAILED
+    ACTIVE --> DEGRADED
+    DEGRADED --> ACTIVE
+    ACTIVE --> DISCONNECTED
+~~~
 
-Each connection is tenant-scoped and contains:
+Connection activation requires verified credentials/webhook configuration.
 
-- organization;
-- page/provider account;
-- credential reference;
-- webhook configuration;
-- integration status;
-- capability metadata;
-- health timestamps.
+## 3. Inbound
 
-A single organization can operate multiple page integrations.
+~~~text
+provider callback
+ -> verify
+ -> dedupe
+ -> normalize
+ -> resolve customer
+ -> persist conversation/message
+ -> queue async work
+~~~
 
-## 3. Webhook Pipeline
+## 4. Provider Thread Mapping
+
+Store provider Page/thread identifiers separately from canonical conversation identifiers.
+
+The Conversation aggregate owns state.
+
+## 5. Outbound
 
 ~~~mermaid
 sequenceDiagram
-    participant P as Facebook
-    participant W as Webhook Boundary
-    participant V as Verifier
-    participant D as Conversation Domain
-    participant Q as Queue
-    P->>W: Callback
-    W->>V: Verify
-    V-->>W: Valid
-    W->>D: Persist canonical event
-    W->>Q: Enqueue async processing
-    W-->>P: Accepted
+participant C as Conversation
+participant Q as Delivery Worker
+participant A as Facebook Adapter
+participant P as Provider
+C->>Q: Delivery job
+Q->>A: Send canonical message
+A->>P: API request
+P-->>A: Result
+A-->>Q: Delivery outcome
+Q->>C: Persist status
 ~~~
 
-No AI generation occurs in the webhook transaction.
+## 6. Delivery Reconciliation
 
-## 4. Customer Identity
+Use provider message IDs to reconcile:
 
-Use a provider/account-scoped identity record.
+- local pending/provider delivered;
+- local sent/provider failed;
+- unknown response;
+- missing status callback.
 
-Do not merge customers from display name, page nickname, or other weak signals.
+Reconciliation updates delivery state, not message history.
 
-Customer identity remains owned by the Customer domain.
+## 7. Dedupe
 
-## 5. Conversation Mapping
+Provider event/update/message IDs must be stored with tenant/account context.
 
-Provider thread identifiers are stored as external references.
-
-Canonical conversation state controls:
-
-- open/resolved;
-- assignment;
-- human/AI control;
-- SLA;
-- tags;
-- quality history.
-
-## 6. Outbound Delivery
-
-~~~mermaid
-flowchart LR
-MESSAGE[Canonical Message] --> WORKER[Delivery Worker]
-WORKER --> ADAPTER[Facebook Adapter]
-ADAPTER --> PROVIDER[Provider API]
-PROVIDER --> CALLBACK[Delivery Callback]
-CALLBACK --> STATE[Canonical Delivery State]
-~~~
-
-The provider message ID is retained for reconciliation.
-
-## 7. Idempotency
-
-Inbound callbacks must use provider event/update/message identity.
-
-Outbound sends use canonical message IDs plus provider-safe mechanisms where supported.
-
-Unknown provider outcomes must be reconciled before retrying a side effect that could duplicate customer-visible communication.
-
-## 8. Failure Handling
+## 8. Failure
 
 | Failure | Behavior |
 |---|---|
-| invalid webhook verification | reject |
-| duplicate event | idempotent |
-| page credential failure | connection degraded |
-| timeout | reconcile/retry |
-| rate limit | queue retry |
-| unsupported operation | capability error |
-| persistent provider outage | queued/degraded, unrelated channels unaffected |
+| forged webhook | reject |
+| duplicate webhook | idempotent |
+| provider timeout | reconcile |
+| 429 | retry |
+| page credential error | degrade |
+| unsupported feature | capability error |
 
 ## 9. Security
 
-Page credentials stay server-side.
+Page ID cannot select tenant.
 
-A provider Page ID never determines which organization is allowed to access an object.
+Credentials remain server-side.
 
-All customer and conversation queries remain organization-scoped.
+## 10. Testing
 
-## 10. Reconciliation
-
-Use stored provider IDs and recent delivery states to identify:
-
-- local pending but provider delivered;
-- local sent but provider failed;
-- unknown provider outcome;
-- missing callback.
-
-Reconciliation changes delivery state, not original message history.
-
-## 11. Observability
-
-Track:
-
-- connection health;
-- callback verification failures;
-- inbound rate;
-- duplicate rate;
-- outbound latency;
-- status callback lag;
-- provider error classes;
-- retry/dead-letter state.
-
-## 12. Testing
-
-- valid/invalid verification;
+- valid callback;
+- invalid callback;
 - duplicate callback;
-- customer identity mapping;
+- customer mapping;
 - conversation creation;
-- outbound send;
-- provider timeout;
-- 429/rate limiting;
-- delivery update;
-- credential failure;
-- cross-tenant Page ID misuse.
+- send;
+- timeout;
+- rate limit;
+- credential revocation;
+- cross-tenant Page ID.
 
-## 13. Acceptance Criteria
+## 11. Acceptance
 
-- Facebook provider models remain behind the adapter.
-- Duplicate events are harmless.
-- Delivery state is separate from message creation.
-- Credential failures are visible.
-- Provider outages do not corrupt unrelated channels.
+Facebook integration is complete when Page/account binding, event dedupe, delivery reconciliation and outage isolation are verified.

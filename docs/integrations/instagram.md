@@ -1,176 +1,130 @@
-# Instagram Integration
+# Instagram Integration — Implementation Specification
 
-> Status: **Target production integration contract**
+> Status: **Target provider-adapter blueprint**
 
-## 1. Purpose
+## 1. Boundary
 
-The Instagram adapter maps business-account messaging into the canonical OMILINKS Customer, Conversation, Message and Delivery models.
+Instagram payloads are parsed exclusively by InstagramAdapter.
 
-The adapter owns provider-specific webhook parsing, account/page credentials, provider identifiers, capability differences and outbound transport behavior.
+Core domains receive canonical message/customer/conversation commands.
 
-## 2. Connection Model
+## 2. Connection
 
-Store:
-
-- organization;
-- provider account/page identity;
-- credential reference;
-- webhook configuration;
-- connection state;
-- supported capabilities;
-- last successful inbound event;
-- last successful outbound operation.
-
-Connection state:
-
-~~~mermaid
-stateDiagram-v2
-    [*] --> SETUP
-    SETUP --> VERIFYING
-    VERIFYING --> CONNECTED
-    VERIFYING --> FAILED
-    CONNECTED --> DEGRADED
-    DEGRADED --> CONNECTED
-    CONNECTED --> DISCONNECTED
-    FAILED --> VERIFYING
+~~~text
+organization
+provider_account
+credential_ref
+webhook_config
+status
+capabilities
+health
 ~~~
 
-## 3. Inbound Flow
+## 3. Inbound
 
 ~~~mermaid
-flowchart LR
-    WEBHOOK[Instagram Webhook] --> VERIFY[Verify]
-    VERIFY --> NORMALIZE[Normalize Event]
-    NORMALIZE --> IDENTITY[Resolve Customer Identity]
-    IDENTITY --> CONVERSATION[Persist Canonical Message]
-    CONVERSATION --> QUEUE[Async Processing]
-    QUEUE --> ROUTING[Routing]
+sequenceDiagram
+participant P as Instagram
+participant A as Adapter
+participant D as Dedupe Store
+participant I as Identity
+participant C as Conversation
+P->>A: Signed callback
+A->>A: Verify
+A->>D: Check event
+D-->>A: New
+A->>I: Resolve identity
+I-->>A: Customer
+A->>C: Canonical message
+A-->>P: Accepted
 ~~~
 
-Verification occurs before business mutation.
+## 4. Thread Semantics
 
-## 4. Thread Mapping
+Provider thread IDs are external references.
 
-Provider thread IDs are integration references.
+The internal Conversation ID is authoritative for:
 
-They must not become the canonical conversation primary key because OMILINKS controls conversation lifecycle independently of provider lifecycle.
+- lifecycle;
+- assignment;
+- AI/human control;
+- SLA;
+- quality.
 
-The adapter stores:
+## 5. Identity
 
-- provider thread ID;
-- provider account;
-- first-seen time;
-- last-seen time;
-- canonical conversation ID.
-
-## 5. Identity Mapping
-
-Identity is scoped by:
+Uniqueness is provider/account scoped:
 
 ~~~text
 organization
 + provider account
-+ external user identity
++ external user ID
 ~~~
 
-Display names are not sufficient for identity matching.
+Weak matches require review.
 
-Ambiguous identities must enter a review or deterministic fallback path rather than triggering irreversible merge behavior.
+## 6. Capabilities
 
-## 6. Outbound Delivery
+Adapter exposes a capability profile such as:
 
-~~~mermaid
-sequenceDiagram
-    participant C as Conversation
-    participant Q as Worker
-    participant A as Instagram Adapter
-    participant P as Provider
-    C->>Q: Canonical outbound message
-    Q->>A: Delivery request
-    A->>P: Provider API call
-    P-->>A: Response
-    A-->>Q: Normalized delivery outcome
-    Q->>C: Persist delivery state
+~~~text
+text
+media
+reaction
+delivery callback
+interactive
 ~~~
 
-The canonical message is created before provider delivery.
+The application checks capability before attempting unsupported operations.
 
-## 7. Capability Discovery
+## 7. Outbound
 
-Provider capability differences should be represented as adapter metadata.
-
-Example categories:
-
-- text send;
-- media send;
-- reaction;
-- attachment receipt;
-- delivery status.
-
-The application checks capability before requesting a feature. Unsupported functionality must return a deterministic error/state.
+~~~text
+canonical message
+ -> delivery job
+ -> adapter
+ -> provider
+ -> normalized delivery event
+~~~
 
 ## 8. Idempotency
 
-Inbound provider events use stable event/update/message identifiers.
+Duplicate webhook/update cannot create multiple canonical messages.
 
-Outbound retries use canonical message identity or provider-safe idempotency.
+Outbound retries require provider-safe dedupe or reconciliation.
 
-If the provider can return an unknown result after a timeout, reconciliation is required before duplicate-sensitive retry.
-
-## 9. Failure Matrix
+## 9. Failure
 
 | Failure | Behavior |
 |---|---|
-| invalid webhook verification | reject |
-| duplicate event | acknowledge without duplicate mutation |
-| provider send rejected | delivery failed |
-| provider timeout | reconcile/retry based on side-effect safety |
-| provider rate limit | scheduled retry |
-| credential revoked | DEGRADED / reconnect |
-| unsupported feature | explicit capability failure |
+| invalid verification | reject |
+| duplicate event | no-op |
+| rate limit | retry queue |
+| provider timeout | reconcile |
+| credential revoked | degrade connection |
+| unsupported operation | deterministic capability error |
 
 ## 10. Security
 
-- provider credentials are server-side;
-- provider account IDs do not select tenant;
-- webhook verification precedes mutation;
-- all customer/conversation reads are tenant-scoped;
-- raw provider payload logging is minimized.
+Provider account identity never determines tenant authorization.
 
-## 11. Observability
+All customer/conversation access is organization-scoped.
 
-Monitor:
+## 11. Testing
 
-- webhook volume;
-- verification failures;
-- dedupe rate;
-- outbound latency;
-- provider response classes;
-- retry age;
-- delivery success;
-- integration health.
-
-## 12. Testing
-
-Test:
-
-- verification success/failure;
-- duplicate events;
-- identity matching;
-- new customer;
-- existing customer;
-- new conversation;
+- verification;
+- duplicate update;
+- identity mapping;
 - unsupported capability;
-- outbound success;
-- timeout;
-- provider rate limit;
-- credential revocation;
-- tenant-isolation failure.
+- outbound timeout;
+- rate limit;
+- credential failure;
+- tenant isolation.
 
-## 13. Acceptance Criteria
+## 12. Observability
 
-- Provider structures do not leak into core domains.
-- Duplicate events cannot create duplicate messages.
-- Unsupported capabilities fail explicitly.
-- Provider failure remains channel-local.
-- Credential material remains outside client/model/log contexts.
+Track ingress, dedupe, outbound latency, provider errors, retries, queue lag and connection health.
+
+## 13. Acceptance
+
+Instagram is complete when provider protocol isolation, capability checking, dedupe and failure reconciliation are implemented.

@@ -1,212 +1,173 @@
-# WhatsApp Integration
+# WhatsApp Integration — Implementation Specification
 
-> Status: **Target production integration contract**
+> Status: **Target provider-adapter blueprint**
 
-## 1. Purpose
+## 1. Adapter Boundary
 
-The WhatsApp adapter translates provider-specific messaging into the canonical OMILINKS customer/conversation model.
+~~~text
+WhatsApp webhook/API
+ -> WhatsAppAdapter
+ -> Canonical IntegrationEvent
+ -> Customer/Conversation Application Service
+~~~
 
-The adapter owns provider protocol details. The core Conversation domain must never import WhatsApp SDK objects or provider-specific webhook structures.
+The Conversation domain never receives provider SDK objects.
 
 ## 2. Connection Model
 
-A WhatsApp connection is tenant-scoped and contains:
-
-- organization ID;
-- provider account identifier;
-- business/phone endpoint identity;
-- credential reference;
-- webhook configuration;
-- connection lifecycle state;
-- provider capability metadata;
-- health timestamps.
-
-One organization may have multiple channel connections.
-
-## 3. Connection Lifecycle
-
-~~~mermaid
-stateDiagram-v2
-    [*] --> CONFIGURING
-    CONFIGURING --> VERIFYING
-    VERIFYING --> ACTIVE
-    VERIFYING --> ERROR
-    ACTIVE --> DEGRADED
-    DEGRADED --> ACTIVE
-    ACTIVE --> DISCONNECTED
-    ERROR --> VERIFYING
+~~~text
+ChannelIntegration
+  organization_id
+  provider
+  provider_account_id
+  credential_ref
+  status
+  capabilities
+  webhook_state
+  health_state
 ~~~
 
-A connection becomes ACTIVE only after required credentials and webhook configuration have been verified.
+A connection is tenant-scoped.
 
-## 4. Inbound Message Pipeline
+## 3. Inbound Webhook
 
 ~~~mermaid
-sequenceDiagram
-    participant P as WhatsApp Provider
-    participant W as Webhook Adapter
-    participant I as Identity Resolver
-    participant C as Conversation Domain
-    participant Q as Queue
-    P->>W: Signed callback
-    W->>W: Verify provider request
-    W->>W: Build dedupe key
-    W->>I: Resolve channel identity
-    I-->>W: Canonical customer
-    W->>C: Persist canonical message
-    W->>Q: Enqueue asynchronous processing
-    W-->>P: Accepted
+flowchart TD
+HTTP[Provider Callback] --> VERIFY[Signature / Auth]
+VERIFY --> LIMIT[Schema + Size Validation]
+LIMIT --> DEDUPE[Provider Event Dedupe]
+DEDUPE --> NORMALIZE[Normalize Message]
+NORMALIZE --> IDENTITY[Resolve Customer Identity]
+IDENTITY --> CONV[Conversation Command]
+CONV --> EVENT[Canonical Event]
+EVENT --> QUEUE[Async Work]
 ~~~
 
-The provider receives an acknowledgement without waiting for AI inference or workflow execution.
+Webhook acknowledgement occurs after durable acceptance, not after AI processing.
 
-## 5. Identity Mapping
+## 4. Identity Key
 
-Use a tenant-scoped provider identity tuple:
+Use provider-account scope:
 
 ~~~text
-organization
-+ provider = whatsapp
-+ provider_account_id
-+ external_identity_id
+organization_id
+provider = whatsapp
+provider_account_id
+external_identity_id
 ~~~
 
-Do not treat a phone number as a globally unique OMILINKS customer ID.
+Phone number alone is insufficient as a global identity key.
 
-Customer merge remains a Customer-domain operation.
+## 5. Message Normalization
 
-## 6. Message Mapping
+Map:
 
-Normalize provider messages into canonical message types:
+~~~text
+text
+media
+interactive
+reaction
+delivery status
+template/system events
+~~~
 
-- text;
-- media attachment;
-- interactive response;
-- reaction;
-- status event.
+to canonical message/event types.
 
-Provider-specific fields are retained only in integration metadata when required for reconciliation.
+Unsupported types become explicit integration events and are observable.
 
-## 7. Outbound Delivery
+## 6. Outbound Delivery
 
 ~~~mermaid
 sequenceDiagram
-    participant C as Conversation Domain
-    participant Q as Delivery Worker
-    participant A as WhatsApp Adapter
-    participant P as Provider
-    C->>Q: Canonical outbound message
-    Q->>A: Deliver message
-    A->>P: Provider API request
-    P-->>A: Provider response
-    A-->>Q: Delivery outcome
-    Q->>C: Update delivery state
+participant APP as Application
+participant OUT as Outbox
+participant W as Worker
+participant A as WhatsApp Adapter
+participant P as Provider
+APP->>OUT: message.delivery.requested
+OUT->>W: Delivery job
+W->>A: Canonical send request
+A->>P: Provider API
+P-->>A: Response
+A-->>W: Normalized result
+W->>APP: Delivery state event
 ~~~
 
-The canonical message exists before external sending begins.
+## 7. Idempotency
 
-## 8. Idempotency
+Inbound dedupe uses provider event/message identity.
 
-Inbound events use provider event/message identifiers when available.
+Outbound idempotency uses canonical message identity plus provider-safe semantics where available.
 
-Outbound retries must use:
+## 8. Unknown Outcome
 
-- canonical message identity;
-- provider-supported idempotency where available;
-- reconciliation when a timeout leaves outcome unknown.
+A timeout after send enters UNKNOWN/RECONCILIATION.
 
-Repeated processing must not create duplicate customer-visible messages.
+Never treat timeout as definitive failure.
 
 ## 9. Media
 
-Store large media outside PostgreSQL.
+Store media in object storage with:
 
-Metadata includes:
+~~~text
+provider_media_id
+content_type
+size
+checksum
+object_key
+scan_state
+~~~
 
-- provider media ID;
-- MIME type;
-- size;
-- checksum;
-- object-storage reference;
-- processing state.
+Provider media fetch happens asynchronously.
 
-Download and scanning are asynchronous jobs.
+## 10. Rate Limiting
 
-## 10. Reliability
+429/throttling becomes scheduled retry with bounded backoff. The HTTP API is never held while waiting.
 
-Provider throttling is handled by the delivery worker.
+## 11. Credential Failure
 
-A 429 response becomes scheduled retry state rather than blocking an API process.
+Credential invalidation changes connection health and creates operator-visible remediation.
 
-An unknown response to a side-effecting send is reconciled before unsafe repetition.
+Existing canonical conversations remain readable.
 
-## 11. Failure Matrix
+## 12. Failure Matrix
 
-| Failure | Behavior |
+| Failure | State |
 |---|---|
-| invalid webhook authentication | reject, no mutation |
-| duplicate inbound event | idempotent acknowledgement |
-| provider timeout | retry/reconcile |
-| rate limit | scheduled retry |
-| expired credential | connection DEGRADED/ERROR |
-| invalid media | failed attachment state |
-| unsupported message feature | explicit unsupported result |
+| invalid webhook | rejected |
+| duplicate event | deduplicated |
+| provider timeout | unknown/reconcile |
+| 429 | retry scheduled |
+| invalid media | attachment failed |
+| credential failure | integration degraded |
+| unsupported type | explicit unsupported event |
 
-## 12. Security
+## 13. Testing
 
-- credentials are server-side;
-- webhook verification precedes mutation;
-- provider account cannot select an organization;
-- customer identity resolution is tenant-scoped;
-- logs do not contain credentials;
-- raw message retention follows data policy.
-
-## 13. Reconciliation
-
-Reconciliation compares recent canonical delivery state with provider-visible message/delivery state where supported.
-
-It is mandatory for operations where the provider response was unknown.
+- forged callback;
+- duplicate callback;
+- identity collision;
+- new conversation;
+- outbound duplicate;
+- timeout after send;
+- 429;
+- delivery callback;
+- credential failure;
+- media processing;
+- cross-tenant provider account.
 
 ## 14. Observability
 
-Track:
-
-- inbound event rate;
+- ingress rate;
 - verification failures;
 - duplicate rate;
-- processing lag;
-- outbound latency;
-- provider status codes;
+- queue lag;
+- send latency;
+- provider status;
 - delivery lag;
-- retry age;
-- dead letters;
-- media processing failures.
+- unknown outcomes;
+- retry age.
 
-All metrics include organization and connection identity.
+## 15. Acceptance
 
-## 15. Testing
-
-Required integration tests:
-
-- valid callback;
-- invalid signature/token;
-- duplicate callback;
-- new customer identity;
-- existing customer identity;
-- new conversation;
-- media message;
-- outbound send;
-- rate limit;
-- timeout after potential send;
-- delivery status callback;
-- expired credentials;
-- cross-tenant provider identity.
-
-## 16. Acceptance Criteria
-
-- WhatsApp SDK behavior is isolated behind the adapter.
-- Duplicate inbound events produce one canonical message.
-- Canonical messages exist before provider delivery.
-- Unknown outbound outcomes are reconciled.
-- Provider outages do not affect unrelated channels.
-- Credentials never reach browser/model/log contexts.
+The adapter is complete when protocol behavior, tenant binding, dedupe, delivery uncertainty and provider outage isolation are independently testable.
