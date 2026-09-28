@@ -1,203 +1,225 @@
-# API Authentication and Authorization
+# API Authentication and Authorization — Implementation Specification
 
-> Status: **Target production API contract**
+> Status: **Target implementation blueprint**
 
-Authentication establishes the principal making a request. Authorization establishes what that principal may do inside a specific organization and resource scope.
+## 1. Authentication Is Not Authorization
 
-## 1. Authentication Modes
+Authentication establishes a principal.
 
-| Caller | Mechanism |
-|---|---|
-| Operations web | secure browser session / short-lived access context |
-| Public API client | scoped API key or OAuth-style credential |
-| Internal worker | service principal credential |
-| Provider webhook | provider signature/token verification |
-| Scheduled job | service principal |
-| AI runtime | internal service identity + execution context |
-
-One credential format must not accidentally become the universal trust mechanism.
-
-## 2. User Session
-
-The session establishes user identity, session identity, authentication time, expiry, authentication strength, and available organization memberships.
-
-The session is not a permanent copy of authorization. High-risk permission changes must become effective without waiting indefinitely for an old authorization snapshot.
-
-## 3. Authentication Pipeline
-
-~~~mermaid
-sequenceDiagram
-    participant C as Client
-    participant E as API Edge
-    participant A as Identity
-    participant T as Tenant Resolver
-    participant Z as Authorization
-    participant U as Use Case
-    C->>E: HTTPS request + credential
-    E->>A: Validate credential
-    A-->>E: Principal
-    E->>T: Resolve organization and scope
-    T-->>E: Tenant context
-    E->>Z: Authorize operation
-    Z-->>E: Allow or deny
-    E->>U: Execute
-    U-->>E: Result
-    E-->>C: Response
-~~~
-
-## 4. Tenant Resolution
-
-Tenant context is derived from server-known membership or an integration binding.
-
-A request body containing an organization identifier is not an authorization grant.
-
-For a human with multiple memberships:
-
-1. verify the membership is active;
-2. resolve the permitted scope;
-3. execute only inside that organization.
-
-For a machine credential:
-
-- bind the credential to explicit organizations/scopes;
-- reject requests outside that binding.
-
-## 5. Authorization
-
-Every protected request evaluates:
+Authorization establishes:
 
 ~~~text
 principal
 + organization
 + permission
-+ resource ownership
 + scope
++ resource
 + resource state
 + entitlement
+= allowed operation
 ~~~
 
-Example for sending a conversation message:
+A valid token is never proof that a resource may be accessed.
 
-~~~text
-authenticate
- -> resolve organization
- -> load conversation in organization scope
- -> check conversation.send
- -> check conversation control state
- -> check channel capability
- -> check entitlement
- -> create message
- -> enqueue delivery
-~~~
+## 2. Credential Classes
 
-## 6. HTTP Error Semantics
+| Caller | Credential | Scope |
+|---|---|---|
+| browser user | secure session/access context | memberships |
+| public API | scoped API key | organization/scope |
+| worker | service principal credential | narrow machine permissions |
+| provider webhook | signature/token | integration binding |
+| AI runtime | internal service identity | runtime capabilities |
 
-| Condition | Typical status |
-|---|---|
-| unauthenticated | 401 |
-| authenticated but forbidden | 403 |
-| resource intentionally undiscoverable | 404 |
-| validation problem | 400 |
-| state/version/idempotency conflict | 409 |
-| rate limited | 429 |
-
-The API may intentionally return 404 instead of 403 when revealing the existence of another tenant's object creates information leakage.
-
-## 7. Service Principals
-
-A service principal contains:
-
-- principal ID;
-- owner;
-- purpose;
-- allowed organizations/scopes;
-- permissions;
-- credential status;
-- rotation metadata.
-
-Example:
-
-~~~text
-webhook.whatsapp
- -> verify inbound event
- -> persist normalized event
- -> enqueue processing
-~~~
-
-It should not automatically have billing administration or unrestricted customer export.
-
-## 8. Credential Lifecycle
+## 3. HTTP Security Pipeline
 
 ~~~mermaid
-stateDiagram-v2
-    [*] --> ISSUED
-    ISSUED --> ACTIVE
-    ACTIVE --> ROTATION_PENDING
-    ROTATION_PENDING --> ACTIVE
-    ACTIVE --> REVOKED
-    ACTIVE --> EXPIRED
-    REVOKED --> [*]
-    EXPIRED --> [*]
+sequenceDiagram
+participant C as Client
+participant E as Edge
+participant A as Auth
+participant T as Tenant
+participant Z as Authz
+participant U as UseCase
+C->>E: HTTPS + credential
+E->>A: Authenticate
+A-->>E: Principal
+E->>T: Resolve tenant
+T-->>E: Scope context
+E->>Z: Permission + resource check
+Z-->>E: Allow / deny
+E->>U: Execute
+U-->>E: Result
+E-->>C: Response
 ~~~
 
-Credential metadata is stored separately from credential material.
+## 4. Tenant Context
 
-## 9. API Keys
+The tenant context must be derived from server-known membership/binding.
 
-Public API keys should be:
+Never trust:
 
-- scoped;
-- revocable;
-- rate-limited;
-- attributable;
-- hashed at rest where possible;
-- shown only at issuance when practical.
+~~~json
+{
+  "organizationId": "requested-by-client"
+}
+~~~
 
-Do not store recoverable plaintext keys merely to support later display.
+as an access grant.
 
-## 10. High-Risk Authentication
+For users with multiple memberships, the target organization must be one of their active memberships.
 
-Require recent or stronger authentication for:
+## 5. Token Claims
 
-- owner transfer;
-- billing configuration;
-- provider credential changes;
-- API key creation;
-- bulk export;
-- AI tool enablement;
-- destructive actions.
-
-## 11. Browser Security
-
-Browser authentication must defend against CSRF, XSS token exposure, session fixation, insecure redirect handling, and credential leakage through URLs.
-
-Use secure cookie controls appropriate to the session architecture.
-
-## 12. Rate Limiting
-
-Rate limiting can be layered:
+Claims may identify:
 
 ~~~text
-edge or IP
- -> credential
- -> organization
- -> endpoint class
- -> expensive-operation class
+subject
+session
+issuer
+issued_at
+expires_at
+auth_strength
 ~~~
 
-Authentication, search, exports, AI and bulk operations should have separate protection.
+Do not put a permanently trusted organization role into a token if authorization may change before token expiry.
+
+Prefer server-side membership lookup/revalidation for sensitive actions.
+
+## 6. Session Revocation
+
+Revocation mechanisms:
+
+- session version;
+- revoked-at threshold;
+- session denylist for high-risk incidents;
+- credential status.
+
+The design must allow a compromised session to be invalidated before natural expiry.
+
+## 7. API Key Storage
+
+Store:
+
+~~~text
+key_id
+prefix
+hash
+organization
+scope
+permissions
+created_at
+last_used_at
+expires_at
+revoked_at
+~~~
+
+The full key should normally be shown only at creation.
+
+## 8. Authorization Decision
+
+~~~mermaid
+flowchart TD
+P[Principal] --> M[Membership / Service Binding]
+M --> ROLE[Permissions]
+M --> SCOPE[Scope]
+R[Resource] --> OWN[Ownership]
+ROLE --> CHECK[Authorization Engine]
+SCOPE --> CHECK
+OWN --> CHECK
+STATE[Resource State] --> CHECK
+ENT[Entitlement] --> CHECK
+CHECK -->|allow| USE[Use Case]
+CHECK -->|deny| ERROR[Safe Error]
+~~~
+
+## 9. HTTP Error Contract
+
+Use:
+
+~~~json
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "Operation is not permitted.",
+    "requestId": "req_123",
+    "details": {}
+  }
+}
+~~~
+
+Never include another tenant's resource identity in a denial.
+
+## 10. CSRF / Browser Security
+
+Browser session design must account for:
+
+- CSRF;
+- XSS;
+- session fixation;
+- open redirect;
+- insecure cookie configuration.
+
+Secure, HttpOnly and SameSite controls should be explicit in implementation.
+
+## 11. Rate Limiting
+
+Different classes require different controls:
+
+~~~text
+authentication
+public reads
+writes
+search
+exports
+AI
+bulk
+webhooks
+~~~
+
+A tenant-level AI limit should not consume the same bucket as login attempts.
+
+## 12. Privileged Reauthentication
+
+Require recent/strong authentication before:
+
+- owner transfer;
+- credential rotation;
+- API-key creation;
+- billing configuration;
+- tenant-wide export;
+- destructive operations;
+- AI tool activation.
 
 ## 13. Audit
 
-Audit authentication success/failure, session revocation, membership changes, role/permission changes, API key changes, privileged exports, and sensitive configuration changes.
+Record:
 
-Never log passwords, access tokens, API keys or provider secrets.
+~~~text
+request_id
+principal
+organization
+operation
+resource
+authorization result
+timestamp
+correlation_id
+~~~
 
-## 14. Acceptance Criteria
+Do not log credentials.
 
-- A user cannot access an organization without an active membership.
-- Organization context is derived server-side.
-- Service principals have narrow permissions.
-- High-risk mutations can require stronger authentication.
-- Authorization is checked at the resource boundary.
-- Authentication and authorization telemetry contains no secret material.
+## 14. Security Tests
+
+- expired credential;
+- revoked credential;
+- stale role;
+- multi-organization access;
+- cross-tenant ID;
+- scope escalation;
+- privileged operation without reauthentication;
+- API key after revocation;
+- service principal overreach.
+
+## 15. Acceptance
+
+Authentication is complete only when credential issuance, validation, revocation, tenant resolution and resource authorization are separately testable.

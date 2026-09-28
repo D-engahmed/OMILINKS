@@ -1,195 +1,141 @@
-# Public API
+# Public API — Implementation Specification
 
-> Status: **Target production API contract**
+> Status: **Target implementation blueprint**
 
-The public API exposes stable business capabilities to customer systems and approved integrations. It is not a direct database API and it is not a mirror of internal frontend requests.
+## 1. Public API Boundary
 
-## 1. Design Principles
+The public API exposes stable business capabilities. It must not expose database tables as-is.
 
-The public API must be:
-
-- versioned;
-- tenant-aware;
-- permissioned;
-- retry-safe where duplicate requests can create duplicate business effects;
-- cursor-paginated;
-- explicit about failures;
-- observable;
-- backward-compatible inside a major version.
-
-## 2. Public Resource Boundary
-
-Potential resources include:
+Each endpoint maps to an application use case:
 
 ~~~text
-organizations
-client-accounts
-programs
-sectors
-teams
-customers
-customer-identities
-conversations
-messages
-assignments
-workforce-members
-knowledge-bases
-workflows
-workflow-runs
-ai-agents
-ai-runs
-quality-evaluations
-subscriptions
-usage
-integrations
+HTTP route
+ -> request schema
+ -> auth/tenant context
+ -> authorization
+ -> application command/query
+ -> domain
+ -> response DTO
 ~~~
 
-Not every persistence table becomes public.
+## 2. Versioning
 
-A resource becomes public only when:
-
-- its semantics are stable;
-- authorization is well-defined;
-- lifecycle is understood;
-- backward compatibility can be maintained.
-
-## 3. API Versioning
-
-The external namespace is:
+Base path:
 
 ~~~text
-/api/v1/...
+/api/v1
 ~~~
 
-Within a major version, prefer additive changes.
+Breaking semantic changes require:
 
-Breaking changes include:
+- a new major version;
+- compatibility layer; or
+- formally documented migration.
 
-- changing field meaning;
-- removing required response fields;
-- changing authentication semantics;
-- changing error meaning;
-- changing state transition guarantees;
-- altering idempotency semantics.
+## 3. Mutation Safety
 
-Breaking changes require a new major version or explicit compatibility strategy.
-
-## 4. Idempotency
-
-Retry-sensitive mutations accept:
+A mutation should define:
 
 ~~~text
-Idempotency-Key: <client-generated value>
+authorization
+validation
+idempotency
+concurrency
+transaction
+events
+failure response
 ~~~
 
-The server stores:
+before implementation.
 
-- authenticated client identity;
-- organization;
-- operation/route semantics;
-- request fingerprint;
-- response;
-- status;
-- expiration.
+## 4. Idempotency Contract
 
-Same key plus same meaningful request returns the original result.
-
-Same key plus a different meaningful request returns a deterministic conflict.
-
-## 5. Pagination
-
-Large collections use opaque cursors.
-
-Example:
+Header:
 
 ~~~text
-GET /api/v1/conversations?limit=50&cursor=<opaque>
+Idempotency-Key: <opaque client key>
 ~~~
 
-Ordering should be stable:
+Store:
+
+~~~text
+organization/client identity
+route
+key
+request hash
+status
+response
+created_at
+expires_at
+~~~
+
+Decision:
+
+~~~text
+same key + same request -> return original outcome
+same key + different request -> 409
+~~~
+
+## 5. Pagination Contract
+
+Collections use opaque cursors.
+
+Recommended ordering:
 
 ~~~text
 created_at DESC
 + id DESC
 ~~~
 
-The cursor must represent a position within the authorized tenant/scope, not expose database internals.
+A cursor is scoped to the authorized tenant/query shape.
 
-## 6. Filtering
+Do not allow clients to edit cursor internals.
 
-Filters are allowlisted and documented.
+## 6. Concurrency Contract
 
-Example:
-
-~~~text
-GET /api/v1/conversations
-  ?status=open
-  &channel=whatsapp
-  &assignedTo=<id>
-~~~
-
-Never accept arbitrary SQL-like filter expressions from clients.
-
-## 7. Error Contract
-
-Use one machine-readable envelope:
-
-~~~json
-{
-  "error": {
-    "code": "CONFLICT",
-    "message": "The conversation changed before this operation completed.",
-    "requestId": "req_123",
-    "details": {}
-  }
-}
-~~~
-
-Error codes are stable API contracts.
-
-Messages may evolve as long as their meaning and security implications remain compatible.
-
-## 8. HTTP Semantics
-
-| Situation | Typical response |
-|---|---|
-| success read | 200 |
-| resource created | 201 |
-| async accepted | 202 |
-| successful no-content delete | 204 |
-| validation error | 400 |
-| unauthenticated | 401 |
-| forbidden | 403 |
-| not found/undiscoverable | 404 |
-| state/version/idempotency conflict | 409 |
-| rate limited | 429 |
-| upstream unavailable | 502/503 |
-| unexpected internal error | 500 |
-
-## 9. Optimistic Concurrency
-
-Mutable resources should expose version/ETag where concurrent edits can cause data loss.
-
-Example:
+For resources with lost-update risk:
 
 ~~~text
-If-Match: "conversation-v42"
+ETag: "v42"
+If-Match: "v42"
 ~~~
 
-If the server is on version 43, return 409.
+If server is v43:
+
+~~~text
+409 CONFLICT
+~~~
 
 This is especially important for:
 
 - conversation control;
 - assignments;
-- customer profile;
-- AI configuration;
-- workflow editing;
-- billing administration.
+- AI policies;
+- workflows;
+- billing configuration.
 
-## 10. Asynchronous Operations
+## 7. Error Taxonomy
 
-Long operations return an operation reference:
+Stable error codes should include:
+
+~~~text
+AUTHENTICATION_REQUIRED
+FORBIDDEN
+NOT_FOUND
+VALIDATION_ERROR
+CONFLICT
+IDEMPOTENCY_CONFLICT
+STALE_VERSION
+RATE_LIMITED
+UPSTREAM_UNAVAILABLE
+INTERNAL_ERROR
+~~~
+
+Do not make client applications parse human-readable strings.
+
+## 8. Asynchronous Resources
+
+Long work returns an operation/run resource.
 
 ~~~json
 {
@@ -198,139 +144,108 @@ Long operations return an operation reference:
 }
 ~~~
 
-Examples:
+Polling endpoints return durable state rather than worker-memory status.
 
-- bulk exports;
-- knowledge ingestion;
-- AI batch evaluation;
-- large reconciliation;
-- workflow execution that requires asynchronous processing.
+## 9. Bulk API
 
-## 11. API Architecture
+Bulk operations define:
 
-~~~mermaid
-flowchart LR
-CLIENT[Customer System] --> EDGE[API Edge]
-EDGE --> AUTH[Authentication]
-AUTH --> TENANT[Tenant Resolution]
-TENANT --> Z[Authorization]
-Z --> APP[Application Service]
-APP --> DOMAIN[Domain]
-DOMAIN --> DB[(PostgreSQL)]
-DOMAIN --> OUTBOX[Outbox]
-OUTBOX --> EVENTS[Events / Webhooks]
+- max item count;
+- request size;
+- per-item result;
+- partial success semantics;
+- idempotency;
+- async execution;
+- cancellation;
+- export/download retention if applicable.
+
+## 10. Resource Examples
+
+### Customer
+
+~~~text
+GET /customers
+GET /customers/{id}
+POST /customers
+PATCH /customers/{id}
 ~~~
 
-Public endpoints use the same domain/application behavior as the first-party application whenever practical.
+### Conversation
 
-## 12. Customer Webhooks
+~~~text
+GET /conversations
+GET /conversations/{id}
+POST /conversations/{id}/messages
+~~~
 
-Outbound webhooks are separate from public request/response APIs.
+### Workflow
 
-They require:
+~~~text
+GET /workflows
+POST /workflows
+POST /workflows/{id}/runs
+~~~
 
-- signed payload;
-- event ID;
-- version;
-- timestamp;
-- retry state;
-- delivery attempt;
-- response status;
-- dead-letter state.
+The exact endpoint set remains versioned in OpenAPI.
 
-Delivery attempts are observable and support safe replay.
+## 11. API Sequence
 
-## 13. Rate Limiting
+~~~mermaid
+sequenceDiagram
+participant C as Client
+participant API as API Layer
+participant APP as Application
+participant DB as Database
+participant O as Outbox
+C->>API: POST mutation
+API->>API: Authenticate / resolve tenant
+API->>APP: Command
+APP->>DB: Transaction
+APP->>O: Event in same transaction
+DB-->>APP: Commit
+APP-->>API: DTO
+API-->>C: Response
+~~~
 
-Separate classes should protect:
+External providers are not called inside the transaction unless a documented distributed boundary requires it.
 
-- authentication;
-- standard reads;
-- writes;
-- search;
-- export;
-- AI operations;
-- bulk operations;
-- webhook administration.
+## 12. Security
 
-Return retry information where appropriate.
+Every endpoint declares:
 
-## 14. Tenant Isolation
-
-All public resources resolve inside the caller's authorized organization and scope.
-
-This must be enforced before:
-
-- object retrieval;
-- collection search;
-- pagination;
-- export;
-- aggregation;
-- webhook generation.
-
-A client-supplied organization identifier cannot broaden access.
-
-## 15. API Key Model
-
-Public API credentials should include:
-
-- key identity;
-- client name;
+- auth mode;
 - organization scope;
-- permissions;
-- created/last-used timestamps;
-- expiry where applicable;
-- revocation state;
-- rate-limit class.
+- permission;
+- resource disclosure policy;
+- rate-limit class;
+- sensitive-data handling.
 
-The raw key is shown only during issuance where practical.
+## 13. API Evolution
 
-## 16. Bulk Operations
+For breaking changes:
 
-Bulk endpoints must define:
+~~~text
+introduce vNext
+ -> migrate clients
+ -> monitor old version
+ -> deprecate
+ -> remove
+~~~
 
-- maximum request size;
-- maximum object count;
-- partial success semantics;
-- per-item errors;
+## 14. Tests
+
+Contract suite should cover:
+
+- request validation;
+- status codes;
+- error envelope;
+- auth;
+- tenant isolation;
 - idempotency;
-- asynchronous processing;
-- cancellation behavior.
+- pagination;
+- optimistic concurrency;
+- async operation state.
 
-Do not return one giant synchronous request that can hold an API worker indefinitely.
+## 15. Acceptance
 
-## 17. Export Security
-
-Exports are sensitive operations.
-
-Require:
-
-- explicit permission;
-- tenant/scoped query;
-- audit record;
-- bounded export size;
-- asynchronous generation;
-- expiring download reference.
-
-The download URL must not become a permanent authorization bypass.
-
-## 18. API Evolution
-
-Before a breaking contract change:
-
-1. define replacement;
-2. publish compatibility/deprecation path;
-3. migrate internal consumers;
-4. monitor old-version traffic;
-5. remove only under documented lifecycle policy.
-
-## 19. Acceptance Criteria
-
-- Public writes are idempotent where documented.
-- Reusing an idempotency key with different input returns conflict.
-- Pagination is stable and tenant-safe.
-- Error codes are consistent.
-- Optimistic concurrency protects mutable resources.
-- Long-running operations are asynchronous.
-- Export operations are audited and scoped.
-- Public endpoints do not create a second business-rule implementation.
+No public endpoint is considered production-ready until its complete request/response/error/concurrency/idempotency/security semantics are documented and tested.

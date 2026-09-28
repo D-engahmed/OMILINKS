@@ -1,51 +1,33 @@
-# Webhook API Contract
+# Webhook API — Implementation Specification
 
-> Status: **Target production API contract**
+> Status: **Target implementation blueprint**
 
-Webhook endpoints are inbound integration boundaries. Their responsibilities are verification, durable acceptance, normalization, and asynchronous processing.
+## 1. Webhook Contract
 
-## 1. Processing Contract
+Webhook processing is:
 
-~~~mermaid
-flowchart LR
-HTTP[Provider Request] --> VERIFY[Verify Signature / Token]
-VERIFY -->|Invalid| REJECT[Reject]
-VERIFY -->|Valid| NORMALIZE[Normalize]
-NORMALIZE --> DEDUPE[Build Idempotency Key]
-DEDUPE --> STORE[Persist Event]
-STORE --> ACK[202 Accepted]
-STORE --> QUEUE[Async Queue]
-QUEUE --> DOMAIN[Domain Processing]
-DOMAIN --> OUTBOX[Domain Events]
+~~~text
+receive
+ -> authenticate
+ -> normalize
+ -> deduplicate
+ -> persist
+ -> acknowledge
+ -> process asynchronously
 ~~~
-
-The request must not wait for AI generation, long workflow execution, or analytics fan-out.
 
 ## 2. Verification
 
-Provider adapters implement provider-specific verification such as:
+Provider-specific adapter performs:
 
-- HMAC signature;
-- signed timestamp;
-- verification token;
-- challenge response;
-- provider-specific authentication headers.
+- signature verification;
+- timestamp/replay check where applicable;
+- challenge verification;
+- provider-account binding.
 
-Verification occurs before business mutation.
+Only verified events enter canonical event processing.
 
-## 3. Request Limits
-
-Webhook endpoints require:
-
-- body-size limits;
-- content-type validation;
-- request timeout;
-- rate limiting;
-- bounded parsing.
-
-Malformed input must not reach expensive downstream operations.
-
-## 4. Idempotency
+## 3. Dedupe
 
 Preferred key:
 
@@ -55,120 +37,112 @@ provider
 + provider_event_id
 ~~~
 
-If the provider has no stable event ID, use a deterministic composition of documented provider fields.
+Fallback key is a deterministic provider-specific composition.
 
-Do not use arrival timestamp as identity.
+A duplicate must be detected before business mutation.
 
-## 5. Durable Acceptance
+## 4. HTTP Response Semantics
 
-A webhook should be acknowledged only after its security result and event state are durably persisted, unless the provider contract explicitly requires another behavior.
+| Condition | Response |
+|---|---|
+| invalid auth | 401/403 |
+| malformed authenticated payload | 400 |
+| accepted + durably stored | 202 |
+| duplicate known event | 202/deterministic accepted |
+| internal persistence failure | retry-compatible failure |
 
-After durable acceptance, downstream processing is asynchronous.
+Provider-specific retry semantics override generic assumptions.
 
-## 6. Duplicate Delivery
+## 5. Processing Pipeline
 
 ~~~mermaid
-sequenceDiagram
-participant P as Provider
-participant W as Webhook API
-participant DB as Event Store
-participant Q as Queue
-P->>W: Event E
-W->>DB: Insert dedupe key
-alt First delivery
-  DB-->>W: Inserted
-  W->>Q: Enqueue
-  W-->>P: 202
-else Duplicate
-  DB-->>W: Already exists
-  W-->>P: 202
-end
+flowchart TD
+HTTP[Provider HTTP] --> LIMIT[Request Limits]
+LIMIT --> VERIFY[Authentication]
+VERIFY --> NORMALIZE[Canonical Event]
+NORMALIZE --> DEDUPE[Dedupe Constraint]
+DEDUPE --> STORE[Durable Store]
+STORE --> ACK[Response]
+STORE --> QUEUE[Processing Queue]
+QUEUE --> DOMAIN[Application/Domain]
+DOMAIN --> OUTBOX[Follow-on Events]
 ~~~
 
-Duplicate deliveries must never duplicate:
+## 6. Raw Payload Policy
 
-- customer creation;
-- conversation messages;
-- payments;
-- workflow triggers;
-- other non-idempotent side effects.
+Raw payload retention should be minimized and bounded.
 
-## 7. Raw Event Record
-
-Subject to retention policy, store:
+Store when operationally necessary:
 
 - provider;
-- provider account;
+- account;
 - event ID;
-- verification result;
-- received timestamp;
-- correlation ID;
+- verification metadata;
 - normalized event type;
-- processing state;
-- attempt count;
-- payload reference.
+- payload reference;
+- processing state.
 
-Raw customer content should be minimized.
+## 7. Replay Protection
 
-## 8. Normalization
+Replay controls include:
 
-External provider payloads become canonical internal events.
+- provider timestamp validity;
+- event dedupe;
+- internal replay authorization;
+- audit of replay attempts.
 
-Example:
+Replay must not change tenant ownership.
 
-~~~text
-WhatsApp provider payload
- -> integration.webhook.received
- -> conversation.message.received
- -> routing request
-~~~
+## 8. Consumer Failure
 
-Provider-specific structures must remain inside integration adapters.
+After durable storage, downstream failure should not force the provider to resend.
 
-## 9. Replay
+Queue retry/dead-letter handles processing.
 
-Internal replay is privileged.
+## 9. Duplicate Business Effects
 
-Replay must:
+Explicitly protect against duplicate:
 
-1. identify original event;
-2. preserve original security metadata;
-3. create a new processing attempt;
-4. preserve original history;
-5. run through normal dedupe and authorization checks.
+- customer creation;
+- message creation;
+- payment;
+- workflow trigger;
+- outbound action.
 
-Replay must never change tenant ownership.
+## 10. Security
 
-## 10. Failure Isolation
+- body-size limits;
+- signature before mutation;
+- rate limiting;
+- provider/account binding;
+- secret redaction;
+- tenant-safe replay.
 
-Provider failure must be channel-local.
+## 11. Observability
 
-If WhatsApp is unavailable:
+Track:
 
-- stored conversations remain readable;
-- other channels continue;
-- queued events remain durable;
-- provider state becomes degraded;
-- retry/dead-letter state becomes visible.
-
-## 11. Operations
-
-Operators need:
-
-- verification failure count;
-- last successful webhook;
-- processing lag;
-- duplicate count;
-- retry state;
-- dead-letter count;
-- replay control;
+- verification failures;
+- event ingress;
+- dedupe;
+- queue lag;
+- processing latency;
+- retries;
+- dead letters;
 - provider health.
 
-## 12. Acceptance Criteria
+## 12. Tests
 
-- Invalid webhook authentication creates no business mutation.
-- Duplicate events create one business effect.
-- Webhook acknowledgement does not depend on AI/workflow completion.
-- Provider parsing is isolated.
-- Stored events can be replayed.
-- Replay cannot cross tenant boundaries.
+- forged signature;
+- expired timestamp;
+- duplicate;
+- malformed payload;
+- provider retry;
+- downstream outage;
+- tenant mismatch;
+- replay authorization;
+- large payload.
+
+## 13. Acceptance
+
+A webhook is complete only when authentication, dedupe, durability, replay, downstream retry and observability are explicit.
