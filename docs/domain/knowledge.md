@@ -1,203 +1,221 @@
-# Knowledge Domain
+# Knowledge Domain — Implementation Specification
 
-> Status: **Target production domain contract**
+> Status: **Target implementation blueprint**
 
-Knowledge is the governed information layer for human and AI operations.
+## 1. Boundary
 
-## 1. Source of Truth
+Knowledge manages source content and derived retrieval artifacts.
 
-Canonical source data lives in transactional/object storage. Search/vector indexes are derived artifacts.
+Transactional business truth remains in domain services.
 
-```text
-KnowledgeBase
-  -> Source
-    -> Document
-      -> DocumentVersion
-        -> Chunk
-          -> Embedding/Search Index
-```
+## 2. Data Model
 
-An index can be rebuilt. The source record remains authoritative.
-
-## 2. Domain Model
-
-```mermaid
+~~~mermaid
 erDiagram
-ORGANIZATION ||--o{ KNOWLEDGE_BASE : owns
-KNOWLEDGE_BASE ||--o{ SOURCE : contains
-SOURCE ||--o{ DOCUMENT : produces
-DOCUMENT ||--o{ DOCUMENT_VERSION : has
-DOCUMENT_VERSION ||--o{ CHUNK : contains
-CHUNK ||--o{ INDEX_ENTRY : produces
-KNOWLEDGE_BASE ||--o{ RETRIEVAL_POLICY : governs
-```
+    ORGANIZATION ||--o{ KNOWLEDGE_BASE : owns
+    KNOWLEDGE_BASE ||--o{ SOURCE : contains
+    SOURCE ||--o{ DOCUMENT : produces
+    DOCUMENT ||--o{ DOCUMENT_VERSION : versions
+    DOCUMENT_VERSION ||--o{ CHUNK : contains
+    CHUNK ||--o{ INDEX_ENTRY : indexes
+    KNOWLEDGE_BASE ||--o{ RETRIEVAL_POLICY : governs
+~~~
 
-## 3. Knowledge Lifecycle
+## 3. Document Version
 
-```mermaid
+Fields:
+
+~~~text
+document_version_id
+document_id
+source_id
+organization_id
+version_number
+checksum
+content_location
+content_type
+created_at
+status
+~~~
+
+Once indexed, semantic content of a version is immutable.
+
+## 4. Ingestion State
+
+~~~mermaid
 stateDiagram-v2
     [*] --> REGISTERED
-    REGISTERED --> INGESTING
-    INGESTING --> READY
-    INGESTING --> FAILED
-    FAILED --> INGESTING
+    REGISTERED --> FETCHING
+    FETCHING --> PARSING
+    PARSING --> CHUNKING
+    CHUNKING --> EMBEDDING
+    EMBEDDING --> INDEXING
+    INDEXING --> READY
+    FETCHING --> FAILED
+    PARSING --> FAILED
+    CHUNKING --> FAILED
+    EMBEDDING --> FAILED
+    INDEXING --> FAILED
+    FAILED --> RETRYING
+    RETRYING --> FETCHING
     READY --> STALE
-    STALE --> INGESTING
     READY --> DISABLED
-    DISABLED --> INGESTING
     DISABLED --> DELETED
-```
+~~~
 
-`READY` means the current version passed ingestion/indexing checks, not that the source can never become stale.
+## 5. Ingestion Job
 
-## 4. Source Types
+A durable job contains:
 
-- uploaded document
-- FAQ/article
-- website content
-- tenant-authored knowledge
-- structured catalog/business data
-- external knowledge connector
+~~~text
+job_id
+organization_id
+source_id
+document_version_id
+stage
+attempt
+next_attempt_at
+error_class
+worker_version
+~~~
 
-Every source stores provenance and update strategy.
+Stages must be resumable.
 
-## 5. Document Versioning
+## 6. Chunk Contract
 
-Indexed document versions are immutable:
+Each chunk stores:
 
-```text
-Billing FAQ
-  v1 -> historical
-  v2 -> historical
-  v3 -> current
-```
+~~~text
+chunk_id
+document_version_id
+organization_id
+scope
+sequence
+text
+checksum
+metadata
+index_status
+~~~
 
-An AI trace that used v2 must be able to identify v2 later.
+Chunk checksum supports incremental indexing.
 
-## 6. Ingestion Pipeline
+## 7. Retrieval Authorization
 
-```mermaid
+Security order:
+
+~~~mermaid
 flowchart LR
-SRC[Source] --> FETCH[Fetch / Upload]
-FETCH --> VALIDATE[Validate Format + Security]
-VALIDATE --> PARSE[Parse]
-PARSE --> NORMALIZE[Normalize]
-NORMALIZE --> CHUNK[Chunk]
-CHUNK --> EMBED[Embedding]
-EMBED --> INDEX[Index]
-INDEX --> READY[Ready]
-VALIDATE --> FAILED[Quarantine / Failed]
-```
-
-All asynchronous ingestion jobs are observable and retryable.
-
-## 7. Chunking
-
-Store organization, knowledge base, document version, source, section/title, chunk order, checksum, and indexing state on chunks.
-
-## 8. Retrieval Authorization
-
-Unsafe:
-
-```text
-global vector search
- -> top K
- -> filter unauthorized rows
-```
-
-Preferred:
-
-```text
-resolve tenant/scope
- -> restrict candidate knowledge
- -> search
- -> rank
- -> project into model context
-```
-
-```mermaid
-flowchart TD
-Q[AI Query] --> TENANT[Resolve Tenant]
-TENANT --> POLICY[Knowledge Access Policy]
-POLICY --> FILTER[Scoped Candidate Set]
-FILTER --> SEARCH[Vector / Keyword Search]
+QUERY[Query] --> TENANT[Tenant Scope]
+TENANT --> POLICY[Retrieval Policy]
+POLICY --> CANDIDATES[Authorized Candidate Set]
+CANDIDATES --> SEARCH[Vector / Keyword Search]
 SEARCH --> RANK[Rank]
-RANK --> PROJ[Model-safe Context]
-```
+RANK --> CONTEXT[Context Projection]
+~~~
 
-Authorization must hold even if stale index entries remain.
+Do not search globally and filter after ranking.
 
-## 9. Deterministic Business Truth
+## 8. Retrieval Contract
 
-| Need | Preferred mechanism |
-|---|---|
-| current order status | business API/tool |
-| current account balance | business API/tool |
-| policy document | knowledge retrieval |
-| FAQ | knowledge retrieval |
-| product description | knowledge/structured catalog |
+Response contains:
 
-Do not force current transactional facts through RAG when a deterministic tool exists.
+~~~text
+chunk_id
+document_version_id
+source_id
+title/section
+relevance
+scope
+retrieved_at
+~~~
 
-## 10. Retrieval Result Contract
+This supports grounding and traceability.
 
-Return chunk ID, document version, source ID, title/section, relevance metadata, effective scope, and retrieval timestamp.
+## 9. Structured Data Rule
 
-## 11. Freshness
+Use deterministic tools for live business state:
 
-Track `fresh`, `stale`, `syncing`, `failed`, and `disabled`. Critical workflows should avoid silently using stale knowledge when current business truth is available.
+~~~text
+order status -> business API
+balance -> business API
+policy article -> knowledge
+FAQ -> knowledge
+~~~
 
-## 12. Deletion
+RAG should not become a substitute for transactional APIs.
 
-Deletion is canonical first, derived second.
+## 10. Freshness
 
-```mermaid
+Freshness metadata:
+
+~~~text
+last_ingested_at
+last_indexed_at
+source_updated_at
+freshness_deadline
+status
+~~~
+
+Critical workflows must have explicit behavior when knowledge is stale.
+
+## 11. Deletion
+
+Delete flow:
+
+~~~mermaid
 sequenceDiagram
 participant A as Admin
-participant K as Knowledge DB
-participant Q as Index Queue
-participant I as Search Index
-A->>K: Disable/Delete source
-K-->>A: Canonical state changed
-K->>Q: Cleanup job
-Q->>I: Delete derived chunks
-I-->>Q: Cleanup complete
-```
+participant DB as Knowledge Store
+participant Q as Cleanup Queue
+participant I as Index
+A->>DB: Disable/Delete source
+DB-->>A: Canonical state changed
+DB->>Q: Cleanup job
+Q->>I: Remove derived chunks
+I-->>Q: Complete
+~~~
 
-Until cleanup completes, canonical disabled/deleted state must block retrieval.
+Canonical disabled state blocks retrieval before cleanup finishes.
 
-## 13. Sensitive Knowledge
+## 12. Cache Invalidation
 
-Knowledge visibility may be organization, client-account, program, sector, team, or site scoped. An AI agent may have a narrower context policy than the requesting human.
+Retrieval caches must include organization/scope and source version information.
 
-## 14. Cross-Domain Contracts
+Deleting/disabling a source invalidates relevant cache entries.
 
-**Tenancy:** ownership/scope.
-**AI:** context policy controls retrieval.
-**Tools:** live structured facts use deterministic tools.
-**Data:** retention/deletion propagates.
-**Quality:** source/version IDs support grounding evaluation.
-
-## 15. Failure Modes
+## 13. Failure Modes
 
 | Failure | Behavior |
 |---|---|
-| parse failure | mark version failed |
-| embedding outage | retry job |
-| index outage | retrieval degraded |
+| parse error | failed version |
+| provider embedding outage | retry |
+| indexing outage | stale/degraded |
 | stale index after deletion | canonical policy blocks result |
-| no authorized knowledge | return empty context |
-| stale knowledge for critical task | use tool or handoff |
+| no authorized data | empty result |
+| current business fact required | deterministic tool/handoff |
 
-## 16. Observability
+## 14. Observability
 
-Measure ingestion latency, failures, stale count, index lag, retrieval latency, zero-result rate, source usage, and grounding failure rate.
+- ingestion duration;
+- queue age;
+- failed sources;
+- stale sources;
+- indexing lag;
+- retrieval latency;
+- zero-result rate;
+- grounding failure.
 
-## 17. Acceptance Criteria
+## 15. Tests
 
-- Source content is separate from derived indexes.
-- Every chunk is tenant/scope/provenance aware.
-- Authorization filters before model exposure.
-- Deleted content is blocked before index cleanup completes.
-- Historical traces identify source versions.
-- Live business facts use deterministic tools where appropriate.
+- tenant retrieval isolation;
+- source deletion before index cleanup;
+- duplicate ingestion;
+- checksum/idempotency;
+- version immutability;
+- stale knowledge;
+- unauthorized scope;
+- live-data preference.
+
+## 16. Acceptance
+
+Knowledge is complete when source/version/index lifecycle, retrieval authorization and deletion safety can be demonstrated independently.

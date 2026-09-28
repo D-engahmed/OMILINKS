@@ -1,227 +1,237 @@
-# Routing Domain
+# Routing Domain — Implementation Specification
 
-> Status: **Target production domain contract**
+> Status: **Target implementation blueprint**
 
-Routing determines who should own a new or re-routed work item, explains why, and defines what happens when nobody qualifies.
+## 1. Responsibility
 
-Routing is **not authorization**. It can select only from workers that are already permitted to work in the requested scope.
+Routing transforms operational context into an explainable assignment decision.
 
-## 1. Routing Inputs
+Routing is not authorization and does not create permission.
 
-Potential inputs:
+## 2. Routing Context
 
-- channel;
-- customer/client;
-- client account;
-- program;
-- sector;
-- team;
-- language;
-- skills;
-- priority;
-- SLA deadline;
-- conversation state;
-- workforce presence;
-- workforce capacity;
-- previous assignment;
-- AI/human policy.
+Normalized context:
 
-## 2. Core Entities
+~~~json
+{
+  "organizationId": "org_123",
+  "conversationId": "conv_123",
+  "channel": "whatsapp",
+  "language": "ar-EG",
+  "priority": "high",
+  "slaDeadline": "...",
+  "requiredSkills": ["billing"],
+  "programId": "program_7",
+  "currentControl": "queue"
+}
+~~~
 
-| Entity | Responsibility |
-|---|---|
-| RoutingPolicy | versioned set of rules |
-| RoutingRule | ordered condition/action |
-| RoutingDecision | immutable decision evidence |
-| Queue | durable work fallback |
-| SkillRequirement | required capability |
-| CandidateSnapshot | worker state used in decision |
-| SLAPolicy | urgency/deadline semantics |
+Context is loaded from authoritative domain state.
 
-## 3. Routing Pipeline
+## 3. Policy Model
 
-```mermaid
+~~~mermaid
+erDiagram
+    ORGANIZATION ||--o{ ROUTING_POLICY : owns
+    ROUTING_POLICY ||--o{ ROUTING_POLICY_VERSION : versions
+    ROUTING_POLICY_VERSION ||--o{ ROUTING_RULE : contains
+    ROUTING_POLICY_VERSION ||--o{ ROUTING_DECISION : produces
+    ROUTING_DECISION ||--o{ ROUTING_CANDIDATE : evaluates
+~~~
+
+Published policy versions are immutable.
+
+## 4. Evaluation Pipeline
+
+~~~mermaid
 flowchart TD
-EVENT[New Work] --> CONTEXT[Build Routing Context]
-CONTEXT --> POLICY[Load Published Policy]
-POLICY --> SCOPE[Apply Organization + Scope]
-SCOPE --> AUTH[Filter Authorized Workers]
-AUTH --> SKILL[Filter Skills]
-SKILL --> PRESENCE[Filter Presence]
-PRESENCE --> CAPACITY[Filter Capacity]
-CAPACITY --> PRIORITY[Priority + SLA]
-PRIORITY --> SCORE[Candidate Ordering]
-SCORE --> DECIDE{Candidate?}
-DECIDE -->|yes| ASSIGN[Assignment]
-DECIDE -->|no| QUEUE[Durable Queue]
-ASSIGN --> RECORD[Persist Decision]
-QUEUE --> RECORD
-```
+CONTEXT[Routing Context] --> POLICY[Load Policy Version]
+POLICY --> SCOPE[Hard Scope Filter]
+SCOPE --> AUTH[Authorization Filter]
+AUTH --> SKILL[Skill Filter]
+SKILL --> PRESENCE[Presence Filter]
+PRESENCE --> CAPACITY[Capacity Filter]
+CAPACITY --> SLA[Priority / SLA]
+SLA --> SCORE[Candidate Score]
+SCORE --> TIE[Deterministic Tie Break]
+TIE --> ASSIGN[Decision]
+~~~
 
-## 4. Hard Filters
+## 5. Hard vs Soft Constraints
 
-A candidate is removed before scoring when:
+Hard filters:
 
-- outside tenant scope;
-- lacks required resource authorization;
-- outside valid program/sector/team scope;
+- organization mismatch;
+- invalid scope;
+- missing authorization;
+- disabled worker;
 - missing required skill;
-- disabled;
-- offline beyond freshness threshold;
-- over capacity;
-- blocked by AI/human policy.
+- insufficient capacity;
+- policy prohibition.
 
-A scoring rule must never re-add a candidate removed by a hard constraint.
+Soft ranking:
 
-## 5. Determinism
-
-Routing should produce the same result for the same:
-
-- policy version;
-- routing context;
-- candidate snapshot.
-
-Dynamic state is acceptable, but the decision record must capture enough evidence to explain which state was observed.
-
-## 6. Policy Versioning
-
-Published policies are immutable.
-
-```text
-routing-policy-v3 = published
-routing-policy-v4 = draft
-```
-
-Historical assignments keep the published version that produced them.
-
-## 7. Scoring
-
-After hard filters, policy may rank candidates using:
-
-- skill match;
-- SLA urgency;
-- queue priority;
 - load balance;
 - affinity;
-- deterministic tie-breaker.
+- skill proficiency;
+- SLA urgency;
+- configured priority.
 
-Conceptual score:
+A soft score can never override a hard rejection.
 
-```text
+## 6. Candidate Snapshot
+
+For explainability, a decision records the observed candidate state:
+
+~~~text
+candidate_id
+eligible
+rejection_reason
+skills
+presence
+capacity
+score
+policy_version
+observed_at
+~~~
+
+This prevents later state changes from making an old decision impossible to explain.
+
+## 7. Deterministic Score
+
+Example:
+
+~~~text
 score =
   skill_weight * skill_match
-+ urgency_weight * urgency
-+ load_weight * inverse_load
-+ affinity_weight * affinity
-```
+  + sla_weight * urgency
+  + load_weight * inverse_load
+  + affinity_weight * affinity
+~~~
 
-Weight values belong to configuration and must be versioned.
+Weights belong to policy configuration.
 
-## 8. Decision Evidence
+## 8. Tie Breaking
 
-A routing decision should contain:
+Stable final ordering:
 
-```json
+~~~text
+priority
+skill score
+worker_id ascending
+~~~
+
+Never randomize when reproducibility is required.
+
+## 9. Routing Decision Record
+
+~~~json
 {
-  "policyVersion": "routing-v4",
-  "matchedRules": [
-    "arabic-language",
-    "billing-skill",
-    "enterprise-priority"
-  ],
-  "candidateCount": 8,
-  "selectedQueue": "enterprise-billing",
-  "selectedWorkforceMember": "agent-42"
+  "decisionId": "uuid",
+  "policyVersion": 7,
+  "selected": "worker_42",
+  "queue": null,
+  "reasonCodes": [
+    "billing_skill",
+    "arabic",
+    "lowest_load"
+  ]
 }
-```
+~~~
 
-The exact internal schema can evolve, but the decision must remain explainable.
+## 10. No-Match State
 
-## 9. Queue and Escalation
-
-```mermaid
+~~~mermaid
 stateDiagram-v2
     [*] --> EVALUATING
     EVALUATING --> ASSIGNED
     EVALUATING --> QUEUED
-    QUEUED --> RE_EVALUATING
-    RE_EVALUATING --> ASSIGNED
+    QUEUED --> REEVALUATING
+    REEVALUATING --> ASSIGNED
     QUEUED --> ESCALATED
-    ESCALATED --> RE_EVALUATING
-```
+    ESCALATED --> REEVALUATING
+~~~
 
-Queue state should carry an SLA deadline so old work cannot disappear into an indefinite backlog.
+Queueing is a valid business outcome.
 
-## 10. Re-Routing
+## 11. Re-Routing
 
-Re-routing triggers include:
+Triggers:
 
-- worker becomes unavailable;
-- queue overload;
-- SLA warning;
+- worker disabled;
+- presence expired;
+- queue SLA warning;
 - customer escalation;
 - AI handoff;
 - supervisor override;
 - skill/policy change.
 
-Close the previous active assignment instead of mutating history.
+Previous assignment remains historical.
 
-## 11. Manual Override
+## 12. Manual Override
 
-Supervisor override is a permissioned operation.
+Manual assignment requires permission.
 
-It records:
+Record:
 
-- actor;
-- previous assignment;
-- replacement assignment;
-- reason;
-- timestamp.
+~~~text
+actor
+previous_assignment
+new_assignment
+reason
+timestamp
+~~~
 
-Manual assignment should not silently disable policy unless a documented control policy says so.
+Manual override does not automatically disable future routing.
 
-## 12. Cross-Domain Contracts
+## 13. Transaction Boundary
 
-**Tenancy:** supplies organization/scope.
+Routing decision can be calculated outside the assignment transaction.
 
-**Workforce:** supplies candidate capabilities and state.
+Final assignment transaction must re-check:
 
-**Conversations:** supplies work context and receives assignment/control.
+- conversation version/control;
+- candidate status;
+- candidate capacity;
+- organization ownership.
 
-**AI:** creates routing requests during handoff.
+This prevents stale routing decisions from creating invalid assignments.
 
-**Quality:** consumes routing/assignment outcomes for operational analytics.
-
-## 13. Failure Modes
+## 14. Failure Modes
 
 | Failure | Behavior |
 |---|---|
-| policy unavailable | use safe queue/degraded routing policy |
-| policy invalid | reject publication, retain last valid version |
-| stale worker state | exclude candidate |
-| concurrent assignment | conflict + fresh evaluation |
-| no eligible candidate | queue |
-| SLA threshold reached | escalation |
+| invalid policy | reject publication |
+| policy unavailable | safe queue/degraded rule |
+| stale candidate | remove/re-evaluate |
+| assignment race | transaction conflict |
+| no candidate | queue |
+| queue SLA breach | escalate |
 
-## 14. Observability
-
-Track:
+## 15. Observability
 
 - routing latency;
-- candidate counts;
-- hard-filter reasons;
+- candidate count;
+- filter rejection distribution;
+- selected worker;
 - queue rate;
 - reroute rate;
-- SLA breach rate;
-- policy version usage;
-- manual override rate.
+- manual override rate;
+- policy version.
 
-## 15. Acceptance Criteria
+## 16. Tests
 
-- Routing never grants permission.
-- Hard authorization/scope filters happen before scoring.
-- Published routing versions are immutable.
-- Decisions retain policy and reason evidence.
-- No-match work enters durable state.
-- Re-routing preserves assignment history.
-- Policy defects cannot silently replace the last valid published policy.
+- deterministic score;
+- tie;
+- missing skill;
+- authorization exclusion;
+- stale presence;
+- capacity race;
+- policy version;
+- no-match queue;
+- manual override;
+- stale assignment decision.
+
+## 17. Acceptance
+
+Routing is complete when decisions are deterministic, tenant-safe, explainable and concurrency-safe at assignment commit time.
