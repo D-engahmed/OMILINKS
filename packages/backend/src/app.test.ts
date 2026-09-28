@@ -407,17 +407,17 @@ test("unauthenticated protected routes are rejected", async () => {
   )
 })
 
-test("unknown routes return stable machine-readable errors", async () => {
+test("unauthenticated requests are rejected before route discovery", async () => {
   const handle = await createApp(new MemoryStore())
 
   const response = await handle(
     new Request("http://localhost/does-not-exist", { method: "GET" })
   )
 
-  assert.equal(response.status, 404)
+  assert.equal(response.status, 401)
 
   const payload = await response.json()
-  assert.equal(payload.error.code, "NOT_FOUND")
-  assert.equal(payload.error.message, "Route not found.")
+  assert.equal(payload.error.code, "AUTHENTICATION_REQUIRED")
+  assert.equal(payload.error.message, "Authentication required.")
   assert.ok(typeof payload.error.requestId === "string")
 })
