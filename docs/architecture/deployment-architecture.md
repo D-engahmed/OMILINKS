@@ -1,40 +1,51 @@
-# Deployment Architecture
+# Deployment Architecture — Implementation Blueprint
 
 > Status: **Target production deployment architecture**
 
-## 1. Environments
+## 1. Environment Model
 
-Minimum environments:
+~~~text
+development
+staging
+production
+~~~
 
-- development;
-- staging;
-- production.
+Each environment has separate:
 
-Each has separate credentials, data and provider configurations.
+- database;
+- object storage;
+- secrets;
+- provider credentials;
+- queue;
+- domain configuration.
 
 ## 2. Production Topology
 
 ~~~mermaid
 flowchart TB
 DNS[DNS / TLS] --> EDGE[Load Balancer / CDN]
-EDGE --> WEB[Operations Web]
+EDGE --> WEB[Web App]
 EDGE --> WIDGET[Widget]
 EDGE --> API[API Replicas]
+EDGE --> WH[Webhook API]
 
-API --> DB[(Managed PostgreSQL)]
-API --> CACHE[(Redis / Queue)]
-API --> STORE[(Object Storage)]
-API --> BUS[Event / Job Bus]
+API --> PG[(Managed PostgreSQL)]
+API --> REDIS[(Redis / Queue)]
+API --> OBJ[(Object Storage)]
 
-BUS --> WORK[Worker Pool]
+WH --> PG
+WH --> REDIS
+
+REDIS --> WORK[Worker Fleet]
 WORK --> AI[AI Workers]
 WORK --> WF[Workflow Workers]
 WORK --> INT[Integration Workers]
+WORK --> KNOW[Knowledge Workers]
+WORK --> BILL[Billing Workers]
 
-AI --> MODELS[Model Providers]
-INT --> CHANNELS[Channel Providers]
-INT --> PAY[Payment Provider]
-INT --> N8N[Automation Provider]
+AI --> MODEL[Model Providers]
+INT --> CHANNEL[Channel Providers]
+BILL --> PAY[Payment Provider]
 
 API --> OBS[Observability]
 WORK --> OBS
@@ -42,61 +53,85 @@ WORK --> OBS
 
 ## 3. Stateless Compute
 
-Web/API/worker processes should be stateless.
+API/worker containers should be stateless.
 
-Persistent state belongs in:
+No business state should require:
 
-- PostgreSQL;
-- object storage;
-- queue/event infrastructure;
-- managed search/vector storage.
+- local filesystem;
+- process memory;
+- one specific machine.
 
-## 4. Scaling
+## 4. Scaling Units
 
-Scale independently:
+Scale independently by bottleneck:
 
 ~~~text
 API:
-  request concurrency / latency
+requests / CPU / latency
 
-workers:
-  queue depth / oldest event
+Webhook:
+ingress rate / persistence latency
 
-AI workers:
-  AI concurrency / provider limits
+AI:
+concurrent runs / provider limits
 
-workflow workers:
-  scheduled job backlog
+Workflow:
+ready-step backlog / timer volume
 
-integration workers:
-  provider rate limits
+Integration:
+provider rate limits / outbound queue
+
+Knowledge:
+ingestion/indexing backlog
+
+Billing:
+reconciliation queue
 ~~~
 
-## 5. Deployment Artifact
+## 5. Readiness vs Liveness
 
-A production release identifies:
+Liveness asks:
 
 ~~~text
-git commit SHA
-artifact digest/version
-schema/migration version
-configuration version
-feature flag state
+Can the process continue?
 ~~~
 
-## 6. Startup Checks
+Readiness asks:
 
-API/worker startup validates required configuration.
+~~~text
+Can this instance safely serve normal work?
+~~~
 
-Readiness should fail if critical dependencies cannot support normal operation.
+External provider outage should not automatically mark the API dead if degraded operation remains safe.
 
-Liveness should not require every external provider to be healthy.
+## 6. Deployment Sequence
 
-## 7. Database Migration
+Typical:
 
-Migration deployment follows compatibility-first patterns.
+1. build immutable artifact;
+2. run CI;
+3. deploy compatible backend;
+4. apply compatible schema migration;
+5. deploy workers;
+6. deploy web/widget;
+7. enable feature flag;
+8. monitor.
 
-During rolling deploy:
+## 7. Feature Flags
+
+Use independent controls for:
+
+- autonomous AI;
+- channel activation;
+- new routing algorithms;
+- new workflow semantics;
+- billing enforcement changes.
+
+Feature flags are not authorization.
+
+## 8. Migration Compatibility
+
+Rolling deployment must support:
 
 ~~~text
 old code
@@ -106,66 +141,51 @@ new code
 compatible schema
 ~~~
 
-must coexist.
+Destructive schema changes happen only after all old consumers are removed.
 
-## 8. Worker Deployment
+## 9. Failure Isolation
 
-Workers must understand queued event versions during rolling deployment.
+A provider-specific worker should fail without killing unrelated workers.
 
-Do not publish a new event schema before consumers can process it unless the compatibility strategy explicitly supports that sequence.
-
-## 9. Feature Flags
-
-Use feature/config gates for:
-
-- AI autonomous mode;
-- new channel;
-- new workflow engine behavior;
-- new billing enforcement;
-- risky provider changes.
-
-Flags are safety controls, not authorization.
+Use separate queues/concurrency limits where noisy-neighbor risk is high.
 
 ## 10. Disaster Recovery
 
-Recovery sequence:
+Recovery:
 
-1. recover database;
-2. verify schema;
-3. restore object references;
-4. recover queue/event processing;
-5. reconcile providers/payment;
-6. verify tenant isolation;
-7. resume traffic.
+~~~text
+restore database
+ -> verify schema
+ -> restore object references
+ -> restart queues/workers
+ -> reconcile payments/providers
+ -> verify tenant isolation
+ -> resume traffic
+~~~
 
-## 11. Production Security
+## 11. Security
 
-- databases private;
-- secrets injected at runtime;
-- least-privilege service identities;
-- network egress controlled;
-- audit access to privileged infrastructure;
-- encrypted storage/backups.
+- private database networking;
+- runtime secret injection;
+- service-level credentials;
+- restricted management access;
+- encrypted backup storage;
+- controlled outbound network;
+- audit privileged infrastructure actions.
 
 ## 12. Observability
 
-Track per deployment:
+Deployment dashboards include:
 
-- API error rate;
-- deployment health;
+- version;
+- error rate;
+- latency;
 - queue age;
-- worker crashes;
-- database saturation;
-- provider failures;
+- worker failures;
+- provider health;
 - AI cost;
-- billing reconciliation.
+- billing mismatches.
 
-## 13. Acceptance Criteria
+## 13. Acceptance
 
-- Environments are isolated.
-- Stateful services are managed and backed up.
-- Compute scales horizontally.
-- Deployment metadata is traceable.
-- Migrations are compatibility-safe.
-- Feature disablement exists for high-risk changes.
-- Recovery includes provider reconciliation.
+Deployment is complete when production state is reproducible from release metadata and recovery is tested rather than assumed.

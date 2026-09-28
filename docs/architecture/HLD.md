@@ -1,261 +1,264 @@
-# High-Level Architecture
+# High-Level Architecture — Implementation Blueprint
 
 > Status: **Target production architecture**
 
-## 1. Architectural Position
+## 1. Architectural Decision
 
-OMILINKS starts as a modular monolith because the dominant complexity is domain correctness, not network distribution.
+OMILINKS starts as a modular monolith.
 
-The first goal is:
+This is deliberate:
 
-~~~text
-strong domain boundaries
-+
-transactional consistency
-+
-clear asynchronous seams
-+
-provider isolation
-~~~
+- strong transaction boundaries are more important than service distribution;
+- tenant isolation is easier to prove inside one transactional system;
+- product requirements are still evolving;
+- unnecessary microservices would add network failure, deployment and observability complexity before scale requires it.
 
-Microservice extraction is an optimization after scale/organizational evidence, not an architectural prerequisite.
+The architecture is designed so modules can be extracted later without changing domain semantics.
 
 ## 2. System Context
 
 ~~~mermaid
 flowchart TB
-CUSTOMER[Customer] --> CHANNELS[Channel Providers]
-OPERATOR[Operations User] --> WEB[Operations Web]
-ADMIN[Administrator] --> WEB
-WEB --> API[OMILINKS API]
+CUST[Customers] --> CHANNEL[Channel Providers]
+OPS[Operations Users] --> WEB[Operations Web]
+ADMIN[Administrators] --> WEB
+WEB --> API[Backend API]
 WIDGET[Customer Widget] --> API
+CHANNEL --> WEBHOOK[Webhook Boundary]
+WEBHOOK --> API
 
-CHANNELS --> API
-API --> DOMAIN[Domain Modules]
-DOMAIN --> DB[(PostgreSQL)]
-DOMAIN --> OUTBOX[Transactional Outbox]
-OUTBOX --> BUS[Event / Job Bus]
-BUS --> WORKERS[Worker Runtime]
+API --> APP[Application Services]
+APP --> DOM[Domain Modules]
+DOM --> DB[(PostgreSQL)]
+DOM --> OUTBOX[Transactional Outbox]
 
-WORKERS --> AI[AI Runtime]
+OUTBOX --> BUS[Queue / Event Bus]
+BUS --> WORK[Worker Runtime]
+WORK --> AI[AI Runtime]
+WORK --> WF[Workflow Runtime]
+WORK --> INT[Integration Workers]
+WORK --> KNOW[Knowledge Workers]
+WORK --> BILL[Billing Workers]
+
 AI --> MODELS[Model Providers]
-WORKERS --> PROVIDERS[Channel / Payment / Automation Providers]
-AI --> KNOW[Knowledge / Search]
 AI --> TOOLS[Tool Runtime]
-
-DOMAIN --> QUALITY[Quality]
-DOMAIN --> BILLING[Billing]
-DOMAIN --> ANALYTICS[Analytics]
+TOOLS --> DOM
+INT --> CHANNEL
+INT --> PAY[Payment Provider]
+INT --> N8N[Automation Provider]
+KNOW --> SEARCH[Search / Vector]
 ~~~
 
-## 3. Major Runtime Components
+## 3. Runtime Planes
 
-| Component | Responsibility |
-|---|---|
-| Operations Web | human-facing management/operations interface |
-| Customer Widget | embeddable customer-facing interface |
-| Backend API | authentication, tenant resolution, application services |
-| Domain Modules | business invariants and transactional use cases |
-| Worker Runtime | async events, workflows, integrations and AI jobs |
-| PostgreSQL | authoritative transactional state |
-| Queue/Event Bus | durable asynchronous delivery |
-| Object Storage | documents/media/exports |
-| Search/Vector | derived retrieval index |
-| AI Runtime | bounded model/tool execution |
-| Provider Adapters | external system protocol isolation |
-| Observability | logs, metrics, traces, audit |
+### Control plane
 
-## 4. Domain Boundaries
+Configuration and administration:
 
-The first-class domains are:
+- organizations;
+- users/memberships;
+- roles;
+- integrations;
+- AI agents/policies;
+- workflows;
+- billing configuration.
+
+### Data plane
+
+Customer operations:
+
+- inbound events;
+- conversations;
+- routing;
+- assignments;
+- AI runs;
+- tool actions;
+- provider delivery.
+
+### Intelligence plane
+
+- model routing;
+- knowledge retrieval;
+- evaluation;
+- AI observability;
+- cost control.
+
+Separating these concepts improves operational reasoning even when deployment remains a modular monolith.
+
+## 4. Core Dependency Direction
 
 ~~~text
-tenancy
-identity
-customers
-conversations
-workforce
-routing
-ai
-knowledge
-tools
-workflows
-quality
-billing
-integrations
-audit
-analytics
+transport
+ -> application
+   -> domain
+     -> ports
+       <- infrastructure/adapters
 ~~~
 
-A module can depend on another module's public application contract/event. It should not import its internal persistence implementation.
+Domain modules never depend on provider SDKs.
 
-## 5. Sync vs Async Boundary
+## 5. Synchronous vs Asynchronous
 
-Use synchronous operations for fast transactional decisions:
+Synchronous:
 
-- authenticate;
-- authorize;
-- load current state;
-- create canonical customer;
-- create conversation;
-- create assignment;
-- update configuration.
+- authentication;
+- tenant resolution;
+- permission checks;
+- current-state reads;
+- short transactional commands.
 
-Use asynchronous processing for:
+Asynchronous:
 
 - AI inference;
-- provider callbacks;
-- outbound delivery;
+- provider outbound delivery;
+- webhook downstream processing;
 - workflow timers;
-- document ingestion;
-- evaluation jobs;
-- analytics projections;
-- payment reconciliation.
+- knowledge ingestion;
+- QA sampling;
+- billing reconciliation;
+- analytics projection.
 
-## 6. Canonical Customer Message Flow
+## 6. Canonical Conversation Path
 
 ~~~mermaid
 sequenceDiagram
 participant P as Provider
-participant API as API/Webhook
-participant DOM as Conversation Domain
+participant W as Webhook
+participant D as Conversation Domain
 participant DB as PostgreSQL
-participant BUS as Event Bus
+participant O as Outbox
+participant Q as Queue
 participant R as Routing
-participant AI as AI Runtime
-participant W as Workforce
-P->>API: Provider event
-API->>DOM: Normalize + ingest
-DOM->>DB: Persist message
-DOM->>DB: Persist outbox event
-DB-->>DOM: Commit
-BUS->>R: Message received
-R->>AI: AI assignment when eligible
-R->>W: Human assignment when required
-AI->>DOM: Outbound message request
-DOM->>DB: Persist outbound message
-AI-->>BUS: AI run completed
+participant A as AI
+participant H as Human
+P->>W: Signed event
+W->>D: Normalize + ingest
+D->>DB: Write canonical state
+D->>O: Write event in same TX
+DB-->>D: Commit
+O->>Q: Publish
+Q->>R: Route
+R->>A: Assign AI when eligible
+R->>H: Assign human when required
+A->>D: Create canonical response
+D->>O: Outbound event
 ~~~
 
-Webhook acknowledgement never waits for this entire flow.
+Provider acknowledgement occurs before expensive asynchronous handling.
 
-## 7. Data Ownership
+## 7. Data Source of Truth
 
 PostgreSQL owns:
 
-- organization;
-- memberships;
-- customers;
-- conversations;
-- messages;
-- assignments;
-- AI configuration/run metadata;
+- transactional business state;
+- authorization/membership;
+- conversation/message state;
 - workflow state;
-- quality;
-- billing;
-- usage;
-- audit.
+- billing state;
+- audit records.
 
-Derived systems own:
+Derived systems:
 
-- embeddings;
-- search index;
-- caches;
-- analytics projections.
+- vector/search index;
+- cache;
+- analytics projections;
+- realtime fan-out.
 
 ## 8. AI Boundary
-
-The AI Runtime is behind an application boundary.
 
 ~~~mermaid
 flowchart LR
 CONV[Conversation] --> RUN[AI Run]
-RUN --> POLICY[Policy Resolver]
-POLICY --> ROUTER[Model Router]
-RUN --> CTX[Context Builder]
-CTX --> KNOW[Knowledge]
-RUN --> GUARD[Guardrails]
+RUN --> POLICY[Policy Snapshot]
+POLICY --> CTX[Context Builder]
+CTX --> KNOW[Knowledge Service]
+RUN --> ROUTE[Model Router]
+ROUTE --> MODEL[Model Provider]
+MODEL --> GUARD[Guardrail]
 GUARD --> TOOL[Tool Runtime]
-TOOL --> DOMAIN[Domain Services]
+TOOL --> DOMAIN[Application / Domain]
 DOMAIN --> DB[(PostgreSQL)]
 ~~~
 
-The model cannot bypass Tool Runtime or Domain Services.
+The model cannot directly reach domain persistence.
 
-## 9. Event Boundary
+## 9. Event Consistency
 
-The outbox is the bridge between transactional state and asynchronous consumers.
-
-~~~text
-domain transaction
- -> outbox event
- -> bus
- -> consumers
- -> derived state / external side effect
-~~~
-
-## 10. Failure Isolation
-
-External provider failure should not corrupt canonical state.
-
-Examples:
+Transactional write:
 
 ~~~text
-WhatsApp down
- -> WhatsApp degraded
- -> queued outbound
- -> Telegram/SMS continue
+business mutation
++
+outbox event
+=
+one database transaction
 ~~~
 
-Similarly:
+Event publication after commit is asynchronous.
+
+This creates eventual delivery but prevents a committed state with no corresponding event intent.
+
+## 10. Failure Domains
+
+Target isolation:
 
 ~~~text
-Model provider down
- -> routing/fallback/handoff
- -> conversation remains accessible
+channel provider failure
+ -> one channel degraded
+
+model provider failure
+ -> AI route/fallback/handoff
+
+search failure
+ -> retrieval degraded; deterministic tools remain possible
+
+billing provider failure
+ -> payment pending/reconciliation
+
+queue failure
+ -> async work delayed; transactional state remains
 ~~~
 
-## 11. Scaling Path
+## 11. Scaling Strategy
 
-Initial:
-
-~~~text
-1 API deployment
-1 worker deployment
-managed PostgreSQL
-managed queue/redis
-object storage
-~~~
-
-Scale independently:
+First:
 
 ~~~text
 API replicas
 worker replicas
-AI worker pool
-webhook workers
-workflow workers
-analytics consumers
+managed PostgreSQL
+Redis/queue
+object storage
 ~~~
 
-Split into services only when ownership, load or failure isolation justifies it.
+Then independently scale:
 
-## 12. Architecture Invariants
+- webhook workers;
+- AI workers;
+- workflow workers;
+- integration workers;
+- analytics consumers.
+
+Extract services only when a measurable bottleneck or team ownership boundary justifies it.
+
+## 12. Current Repository Alignment
+
+The repository is presently an implementation scaffold with a thin backend entry point and Next.js application shells.
+
+The documentation therefore defines the target architecture, not a claim that all runtime modules already exist.
+
+Implementation should add the target module boundaries incrementally rather than creating placeholder directories with no ownership.
+
+## 13. Architecture Invariants
 
 - PostgreSQL is transactional truth.
-- Tenant authorization occurs before data access.
-- External providers are adapters.
-- Events are at-least-once.
-- Side effects are idempotent/reconciled.
-- AI is policy constrained.
-- Billing is backend authoritative.
-- Derived stores can be rebuilt.
+- organization context precedes tenant-owned data access.
+- domain rules are not implemented in provider adapters.
+- asynchronous work is durable.
+- model output is not authorization.
+- external side effects are idempotent/reconciled.
+- derived systems can be rebuilt.
 
-## 13. Acceptance Criteria
+## 14. Acceptance
 
-- Domain boundaries are enforceable in code structure.
-- Sync/async boundaries are explicit.
-- AI cannot bypass domain/tool authorization.
-- Provider outages are isolated.
-- Transactional state is separated from derived data.
-- Scaling can occur independently for API and workers.
+The architecture is complete when a feature can be located in one domain, one application boundary, one persistence strategy, one event strategy and one explicit failure model.

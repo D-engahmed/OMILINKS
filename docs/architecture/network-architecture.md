@@ -1,76 +1,69 @@
-# Network Architecture
+# Network Architecture — Implementation Blueprint
 
-> Status: **Target production network/security architecture**
+> Status: **Target production network architecture**
 
 ## 1. Trust Zones
 
 ~~~mermaid
 flowchart TB
-INTERNET((Internet)) --> EDGE[Public Edge]
-PROVIDER[External Providers] --> EDGE
-EDGE --> PUBLIC[Public Application Endpoints]
+INTERNET[Internet / Providers] --> EDGE[Public Edge]
+EDGE --> PUBLIC[Public Endpoints]
 PUBLIC --> APP[Private Application Zone]
 APP --> DATA[Private Data Zone]
 APP --> EGRESS[Controlled Egress]
-MGMT[Management / CI / Admin] --> MGMTEDGE[Restricted Management Zone]
-MGMTEDGE --> APP
+ADMIN[Restricted Management Access] --> APP
 ~~~
 
-## 2. Public Endpoints
+## 2. Public Surface
 
-Public endpoints should be limited to:
+Only these should be public:
 
 - web application;
-- widget;
+- widget endpoint;
 - API;
-- verified provider webhooks;
-- health/readiness when required by infrastructure.
+- provider webhook endpoints;
+- infrastructure health endpoints as necessary.
 
-Databases and internal workers are not public endpoints.
+PostgreSQL, Redis, workers and secret stores are not public.
 
-## 3. Private Application Zone
+## 3. Application Zone
 
-Contains:
+Includes:
 
-- backend API;
-- workers;
-- workflow processors;
+- API;
+- webhook handlers;
+- worker pools;
 - AI runtime;
+- workflow workers;
 - integration adapters.
 
-Services authenticate one another where required.
+Service-to-service access is authenticated as required.
 
 ## 4. Data Zone
 
-Contains:
+Includes:
 
 - PostgreSQL;
 - Redis/queue;
 - object storage;
 - search/vector infrastructure.
 
-Access is restricted to approved application identities.
+Access is restricted by service identity/network policy.
 
-## 5. Egress
+## 5. Egress Policy
 
-External egress is controlled by adapter/service responsibility.
-
-Examples:
+External calls are explicit:
 
 ~~~text
-AI worker -> approved model provider
-integration worker -> approved channel provider
-billing worker -> approved payment provider
+AI worker -> model provider
+integration worker -> channel provider
+billing worker -> payment provider
 automation worker -> n8n
 ~~~
 
-Do not allow arbitrary model-generated URLs to become network destinations.
+A model-generated URL is never allowed to become an arbitrary network destination.
 
 ## 6. Webhook Security
-
-Webhook traffic is public ingress but is still treated as untrusted.
-
-Flow:
 
 ~~~mermaid
 sequenceDiagram
@@ -79,65 +72,47 @@ participant E as Edge
 participant W as Webhook Handler
 participant V as Verifier
 participant DB as Event Store
-P->>E: HTTPS callback
-E->>W: Request
-W->>V: Verify signature/token
-V-->>W: Valid
-W->>DB: Durable event
-W-->>P: Accepted
+P->>E: HTTPS request
+E->>W: Forward request
+W->>V: Verify provider authentication
+V-->>W: Valid / invalid
+W->>DB: Persist only when valid
+W-->>P: Accepted / rejected
 ~~~
 
-## 7. Secret Access
+## 7. Management Plane
 
-Secret manager access is granted only to the identities that require the secret.
+Privileged administrative access requires:
 
-Browser clients never access provider secrets.
-
-## 8. Network Failure
-
-On database/network partition:
-
-- authorization should fail closed for protected writes;
-- queued work remains durable where possible;
-- external provider operations stop/retry according to policy.
-
-## 9. Rate Limiting
-
-Apply limits at:
-
-- edge;
-- credential;
-- organization;
-- route;
-- expensive operation.
-
-Webhooks may also need provider/account-specific burst controls.
-
-## 10. Management Plane
-
-Privileged operations should use:
-
-- restricted network access;
 - strong authentication;
-- audit logs;
-- least-privilege identities.
+- restricted network;
+- least-privilege identity;
+- audit;
+- session/recent-auth controls.
 
-## 11. Monitoring
+## 8. Failure Behavior
 
-Network observability includes:
+If database access is unavailable:
 
-- connection failures;
-- unusual egress;
-- TLS errors;
-- provider latency;
-- webhook source anomalies;
+- protected writes fail closed;
+- durable external side effects stop when safety cannot be established;
+- health endpoint remains useful for diagnosis.
+
+## 9. Monitoring
+
+Detect:
+
+- unusual egress destinations;
+- failed TLS;
+- connection spikes;
+- webhook anomalies;
+- excessive authentication failures;
 - data-zone access anomalies.
 
-## 12. Acceptance Criteria
+## 10. Acceptance
 
-- Database services are not internet-facing.
-- Provider webhooks are verified.
-- External egress is controlled.
-- Secrets are server-side.
-- Management access is restricted and audited.
-- Failure behavior fails closed for protected actions.
+- databases are private;
+- webhook authentication precedes mutation;
+- egress is controlled;
+- management access is restricted;
+- network failures do not weaken authorization.

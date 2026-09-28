@@ -1,245 +1,185 @@
-# Event Architecture
+# Event Architecture — Implementation Blueprint
 
 > Status: **Target production event architecture**
 
-## 1. Purpose
+## 1. Event Semantics
 
-Event architecture connects transactionally committed facts to asynchronous consumers without making the event system a second source of truth.
-
-## 2. Event Classes
-
-### Domain fact
-
-Something happened.
-
-Examples:
+There are three distinct concepts:
 
 ~~~text
-customer.created
-conversation.message.received
-subscription.changed
+Domain fact:
+  something happened.
+
+Work request:
+  something should be processed.
+
+Integration notification:
+  an external boundary changed.
 ~~~
 
-### Work request
+These must not be mixed.
 
-A worker should perform work.
-
-Examples:
-
-~~~text
-ai.run.requested
-workflow.run.requested
-knowledge.ingestion.requested
-~~~
-
-### Integration event
-
-An external boundary changed.
-
-Examples:
-
-~~~text
-integration.webhook.received
-integration.delivery.updated
-~~~
-
-## 3. End-to-End Architecture
+## 2. Transactional Outbox
 
 ~~~mermaid
-flowchart TB
-APP[Application Service] --> TX[DB Transaction]
-TX --> STATE[Business State]
-TX --> OUTBOX[Outbox]
-OUTBOX --> PUB[Publisher]
-PUB --> BUS[Event Bus]
-BUS --> ROUTER[Consumer Router]
+sequenceDiagram
+participant APP as Application Service
+participant DB as PostgreSQL
+participant O as Outbox
+participant PUB as Publisher
+participant BUS as Event Bus
+APP->>DB: Begin transaction
+APP->>DB: Business mutation
+APP->>O: Insert event
+DB-->>APP: Commit
+PUB->>O: Read pending
+PUB->>BUS: Publish
+BUS-->>PUB: Ack
+PUB->>O: Mark published
+~~~
+
+A committed business mutation always creates its required event intent in the same transaction.
+
+## 3. Delivery Semantics
+
+Assume at-least-once.
+
+~~~text
+publish succeeds
+consumer crashes before ack
+message delivered again
+~~~
+
+Therefore every consumer must be idempotent.
+
+## 4. Consumer Inbox
+
+Where needed:
+
+~~~text
+consumer_id
+event_id
+first_seen_at
+processed_at
+result_reference
+status
+~~~
+
+Unique constraint on consumer + event prevents duplicate effects.
+
+## 5. Ordering
+
+No global order.
+
+Partition by aggregate when necessary:
+
+~~~text
+conversation_id
+workflow_run_id
+subscription_id
+~~~
+
+Example: conversation message processing may require in-order handling while independent conversations process concurrently.
+
+## 6. Event Schema
+
+Envelope:
+
+~~~json
+{
+  "event_id": "uuid",
+  "event_type": "conversation.message.received",
+  "version": 1,
+  "occurred_at": "...",
+  "organization_id": "uuid",
+  "actor": {},
+  "correlation_id": "uuid",
+  "causation_id": "uuid",
+  "data": {},
+  "metadata": {}
+}
+~~~
+
+## 7. Event Routing
+
+~~~mermaid
+flowchart TD
+EVENT[Event] --> ROUTER[Event Router]
 ROUTER --> AI[AI]
 ROUTER --> WF[Workflow]
 ROUTER --> BILL[Billing]
 ROUTER --> QA[Quality]
 ROUTER --> ANALYTICS[Analytics]
-ROUTER --> INTEGRATIONS[Integrations]
+ROUTER --> INT[Integrations]
 ~~~
 
-## 4. Outbox
+Consumers should subscribe only to event types they need.
 
-The transaction is:
+## 8. Retry
+
+Failure classes:
 
 ~~~text
-BEGIN
-  business mutation
-  outbox insert
-COMMIT
+transient -> retry
+permanent -> dead letter
+unknown side effect -> reconcile
+authorization -> no retry
+schema invalid -> quarantine
 ~~~
 
-The publisher later reads pending outbox events.
+## 9. Dead Letter
 
-This ensures event publication does not disappear after a successful business transaction.
+Dead-letter record retains:
 
-## 5. Delivery Guarantee
-
-Event delivery is at least once.
-
-Therefore:
-
-~~~text
-consumer(event_id)
-must be safe
-when called twice
-~~~
-
-Exactly-once processing is not assumed across network boundaries.
-
-## 6. Consumer Inbox
-
-For non-idempotent consumers, maintain an inbox/processed-event record:
-
-~~~text
-consumer
-+ event_id
-+ processed_at
-+ result_reference
-~~~
-
-The consumer can safely recognize duplicate delivery.
-
-## 7. Ordering
-
-Order only where business logic requires it.
-
-Example:
-
-~~~text
-conversation A:
-message 1
-message 2
-assignment change
-message 3
-~~~
-
-Partition consumers by conversation when strict per-conversation sequence is required.
-
-Global ordering is avoided because it limits scale.
-
-## 8. Causality
-
-Use:
-
-- correlation_id for the whole operation;
-- causation_id for the direct predecessor.
-
-Example:
-
-~~~text
-provider event
- -> conversation.message.received
- -> ai.run.requested
- -> ai.run.completed
- -> conversation.message.sent
-~~~
-
-## 9. Event Versioning
-
-Events use explicit schema versions.
-
-Breaking semantics create a new version.
-
-Consumers declare supported versions.
-
-## 10. Retry
-
-Retries are classified:
-
-~~~mermaid
-flowchart TD
-EVENT[Event] --> HANDLER[Consumer]
-HANDLER --> OUTCOME{Outcome}
-OUTCOME -->|Success| ACK[Ack]
-OUTCOME -->|Transient| RETRY[Retry Queue]
-RETRY --> HANDLER
-OUTCOME -->|Permanent| DLQ[Dead Letter]
-OUTCOME -->|Unknown Side Effect| RECON[Reconcile]
-RECON --> SAFE[Known State]
-SAFE --> RETRYSAFE[Retry if Safe]
-~~~
-
-## 11. Dead Letters
-
-Dead-letter records include:
-
-- tenant;
 - event;
+- tenant;
 - consumer;
-- version;
-- attempts;
+- attempt count;
 - error;
+- worker version;
 - timestamps;
 - replay state.
 
-Dead letters are operational data, not discarded messages.
+## 10. Replay
 
-## 12. Replay
+Replay is an operator-controlled operation and must preserve original history.
 
-Replay is permissioned.
+It passes through normal consumer idempotency and authorization.
 
-~~~mermaid
-sequenceDiagram
-participant O as Operator
-participant S as Event Store
-participant R as Replay Service
-participant C as Consumer
-O->>S: Select failed event
-O->>R: Authorize replay
-R->>C: Re-deliver
-C->>C: Idempotency check
-C-->>R: Result
-R-->>S: Replay outcome
+## 11. Event Evolution
+
+Compatibility:
+
+~~~text
+add optional field -> compatible
+change field meaning -> new version
+remove required field -> breaking/new version
+change units/semantic -> new version
 ~~~
 
-Replay must preserve original history.
-
-## 13. Schema Registry
-
-Schemas live in the events schema directory and are tested in CI.
-
-Required fixture classes:
-
-- valid minimal;
-- valid full;
-- additive fields;
-- boundary values;
-- invalid;
-- tenant mismatch/security case.
-
-## 14. Event Security
+## 12. Event Security
 
 Never place:
 
 - passwords;
 - API keys;
-- bearer tokens;
-- raw payment credentials.
+- access tokens;
+- raw payment secrets.
 
-Large payloads are stored by durable reference.
+Large payloads are references to durable storage.
 
-## 15. Event Observability
+## 13. Observability
 
-Monitor:
+Measure:
 
 - outbox age;
 - publish lag;
 - consumer lag;
-- retry count;
-- dead letters;
+- retry rate;
 - duplicate rate;
-- per-consumer failure rate.
+- dead-letter count;
+- per-consumer failures.
 
-## 16. Acceptance Criteria
+## 14. Acceptance
 
-- Business state and outbox event commit together.
-- Delivery is treated as at-least-once.
-- Consumers are idempotent.
-- Ordering is per aggregate where required.
-- Replay preserves history.
-- Event versions are explicit.
-- Secrets are excluded.
+Event architecture is complete when every event type has a defined producer, consumer, schema, ordering rule, retry class, dedupe rule and replay behavior.
