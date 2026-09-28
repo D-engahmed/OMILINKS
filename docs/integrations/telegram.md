@@ -1,151 +1,114 @@
-# Telegram Integration
+# Telegram Integration — Implementation Specification
 
-> Status: **Target production integration contract**
+> Status: **Target provider-adapter blueprint**
 
-## 1. Purpose
+## 1. Boundary
 
-Connect Telegram bots to the canonical OMILINKS customer and conversation system while preserving Telegram chat/update semantics.
+TelegramAdapter owns bot authentication, webhook/update parsing, chat semantics and provider delivery.
 
-## 2. Bot Connection
+Core Conversation and Customer domains receive canonical commands.
 
-Store:
+## 2. Connection
 
-- organization;
-- bot identity;
-- credential reference;
-- webhook configuration;
-- status;
-- supported chat/message capabilities;
-- health timestamps.
-
-Lifecycle:
-
-~~~mermaid
-stateDiagram-v2
-    [*] --> CONFIGURING
-    CONFIGURING --> ACTIVE
-    CONFIGURING --> FAILED
-    ACTIVE --> DEGRADED
-    DEGRADED --> ACTIVE
-    ACTIVE --> DISCONNECTED
+~~~text
+organization_id
+bot_id
+credential_ref
+webhook_config
+status
+capabilities
+health
 ~~~
 
-## 3. Update Processing
+## 3. Update Dedupe
 
-Use provider update identity to deduplicate.
+Provider update identity becomes the first dedupe key.
 
 ~~~mermaid
 flowchart LR
-UPDATE[Telegram Update] --> DEDUPE[Dedupe update]
-DEDUPE --> IDENTITY[Bot + Chat + User Mapping]
+UPDATE[Telegram Update] --> DEDUPE[Update ID Constraint]
+DEDUPE --> IDENTITY[Bot + Chat + User]
 IDENTITY --> MESSAGE[Canonical Message]
 MESSAGE --> ROUTE[Routing]
-ROUTE --> AIHUMAN[AI / Human]
-AIHUMAN --> SEND[Outbound Adapter]
 ~~~
+
+A duplicate update must not produce another message.
 
 ## 4. Chat Semantics
 
-Preserve provider chat type.
+Preserve chat type:
 
-Potential classes include:
+~~~text
+private
+group
+other supported type
+~~~
 
-- direct/private;
-- group;
-- other provider-supported chat modes.
+Product policy decides which types can enter customer-support conversations.
 
-The product may restrict supported modes. Unsupported modes must become an explicit integration state instead of being silently treated as ordinary customer conversations.
+Unsupported types become explicit unsupported events.
 
-## 5. Identity
-
-Identity is scoped by:
+## 5. Identity Scope
 
 ~~~text
 organization
 + bot
-+ provider user/chat identity
++ external user/chat identity
 ~~~
 
-A Telegram user ID should never be treated as globally unique across all tenants and bots.
+Provider user IDs are not global customer IDs.
 
-## 6. Outbound Delivery
+## 6. Outbound
 
 ~~~mermaid
 sequenceDiagram
-    participant C as Conversation
-    participant Q as Worker
-    participant A as Telegram Adapter
-    participant P as Telegram
-    C->>Q: Delivery job
-    Q->>A: Send canonical message
-    A->>P: Provider API
-    P-->>A: Result
-    A-->>Q: Normalized status
-    Q->>C: Persist delivery state
+participant C as Conversation
+participant Q as Worker
+participant A as Telegram Adapter
+participant P as Telegram
+C->>Q: Delivery job
+Q->>A: Send
+A->>P: Provider call
+P-->>A: Result
+A-->>Q: Normalized result
+Q->>C: Delivery state
 ~~~
 
 ## 7. Media
 
-Provider media IDs can be retained for later retrieval.
+Media download is asynchronous.
 
-Media download/processing should be asynchronous and bounded by size/type policies.
+Persist provider media ID and processing state before download.
 
 ## 8. Reliability
 
-Provider throttling becomes scheduled retry work.
+- rate limits -> scheduled retry;
+- timeout -> reconcile if outcome is unknown;
+- invalid token -> connection degraded;
+- malformed update -> quarantine.
 
-For unknown side-effect outcomes, reconcile before repeating the operation if duplicate customer-visible action is possible.
+## 9. Security
 
-## 9. Failure Modes
+Bot credentials never enter browser, model or event payload.
 
-| Failure | Behavior |
-|---|---|
-| duplicate update | no duplicate business state |
-| malformed update | quarantine |
-| invalid token | connection error |
-| rate limit | scheduled retry |
-| provider timeout | reconcile |
-| unsupported chat type | explicit unsupported state |
-| media processing failure | attachment failure state |
+The organization binding comes from the integration connection.
 
-## 10. Security
+## 10. Tests
 
-- bot tokens remain server-side;
-- organization binding is server-derived;
-- webhook configuration is controlled server-side;
-- raw credentials never enter events/logs/model context.
+- duplicate update;
+- malformed update;
+- private chat;
+- unsupported chat;
+- media;
+- send timeout;
+- rate limit;
+- invalid token;
+- tenant isolation.
 
 ## 11. Observability
 
-Monitor:
+Measure update throughput, duplicate rate, provider latency, token health, queue age, unsupported events and delivery failures.
 
-- update throughput;
-- duplicate rate;
-- outbound latency;
-- API errors;
-- token health;
-- queue age;
-- unsupported events;
-- media failures.
+## 12. Acceptance
 
-## 12. Testing
-
-- valid update;
-- duplicate update;
-- malformed update;
-- private chat mapping;
-- supported media;
-- unsupported chat;
-- outbound success/failure;
-- rate limiting;
-- timeout;
-- credential revocation;
-- tenant isolation.
-
-## 13. Acceptance Criteria
-
-- Update identity prevents duplicate business state.
-- Chat semantics are preserved.
-- Unsupported modes fail explicitly.
-- Bot credentials remain server-side.
-- Provider degradation is isolated to Telegram.
+Telegram is complete when update dedupe, chat semantics, credential isolation and delivery uncertainty are handled explicitly.

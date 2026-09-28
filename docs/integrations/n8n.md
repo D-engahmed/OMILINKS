@@ -1,166 +1,128 @@
-# n8n Integration
+# n8n Integration — Implementation Specification
 
-> Status: **Target production integration contract**
+> Status: **Target external-automation blueprint**
 
-n8n is an external automation system used to connect OMILINKS with other services. OMILINKS remains authoritative for customer, conversation, authorization, AI policy, workforce and billing state.
+## 1. Boundary
 
-## 1. Integration Modes
+n8n is an external automation engine.
 
-### Outbound trigger
+OMILINKS remains authoritative for:
 
-OMILINKS sends an authenticated event to an n8n workflow.
-
-### Inbound action
-
-An n8n workflow calls a scoped OMILINKS API operation.
-
-### Callback
-
-n8n returns the execution outcome using a correlation identifier.
-
-## 2. Boundary
-
-OMILINKS owns:
-
-- customers;
-- customer identities;
-- conversations;
-- assignments;
-- AI policies;
+- customer;
+- conversation;
+- authorization;
+- AI policy;
 - workflow state;
-- entitlements;
-- payments.
+- billing.
 
-n8n owns external automation execution state.
+## 2. Modes
+
+~~~text
+OMILINKS -> n8n trigger
+n8n -> OMILINKS API action
+n8n -> OMILINKS callback
+~~~
 
 ## 3. Architecture
 
 ~~~mermaid
 sequenceDiagram
-    participant O as OMILINKS
-    participant N as n8n
-    participant X as External System
-    participant C as Callback
-    O->>N: Signed event
-    N->>X: External automation
-    X-->>N: Result
-    N->>C: Authenticated callback
-    C->>O: Correlated outcome
-    O->>O: Update workflow state
+participant O as OMILINKS
+participant N as n8n
+participant X as External System
+participant C as Callback
+O->>N: Authenticated event
+N->>X: External operation
+X-->>N: Result
+N->>C: Authenticated callback
+C->>O: Correlated outcome
+O->>O: Resume workflow
 ~~~
 
 ## 4. Authentication
 
-Outbound events use a signed request or other explicit authentication mechanism.
+Outbound events are signed/authenticated.
 
-Inbound n8n operations use a scoped service principal/API credential.
+Inbound API access uses scoped service credentials.
 
-Do not provide a general OMILINKS administrator credential to n8n.
+Never provide n8n an unrestricted administrator credential.
 
-## 5. Tenant Scope
+## 5. Tenant Binding
 
-Every connection is bound to an organization and optional subordinate scope.
+Connection includes:
 
-An n8n request cannot switch organization through a customer-supplied organization ID.
+~~~text
+organization_id
+scope
+credential identity
+~~~
 
-Resource ownership is resolved server-side.
+Every referenced resource is resolved within that organization/scope.
 
 ## 6. Idempotency
 
-Every n8n-triggered mutation uses an idempotency key based on:
+Use:
 
 ~~~text
-n8n execution/correlation
+n8n execution ID
 + semantic operation
 ~~~
 
-Duplicate workflow retries must not duplicate customer-facing or financial side effects.
+as the basis for idempotency.
 
-## 7. Long-Running Automation
+Duplicate execution cannot create duplicate financial/customer-visible effects.
 
-Do not hold an HTTP request open while n8n runs.
+## 7. Long Running Work
 
-OMILINKS stores a waiting state:
+Do not hold an HTTP request open.
 
-~~~text
-workflow step
- -> WAITING_EXTERNAL
- -> callback
- -> RESUME
-~~~
-
-A timeout becomes an explicit workflow failure/escalation state.
-
-## 8. Workflow Interaction
-
-n8n can perform external work while OMILINKS controls the business boundary.
-
-Example:
+Persist:
 
 ~~~text
-OMILINKS workflow
- -> n8n CRM sync
- -> CRM operation
- -> n8n callback
- -> OMILINKS records sync result
+WAITING_EXTERNAL
+correlation_id
+timeout_at
 ~~~
 
-If n8n is unavailable, OMILINKS retains the workflow state and retries according to policy.
+Callback resumes the durable workflow.
 
-## 9. Failure Modes
+## 8. Failure Matrix
 
 | Failure | Behavior |
 |---|---|
 | invalid credential | reject |
 | n8n unavailable | queue/retry |
 | duplicate action | idempotent |
-| delayed callback | remain waiting until timeout |
 | callback duplicate | idempotent |
-| external workflow error | step failure with reason |
-| callback never arrives | timeout + escalation |
-| unauthorized tenant resource | deny |
+| callback delayed | remain waiting |
+| callback timeout | explicit failure/escalation |
+| external workflow failure | step failure |
+| cross-tenant resource | deny |
 
-## 10. Security
+## 9. Security
 
-- scoped service identities;
-- authenticated inbound calls;
-- signed outbound events;
-- no unrestricted internal APIs;
-- credentials referenced through secrets infrastructure;
-- all n8n-triggered mutations audited.
+- scoped service identity;
+- signed outbound payloads;
+- no internal database/API bypass;
+- secrets server-side;
+- mutation audit.
 
-## 11. Observability
+## 10. Observability
 
-Track:
+Track n8n execution ID, correlation ID, request latency, callback latency, retries, waiting duration and timeout rate.
 
-- n8n execution ID;
-- OMILINKS correlation ID;
-- request latency;
-- callback latency;
-- retry count;
-- waiting duration;
-- timeout count;
-- external workflow error;
-- tenant.
+## 11. Tests
 
-## 12. Testing
-
-- trigger success;
-- invalid credentials;
-- duplicate action;
-- callback success;
-- duplicate callback;
+- trigger;
+- credential failure;
+- duplicate;
 - delayed callback;
+- callback duplicate;
 - n8n outage;
 - timeout;
 - cross-tenant action;
 - workflow recovery.
 
-## 13. Acceptance Criteria
+## 12. Acceptance
 
-- n8n cannot bypass OMILINKS authorization.
-- Long-running external automation is durable.
-- Duplicate execution is safe.
-- Callback outcomes are correlated and auditable.
-- Provider failure does not corrupt workflow state.
-- OMILINKS remains source of truth.
+n8n is integrated correctly when it remains an external execution dependency rather than becoming OMILINKS business-data authority.
