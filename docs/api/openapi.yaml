@@ -1,0 +1,6 @@
+openapi: 3.1.0
+info:
+  title: OMILINKS API
+  version: 0.1.0
+  description: API contract scaffold for the OMILINKS platform.
+paths: {}
