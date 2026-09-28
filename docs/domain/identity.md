@@ -1,63 +1,102 @@
-# Identity Domain
+# Identity Domain — Implementation Specification
 
-> Status: **Target production domain contract**
->
-> Identity defines people, machine principals, memberships, roles, permissions, sessions, and credentials.
+> Status: **Target implementation blueprint**
 
-## 1. Identity vs Access
+Identity separates human/service principals from organization membership and effective permissions.
 
-Identity answers **who is this principal?**
+## 1. Core Model
 
-Authorization answers **what may this principal do here?**
-
-OMILINKS must not encode tenant access directly on the global User record.
-
-## 2. Core Entities
-
-| Entity | Purpose |
-|---|---|
-| User | human identity |
-| Membership | relationship between User and Organization |
-| Role | reusable permission bundle |
-| Permission | atomic capability |
-| ScopeBinding | limits permission to client/program/sector/team/site/etc. |
-| ServicePrincipal | machine identity |
-| Session | authenticated runtime session |
-| APIKey | long-lived integration credential |
-| Credential | encrypted provider secret reference |
-
-## 3. Membership Model
-
-Conceptual relationship:
-
-```mermaid
+~~~mermaid
 erDiagram
-USER ||--o{ MEMBERSHIP : has
-ORGANIZATION ||--o{ MEMBERSHIP : contains
-MEMBERSHIP ||--o{ SCOPE_BINDING : limits
-ROLE ||--o{ ROLE_PERMISSION : grants
-PERMISSION ||--o{ ROLE_PERMISSION : included
-MEMBERSHIP }o--|| ROLE : assigned
-SERVICE_PRINCIPAL }o--o{ PERMISSION : grants
-```
+    USER ||--o{ MEMBERSHIP : has
+    ORGANIZATION ||--o{ MEMBERSHIP : contains
+    MEMBERSHIP }o--|| ROLE : uses
+    ROLE ||--o{ ROLE_PERMISSION : grants
+    PERMISSION ||--o{ ROLE_PERMISSION : included
+    MEMBERSHIP ||--o{ SCOPE_BINDING : limits
+    SERVICE_PRINCIPAL ||--o{ SERVICE_PERMISSION : grants
+~~~
 
-A user can belong to multiple organizations with different roles and scopes.
+## 2. User Record
 
-Example:
+User stores identity, not tenant authorization.
 
-```text
-User Ahmed
-  -> Organization A: Admin
-  -> Organization B: Supervisor, Team-7 only
-```
+Conceptual fields:
 
-The second membership must never inherit the first one's access.
+~~~text
+user_id
+email/identity_handle
+display_name
+status
+created_at
+updated_at
+~~~
 
-## 4. Permissions
+There is no global tenant role field.
 
-Permissions should be expressed as stable capabilities:
+## 3. Membership
 
-```text
+Membership represents access to one organization:
+
+~~~text
+membership_id
+user_id
+organization_id
+status
+role_id
+version
+created_at
+updated_at
+~~~
+
+## 4. Authorization Calculation
+
+Effective access is the intersection of:
+
+~~~text
+role permissions
+INTERSECT scope
+INTERSECT resource ownership
+INTERSECT resource state
+INTERSECT entitlement where applicable
+~~~
+
+## 5. Authorization Flow
+
+~~~mermaid
+flowchart TD
+PRINCIPAL[Principal] --> MEMBERSHIP[Active Membership]
+MEMBERSHIP --> ROLE[Role Permissions]
+MEMBERSHIP --> SCOPE[Scope Bindings]
+REQUEST[Resource Request] --> OWNERSHIP[Resource Ownership]
+ROLE --> CHECK[Authorization]
+SCOPE --> CHECK
+OWNERSHIP --> CHECK
+REQUEST --> CHECK
+CHECK --> DECISION{Allow?}
+DECISION -->|yes| USE[Application Service]
+DECISION -->|no| DENY[Reject]
+~~~
+
+## 6. Service Principals
+
+Examples:
+
+~~~text
+whatsapp-webhook
+workflow-worker
+ai-runtime
+billing-reconciler
+analytics-consumer
+~~~
+
+Each gets explicit permissions and organization/scope binding when tenant-specific.
+
+## 7. Permission Vocabulary
+
+Examples:
+
+~~~text
 customer.read
 customer.write
 conversation.read
@@ -67,155 +106,149 @@ workforce.manage
 ai.configure
 ai.execute
 tool.execute
+quality.review
 billing.read
 billing.manage
+integration.manage
 organization.manage
-```
+~~~
 
-Roles are collections of permissions and are not a substitute for resource-level checks.
+Roles are reusable bundles, not the final authorization decision.
 
-## 5. Authorization Decision
+## 8. Membership Lifecycle
 
-```mermaid
-flowchart LR
-P[Principal] --> M[Membership]
-M --> ROLE[Role]
-ROLE --> PERM[Permission]
-M --> SCOPE[Scope Binding]
-PERM --> CHECK[Permission Check]
-SCOPE --> CHECK
-RESOURCE[Requested Resource] --> CHECK
-CHECK --> DECISION{Allow?}
-DECISION -->|yes| USE[Use Case]
-DECISION -->|no| DENY[Deny]
-```
-
-Authorization should evaluate:
-
-```text
-principal
-+ organization
-+ permission
-+ resource
-+ resource ownership
-+ effective scope
-+ resource state
-+ capability policy
-```
-
-## 6. Service Principals
-
-Service identities are required for:
-
-- webhook processors;
-- background workers;
-- scheduled jobs;
-- AI runtime;
-- integration adapters;
-- CI/deployment automation where applicable.
-
-They must not impersonate human administrators unless the operation explicitly defines a delegated identity.
-
-## 7. Sessions
-
-Sessions should contain enough information to identify the principal but not enough authority to bypass current authorization.
-
-Important consequence:
-
-Role changes should become effective without requiring the user to continue using an old authorization snapshot indefinitely.
-
-High-risk administrative actions may require fresh authentication.
-
-## 8. Credential Lifecycle
-
-```mermaid
+~~~mermaid
 stateDiagram-v2
-    [*] --> ISSUED
-    ISSUED --> ACTIVE
-    ACTIVE --> ROTATION_PENDING
-    ROTATION_PENDING --> ACTIVE
+    [*] --> INVITED
+    INVITED --> ACTIVE
+    INVITED --> EXPIRED
+    ACTIVE --> SUSPENDED
+    SUSPENDED --> ACTIVE
     ACTIVE --> REVOKED
-    ACTIVE --> EXPIRED
     REVOKED --> [*]
-    EXPIRED --> [*]
-```
+~~~
 
-Credential material is separate from authorization metadata.
+Invitation acceptance never implies organization-wide administrator access.
 
-## 9. Organization Switching
+## 9. Credential Separation
 
-When a user switches organizations:
+Keep separate:
 
-1. the client requests the target organization context;
-2. the server verifies an active membership;
-3. the server resolves effective scopes;
-4. all subsequent queries use the new organization context.
+- browser/session credentials;
+- public API keys;
+- internal service credentials;
+- provider credentials.
 
-The browser cannot switch tenant by changing an ID in local state.
+Each has distinct rotation/revocation behavior.
 
-## 10. Privileged Changes
+## 10. Organization Switching
 
-Require stronger controls for:
+For a multi-organization user:
+
+~~~text
+request target organization
+ -> verify active membership
+ -> resolve effective scope
+ -> establish request tenant context
+ -> query only inside that context
+~~~
+
+The browser cannot grant itself a membership.
+
+## 11. Authorization Cache
+
+If authorization is cached, the key needs all relevant inputs:
+
+~~~text
+principal
+organization
+role version
+scope version
+permission
+resource type
+resource identity when required
+~~~
+
+Membership/role changes invalidate relevant entries.
+
+## 12. Privileged Operations
+
+Require stronger controls where appropriate for:
 
 - owner transfer;
-- role/permission policy changes;
-- API key creation/revocation;
-- provider credential changes;
-- billing administrator changes;
-- AI tool enablement;
-- export permissions.
+- role changes;
+- service principal creation;
+- API key creation;
+- provider credentials;
+- bulk exports;
+- billing administration.
 
-These changes should generate audit records.
+## 13. Audit
 
-## 11. Failure Modes
+Record:
+
+~~~text
+actor
+organization
+target principal
+previous state
+new state
+action
+timestamp
+correlation_id
+~~~
+
+Do not place secrets in audit events.
+
+## 14. Concurrency
+
+Membership mutations are versioned.
+
+Example:
+
+~~~text
+admin A revokes membership version 4
+admin B updates role using version 4
+=> conflict
+~~~
+
+This prevents stale administration from resurrecting access.
+
+## 15. Cross-Domain Contracts
+
+Tenancy owns organization identity.
+
+Workforce represents operational members but does not grant authorization.
+
+AI uses independent service/agent policy.
+
+Billing permissions are separate.
+
+Integrations use service identities.
+
+## 16. Failure Modes
 
 | Failure | Behavior |
 |---|---|
-| invalid credentials | authenticate failure, no domain mutation |
-| inactive membership | deny organization access |
-| missing permission | deny operation |
-| expired credential | require renewal/reauth |
-| revoked service identity | reject job/request |
-| stale authorization cache | revalidate before high-risk mutation |
+| invalid credential | 401 |
+| revoked membership | deny |
+| missing permission | 403/404 per disclosure policy |
+| invalid scope | deny |
+| revoked service identity | reject work |
+| stale authorization cache | refresh/revalidate |
+| suspicious privileged action | audit/alert |
 
-## 12. Cross-Domain Contracts
+## 17. Security Tests
 
-### Tenancy
+- cross-tenant read;
+- role escalation;
+- scope escalation;
+- revoked membership;
+- stale session after revocation;
+- service principal overreach;
+- API key after revocation;
+- owner transfer race.
 
-Membership references organization and scope.
+## 18. Acceptance
 
-### Workforce
-
-Workforce role is operational; authorization still comes from Membership.
-
-### AI
-
-An AI agent does not inherit all permissions of the human who created it.
-
-### Billing
-
-Billing management is permissioned independently from product usage.
-
-## 13. Audit Model
-
-Capture at minimum:
-
-- actor principal;
-- organization;
-- action;
-- target resource;
-- old/new access state where appropriate;
-- timestamp;
-- correlation ID;
-- result.
-
-Do not log raw authentication secrets.
-
-## 14. Acceptance Criteria
-
-- A user can have different access in different organizations.
-- A membership scope cannot be widened by client input.
-- Service principals have explicit permissions.
-- Revoked credentials fail immediately enough for the security requirement.
-- AI agents do not inherit human administrator privileges.
-- Privileged access changes are auditable.
+Authentication, membership, scope, permission, credential lifecycle and revocation must each be independently testable.

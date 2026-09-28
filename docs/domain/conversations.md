@@ -1,99 +1,59 @@
-# Conversations Domain
+# Conversations Domain — Implementation Specification
 
-> Status: **Target production domain contract**
->
-> Conversations are the canonical operational record connecting customers, channels, workforce, AI, workflows, delivery, and quality.
+> Status: **Target implementation blueprint**
 
-## 1. Domain Responsibility
+Conversation is the canonical operational aggregate connecting customer identity, messages, channels, workforce control, AI, workflows, delivery and quality.
 
-The Conversation domain owns:
+## 1. Aggregate
 
-- conversation lifecycle;
-- participants;
-- message records;
-- attachments/media references;
-- assignment/control state;
-- delivery state;
-- conversation tags and operational metadata;
-- customer-visible timeline semantics.
-
-Channel adapters own provider-specific protocol behavior. The Conversation domain owns the canonical representation.
-
-## 2. Core Model
-
-```mermaid
+~~~mermaid
 erDiagram
-ORGANIZATION ||--o{ CONVERSATION : owns
-CUSTOMER ||--o{ CONVERSATION : participates
-CONVERSATION ||--o{ PARTICIPANT : has
-CONVERSATION ||--o{ MESSAGE : contains
-CONVERSATION ||--o{ ATTACHMENT : contains
-CONVERSATION ||--o{ ASSIGNMENT : has
-CONVERSATION ||--o{ DELIVERY : tracks
-CONVERSATION ||--o{ TAG : has
-```
+    ORGANIZATION ||--o{ CONVERSATION : owns
+    CUSTOMER ||--o{ CONVERSATION : participates
+    CONVERSATION ||--o{ MESSAGE : contains
+    CONVERSATION ||--o{ ASSIGNMENT : records
+    CONVERSATION ||--o{ DELIVERY : tracks
+    CONVERSATION ||--o{ ATTACHMENT : contains
+~~~
 
-## 3. Conversation Identity
+## 2. Conversation Record
 
-A provider conversation/thread identifier may be stored, but the internal `conversation_id` is authoritative.
+Minimum fields:
 
-Possible relationship:
+~~~text
+conversation_id
+organization_id
+customer_id
+status
+control_owner
+control_version
+channel
+priority
+last_message_at
+sla_deadline_at
+version
+created_at
+updated_at
+resolved_at
+~~~
 
-```text
-Organization
-  -> ChannelAccount
-    -> ProviderThread
-      -> Conversation
-```
+Status and control owner are separate fields because they answer different questions.
 
-Do not assume one customer equals one conversation. Customers may have multiple active or historical conversations depending on channel and product policy.
+## 3. Control Model
 
-## 4. Message Model
+Control owner:
 
-Messages are append-oriented facts.
+~~~text
+HUMAN
+AI
+QUEUE
+~~~
 
-Important fields:
+This controls who may produce autonomous/customer-visible actions at a given point.
 
-- message ID;
-- conversation ID;
-- direction: inbound/outbound;
-- author type: customer/human/AI/system;
-- content representation;
-- provider message ID;
-- timestamps;
-- delivery status;
-- attachment references;
-- correlation ID.
+## 4. Conversation Lifecycle
 
-Edits, retries, and corrections should preserve the original fact rather than rewriting history without trace.
-
-## 5. Inbound Processing
-
-```mermaid
-sequenceDiagram
-participant P as Provider
-participant W as Webhook Adapter
-participant DB as Conversation Store
-participant Q as Queue
-participant R as Routing
-participant AI as AI Runtime
-P->>W: Incoming message
-W->>W: Verify + normalize
-W->>DB: Persist provider event
-W->>DB: Upsert conversation/message
-W->>Q: Enqueue processing
-Q->>R: Routing decision
-R->>AI: Assign AI when eligible
-AI-->>DB: Run + response state
-```
-
-Webhook acknowledgement should not depend on model completion.
-
-## 6. Conversation State
-
-Suggested state machine:
-
-```mermaid
+~~~mermaid
 stateDiagram-v2
     [*] --> OPEN
     OPEN --> ASSIGNED
@@ -106,65 +66,82 @@ stateDiagram-v2
     REOPENED --> ASSIGNED
     OPEN --> SPAM
     SPAM --> [*]
-    RESOLVED --> [*]
-```
+~~~
 
-Actual states may vary by workflow, but every transition must be explicit.
+Transitions are domain commands rather than arbitrary field updates.
 
-## 7. Conversation Control
+## 5. Message Record
 
-Separate conversation business status from **control owner**.
+Conceptual fields:
 
-Example:
+~~~text
+message_id
+conversation_id
+direction
+author_type
+content
+content_type
+provider_message_id
+client_message_id
+status
+occurred_at
+created_at
+version
+~~~
 
-```text
-status = ASSIGNED
-control = HUMAN
-```
+Messages are append-oriented facts.
 
-or:
+Edits/redactions preserve history where the product/legal model requires it.
 
-```text
-status = ASSIGNED
-control = AI
-```
+## 6. Inbound Transaction
 
-This distinction is required for safe AI/human handoff.
+~~~mermaid
+sequenceDiagram
+participant P as Provider
+participant W as Webhook
+participant D as Conversation Domain
+participant DB as PostgreSQL
+participant O as Outbox
+participant Q as Queue
+P->>W: Verified provider event
+W->>D: Normalized message
+D->>DB: Persist canonical message
+D->>O: Persist message event
+DB-->>D: Commit
+D->>Q: Queue processing
+W-->>P: Acknowledge
+~~~
 
-## 8. Control Version
+AI inference never belongs in the webhook transaction.
 
-Each conversation maintains a monotonic `control_version`.
+## 7. Dedupe
 
-```text
-AI run starts at version 41
-Human takeover increments conversation to 42
-AI run finishes with version 41
-AI send checks 41 != 42
-send is rejected as stale
-```
+Recommended key:
 
-This protects against delayed model responses.
+~~~text
+organization
++ provider
++ provider_account
++ provider_message_id
+~~~
 
-## 9. Assignment
+At the integration boundary, provider event IDs can provide an earlier dedupe layer.
 
-Assignments are durable records, not merely a mutable `assignee_id` field.
+## 8. Outbound Creation
 
-An assignment should capture:
+~~~text
+authorize send
+ -> create canonical outbound message
+ -> create delivery job/outbox
+ -> COMMIT
+ -> send provider request asynchronously
+~~~
 
-- workforce member;
-- queue/team;
-- actor who assigned;
-- timestamp;
-- reason;
-- assignment version/state.
+Canonical creation and provider delivery are intentionally separate.
 
-The latest active assignment can be derived while history remains immutable.
+## 9. Delivery State
 
-## 10. Delivery
-
-Outbound message lifecycle should distinguish business creation from provider delivery.
-
-```mermaid
+~~~mermaid
 stateDiagram-v2
     [*] --> CREATED
     CREATED --> QUEUED
@@ -174,103 +151,130 @@ stateDiagram-v2
     SENT --> FAILED
     FAILED --> RETRYING
     RETRYING --> SENDING
-```
+    SENDING --> UNKNOWN
+    UNKNOWN --> RECONCILING
+    RECONCILING --> SENT
+    RECONCILING --> FAILED
+~~~
 
-A message can be a valid business record even if the external provider failed to deliver it.
+UNKNOWN exists because a network timeout does not prove that the provider did not send.
 
-## 11. Idempotency
+## 10. Human Takeover Race
 
-Provider messages require a dedupe key such as:
+The conversation control version is monotonic.
 
-```text
-(organization_id, provider, provider_account_id, provider_message_id)
-```
+~~~text
+AI starts with control version 41
+human takeover -> version 42
+AI resumes with version 41
+=> stale continuation
+=> customer send rejected
+~~~
 
-Outbound idempotency should use a canonical message ID or semantic request key so worker retries cannot send multiple customer-visible messages.
+This check happens immediately before the side effect.
+
+## 11. Assignment
+
+Assignment history records:
+
+~~~text
+assignment_id
+conversation_id
+workforce_member_id
+team/queue
+reason
+assigned_by
+assigned_at
+released_at
+routing_decision_id
+~~~
+
+Assignment races require a transaction/version strategy.
 
 ## 12. Attachments
 
-Store metadata and object-storage references rather than putting large binary data in PostgreSQL.
+Metadata:
 
-Attachment metadata may include:
+~~~text
+attachment_id
+message_id
+object_key
+mime_type
+size
+checksum
+provider_media_id
+processing_state
+~~~
 
-- MIME type;
-- size;
-- storage reference;
-- checksum;
-- provider media ID;
-- scan/processing state.
+Binary content belongs in object storage.
 
-## 13. Conversation Search
+## 13. SLA
 
-Search must retain organization and permission scope in the query itself.
+Conversation SLA data can include:
 
-Do not implement:
+~~~text
+first_response_deadline
+resolution_deadline
+priority
+sla_policy_version
+~~~
 
-```text
-search globally -> filter results in UI
-```
+SLA calculations reference the policy version used.
 
-Prefer:
+## 14. Concurrency Cases
 
-```text
-search within authorized organization/scope
-```
+Critical races:
 
-## 14. Cross-Domain Contracts
+- duplicate inbound message;
+- simultaneous assignment;
+- human takeover vs AI send;
+- resolve vs reopen;
+- duplicate outbound retry.
 
-### Customers
-
-Conversation belongs to canonical Customer where identity is known.
-
-### Routing
-
-New work produces a routing request and assignment decision.
-
-### Workforce
-
-Assignments and human takeover live in workforce/control boundaries.
-
-### AI
-
-AI runs are attached to a conversation and obey control/version state.
-
-### Quality
-
-Conversation evidence can be sampled for evaluation without modifying message facts.
-
-### Billing
-
-Message and AI events can feed usage metering.
+Each has explicit idempotency or transaction protection.
 
 ## 15. Failure Modes
 
 | Failure | Behavior |
 |---|---|
-| duplicate inbound event | return existing message state |
-| provider send timeout | preserve message, mark uncertain/retry according to provider semantics |
-| stale AI continuation | reject send, mark run stale/cancelled |
-| assignment race | use version/lock; only one valid winner |
-| conversation closed during processing | cancel or re-evaluate pending action |
-| unauthorized read | deny without cross-tenant leakage |
+| duplicate inbound | idempotent |
+| stale AI send | reject |
+| provider timeout | unknown + reconcile |
+| provider 429 | retry queue |
+| assignment race | conflict/re-evaluate |
+| closed conversation | reject incompatible mutation |
+| attachment failure | message preserved; attachment failed |
+| event publication failure | outbox retry |
 
-## 16. Audit Requirements
+## 16. Cross-Domain Contracts
 
-Audit:
+Customer owns identity.
 
-- assignment changes;
-- human takeover/release;
-- message deletion/redaction where supported;
-- state transitions with operational impact;
-- privileged export;
-- AI auto-send enable/disable.
+Routing selects owner.
 
-## 17. Acceptance Criteria
+Workforce changes operational control.
 
-- Duplicate provider messages create one canonical message.
-- Human takeover blocks stale autonomous sends.
-- Outbound retries do not create duplicate customer-visible messages.
-- Conversation history remains traceable after delivery failure.
-- Search is tenant/scope restricted.
-- Assignments are concurrency-safe.
-- Conversation state transitions are validated.
+AI executes under policy.
+
+Tools perform bounded business actions.
+
+Quality samples conversation evidence.
+
+Billing consumes usage facts.
+
+## 17. Test Vectors
+
+- duplicate webhook;
+- duplicate outbound request;
+- two simultaneous assignments;
+- takeover during AI generation;
+- timeout after provider send;
+- resolve during worker execution;
+- reopen race;
+- attachment failure;
+- cross-tenant conversation ID;
+- unauthorized outbound send.
+
+## 18. Acceptance
+
+A conversation implementation is complete only when message dedupe, control races, delivery uncertainty, assignment concurrency and tenant isolation are independently proven.

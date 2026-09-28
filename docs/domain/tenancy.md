@@ -1,82 +1,62 @@
-# Tenancy Domain
+# Tenancy Domain — Implementation Specification
 
-> Status: **Target production domain contract**
->
-> The tenancy model is the root of authorization, data isolation, billing ownership, reporting scope, and BPO hierarchy.
+> Status: **Target implementation blueprint**
 
-## 1. Domain Responsibility
+The Tenancy domain is the root ownership model for organizations, BPO client accounts, programs, sectors, teams, sites and memberships.
 
-The tenancy domain answers:
+## 1. Aggregate Boundary
 
-- Which organization owns a resource?
-- Which organizational scope contains that resource?
-- Which users/services are members?
-- Which client/program/sector/team/site does a user or workload operate within?
-- What lifecycle state is the organization in?
+~~~text
+Organization
+  -> ClientAccount
+  -> Program
+  -> Sector
+  -> Team
+  -> Site
+~~~
 
-The domain does **not** decide individual API permissions; identity/authorization consumes its membership and scope model.
+Membership is associated with Organization while authorization is defined by Identity.
 
-## 2. Business Model
+## 2. Relational Model
 
-OMILINKS must support two operating modes without two separate architectures:
+~~~mermaid
+erDiagram
+    ORGANIZATION ||--o{ CLIENT_ACCOUNT : owns
+    ORGANIZATION ||--o{ PROGRAM : owns
+    CLIENT_ACCOUNT ||--o{ PROGRAM : scopes
+    PROGRAM ||--o{ SECTOR : contains
+    SECTOR ||--o{ TEAM : contains
+    ORGANIZATION ||--o{ SITE : owns
+    ORGANIZATION ||--o{ MEMBERSHIP : has
+~~~
 
-### Direct business
+Every tenant-owned table should expose organization_id unless there is a deliberate architectural reason not to.
 
-`Organization -> Program/Sector/Team -> Workforce -> Customer Operations`
+## 3. Organization Record
 
-### BPO/service provider
+Minimum fields:
 
-`Organization -> ClientAccount -> Program -> Sector -> Team -> Workforce -> Customer Operations`
+~~~text
+id
+slug
+name
+status
+created_at
+updated_at
+version
+closed_at
+~~~
 
-`ClientAccount` is optional. It represents a client served by the operating organization; it is not a tenant/security boundary.
+Recommended uniqueness:
 
-## 3. Core Entities
+~~~text
+id
+slug within its public routing namespace
+~~~
 
-| Entity | Responsibility | Ownership |
-|---|---|---|
-| Organization | hard tenant boundary | root |
-| ClientAccount | external client served by BPO | Organization |
-| Program | operational service/program | Organization, optionally ClientAccount |
-| Sector | business partition under a program | Organization |
-| Team | workforce operating unit | Organization |
-| Site | physical/logical operating location | Organization |
-| Membership | user access to organization/scopes | Organization |
-| OrganizationSettings | tenant-level configuration | Organization |
-| TenantQuota | effective capacity/plan limits | Organization |
+## 4. Organization Lifecycle
 
-## 4. Ownership Invariant
-
-Every tenant-owned row must have an unambiguous ownership path.
-
-Preferred pattern:
-
-```text
-resource.organization_id -> organization.id
-```
-
-Do not infer ownership through multiple nullable relations during authorization.
-
-If a child has a natural parent such as `Team -> Sector -> Program`, it may also retain `organization_id` when that makes tenant predicates and row-level security safer. The application must enforce consistency between the direct organization ID and parent ownership.
-
-## 5. Hierarchy
-
-```mermaid
-flowchart TB
-ORG[Organization] --> CLIENT[Client Account]
-ORG --> PROGRAM[Program]
-CLIENT --> PROGRAM
-PROGRAM --> SECTOR[Sector]
-SECTOR --> TEAM[Team]
-ORG --> SITE[Site]
-TEAM --> MEMBERS[Membership Scope]
-MEMBERS --> USER[User]
-```
-
-The hierarchy represents organizational scope. It must not become an accidental permission hierarchy where child objects automatically grant access.
-
-## 6. Organization Lifecycle
-
-```mermaid
+~~~mermaid
 stateDiagram-v2
     [*] --> PROVISIONING
     PROVISIONING --> ACTIVE
@@ -87,140 +67,185 @@ stateDiagram-v2
     ACTIVE --> CLOSING
     SUSPENDED --> CLOSING
     CLOSING --> CLOSED
-```
+~~~
 
-### Provisioning
+Transitions are implemented in one domain/application boundary.
 
-An organization is not usable until mandatory defaults exist:
+## 5. Atomic Provisioning
 
-- owner membership;
-- initial site if the product requires one;
-- billing/subscription state;
-- default configuration;
-- required authorization roles.
+Tenant creation should be one application use case.
 
-Provisioning must be idempotent so repeated signup requests cannot create duplicate tenants.
+~~~text
+BEGIN
+  create organization
+  create owner membership
+  create required roles/permissions
+  create default site when required
+  create subscription/trial state
+  create organization settings
+  create provisioning outbox event
+COMMIT
+~~~
 
-## 7. BPO Client Boundary
+External email/payment/provider calls happen after commit.
 
-`ClientAccount` exists to model the commercial/operational client relationship.
+## 6. Idempotency
 
-It may own:
+Provisioning needs a semantic identity such as a signup request ID.
 
-- programs;
-- client-facing configuration;
-- SLA definitions;
-- reporting scope;
-- client-specific knowledge;
-- approved integrations;
-- routing rules.
+Repeated provisioning attempts return the prior result or deterministic conflict.
 
-It does not replace `Organization` in any database ownership or authorization query.
+A retry must never create a second Organization for the same logical signup.
 
-## 8. Scope Model
+## 7. BPO Hierarchy
 
-Effective scope can be:
+BPO mode:
 
-```text
-organization
-client_account
-program
-sector
-team
-site
-```
+~~~text
+Organization
+ -> ClientAccount
+    -> Program
+       -> Sector
+          -> Team
+~~~
 
-Scopes are additive constraints. A membership with team scope does not automatically gain organization-wide access.
+Direct-business mode:
 
-## 9. Cross-Domain Contracts
+~~~text
+Organization
+ -> Program
+    -> Sector
+       -> Team
+~~~
 
-### Identity
+Both modes use one authorization architecture.
 
-Identity creates and manages Membership records against organizations and scopes.
+## 8. Ownership Consistency
 
-### Workforce
+Example invariant:
 
-Teams and sites provide workforce placement and routing scope.
+~~~text
+team.organization_id
+==
+team.sector.organization_id
+~~~
 
-### Billing
+If organization_id is denormalized on children for isolation performance, every mutation validates parent/child consistency.
 
-Organization owns subscription, entitlement, and usage.
+## 9. Scope Binding
 
-### Integrations
+Supported scopes:
 
-Channel/provider accounts belong to an organization and may additionally be constrained to client/program scope.
+- organization;
+- client account;
+- program;
+- sector;
+- team;
+- site.
 
-### Analytics
+Scope narrows access. Scope does not grant permission by itself.
 
-Every tenant-owned metric must retain organization identity and any valid subordinate scope.
+## 10. Commands
 
-## 10. Critical Queries
+Conceptual commands:
 
-All of these must be tenant-scoped:
+~~~text
+CreateOrganization
+ActivateOrganization
+SuspendOrganization
+ResumeOrganization
+CloseOrganization
+CreateClientAccount
+CreateProgram
+CreateSector
+CreateTeam
+CreateSite
+MoveTeam
+~~~
 
-- list organizations available to a user;
-- list memberships;
-- resolve a team;
-- list conversations for a program;
-- export customers;
-- retrieve usage;
-- retrieve AI traces;
-- retrieve quality evaluations.
+Every command carries actor, organization and correlation context.
 
-The same object ID must not be queried globally and filtered afterward.
+## 11. Queries
 
-## 11. Concurrency
+Examples:
 
-Organization provisioning requires an idempotency key or unique identity constraint for the initiating signup flow.
+~~~text
+GetOrganizationForPrincipal
+ListAccessiblePrograms
+ListTeamsForScope
+GetOrganizationHierarchy
+GetOrganizationSettings
+~~~
 
-Hierarchy operations must reject stale parent versions if the product allows concurrent administrative editing.
+All tenant queries include explicit organization/scope conditions.
 
-Deletion/closure is a lifecycle workflow rather than a direct cascade from the UI.
+## 12. Concurrency
 
-## 12. Failure Modes
+Hierarchy mutations use version checking or transactional locking.
 
-| Failure | Required behavior |
+Example:
+
+~~~text
+admin A reads team version 7
+admin B changes team -> version 8
+admin A writes version 7
+=> 409 CONFLICT
+~~~
+
+Never silently overwrite.
+
+## 13. Close Semantics
+
+Closing is a workflow:
+
+~~~text
+ACTIVE
+ -> CLOSING
+ -> block new business writes
+ -> drain/stop asynchronous work by policy
+ -> disable integrations
+ -> close billing state
+ -> CLOSED
+~~~
+
+Historical data follows retention policy.
+
+## 14. Failure Modes
+
+| Failure | Behavior |
 |---|---|
-| duplicate signup | return existing provisioning outcome or deterministic conflict |
-| missing owner membership | provisioning fails; tenant remains unusable |
-| invalid parent scope | reject before mutation |
-| closed organization request | deny new business writes |
-| suspended organization | apply capability-specific suspension policy |
-| cross-tenant ID | return authorization-safe not-found/forbidden result |
+| duplicate provisioning | return existing outcome |
+| parent/child mismatch | reject transaction |
+| stale hierarchy write | conflict/re-evaluate |
+| suspended tenant | capability-specific denial |
+| closed tenant | reject new business writes |
+| missing defaults | remain unusable until repaired |
+| provisioning worker failure | resume from durable state |
 
-## 13. Tenant Isolation Rule
+## 15. Events
 
-`organization_id` is not a convenience field. It is the fundamental data-isolation key.
+Key events:
 
-Every repository method handling tenant-owned state should make organization context explicit.
+~~~text
+organization.created
+organization.activated
+organization.suspended
+organization.closed
+organization.hierarchy.changed
+~~~
 
-```text
-repository.getCustomer({ organizationId, customerId })
-```
+Events contain tenant, actor and correlation context.
 
-is preferred to:
+## 16. Security Test Vectors
 
-```text
-repository.getCustomer(customerId)
-```
+- Organization A access from Organization B;
+- program scope escape;
+- team scope escalation;
+- ClientAccount spoofing;
+- organization ID tampering;
+- suspended tenant mutation;
+- replay under incorrect tenant.
 
-## 14. Audit Requirements
+## 17. Acceptance
 
-Audit tenant lifecycle and hierarchy changes:
-
-- organization created/closed/suspended;
-- owner transferred;
-- membership scope changed;
-- client/program/sector/team created or moved;
-- site configuration changed;
-- tenant quota/entitlement override changed.
-
-## 15. Acceptance Criteria
-
-- A resource from Organization A is inaccessible from Organization B.
-- ClientAccount does not create a second security boundary.
-- Scope changes cannot silently broaden permissions.
-- Provisioning is repeat-safe.
-- Closed organizations cannot perform normal business writes.
-- Tenant ownership is queryable without walking an unbounded parent chain.
-- Hierarchy and membership changes are auditable.
+A tenancy implementation is complete only when ownership, scope, lifecycle, concurrency and authorization boundaries are independently testable.
