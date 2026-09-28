@@ -1,21 +1,50 @@
-# Documentation Scaffold
+# Tenancy Domain
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**. This contract defines the intended business model and implementation rules.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+## Purpose
 
-## Scope
+Organization is the hard tenant boundary. The hierarchy supports both direct businesses and BPOs without forcing every customer through a BPO-only abstraction.
 
-TODO.
+## Core Model
 
-## Invariants and Decisions
+Organization -> optional ClientAccount -> Program -> Sector -> Team, with Site and Membership scoped under Organization. Resources store organization ownership explicitly.
 
-TODO.
+## Invariants
 
-## Interfaces / Dependencies
+- Every tenant-owned record belongs to exactly one Organization.
+- ClientAccount is optional and never replaces Organization as the security boundary.
+- Programs, Sectors, Teams, and Sites constrain scope; they never bypass organization authorization.
+- Membership is the link between User and Organization and may include scope bindings.
+- Organization lifecycle is explicit: provisioning, active, suspended, closed.
 
-TODO.
+## Operations
 
-## Open Questions
+- Create/read/update operations are organization-scoped and permission-checked.
+- Cross-domain behavior goes through explicit application services or events.
+- External identifiers remain provider references and never become authorization keys.
+- State changes are observable and auditable where they affect security, money, customer communication, or workflow control.
 
-TODO.
+## Failure and Concurrency
+
+- Validation fails before side effects.
+- Concurrent state changes use constraints or explicit version checks.
+- Retries are safe only where idempotency is defined.
+- External failures produce explicit recoverable states.
+
+## Mermaid Flow
+
+```mermaid
+flowchart LR
+ORG[Organization] --> CA[Client Account]
+ORG --> PROG[Program]
+PROG --> SEC[Sector]
+SEC --> TEAM[Team]
+ORG --> SITE[Site]
+USER[User] --> MEM[Membership]
+MEM --> ORG
+```
+
+## Change Rule
+
+Changing an invariant or state transition requires updating the relevant requirements, acceptance criteria, tests, API/event contract, and this document.

@@ -1,21 +1,49 @@
-# Documentation Scaffold
+# Quality Domain
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**. This contract defines the intended business model and implementation rules.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+## Purpose
 
-## Scope
+Measure operational quality across conversations, workforce, programs, and AI.
 
-TODO.
+## Core Model
 
-## Invariants and Decisions
+QualityProgram -> Scorecard -> Criterion. Evaluation records reviewer, evidence, score, findings, and remediation references.
 
-TODO.
+## Invariants
 
-## Interfaces / Dependencies
+- Scorecard versions are immutable once used by completed evaluations.
+- Reviewers evaluate only inside allowed organization/scope.
+- Scores preserve evidence references.
+- AI-generated evaluations are proposals until accepted by policy.
+- Quality analytics do not mutate source conversation facts.
 
-TODO.
+## Operations
 
-## Open Questions
+- Create/read/update operations are organization-scoped and permission-checked.
+- Cross-domain behavior goes through explicit application services or events.
+- External identifiers remain provider references and never become authorization keys.
+- State changes are observable and auditable where they affect security, money, customer communication, or workflow control.
 
-TODO.
+## Failure and Concurrency
+
+- Validation fails before side effects.
+- Concurrent state changes use constraints or explicit version checks.
+- Retries are safe only where idempotency is defined.
+- External failures produce explicit recoverable states.
+
+## Mermaid Flow
+
+```mermaid
+flowchart LR
+CONV[Conversation] --> SAMPLE[Sampling]
+SAMPLE --> EVAL[Evaluation]
+EVAL --> SCORE[Scorecard Version]
+EVAL --> FIND[Findings]
+FIND --> REM[Remediation]
+EVAL --> ANALYTICS[Quality Analytics]
+```
+
+## Change Rule
+
+Changing an invariant or state transition requires updating the relevant requirements, acceptance criteria, tests, API/event contract, and this document.

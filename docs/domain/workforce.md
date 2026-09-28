@@ -1,21 +1,50 @@
-# Documentation Scaffold
+# Workforce Domain
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**. This contract defines the intended business model and implementation rules.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+## Purpose
 
-## Scope
+Treat humans and AI agents as workforce capabilities with shared assignment and capacity semantics.
 
-TODO.
+## Core Model
 
-## Invariants and Decisions
+WorkforceMember is a common abstraction with HumanAgent and AIAgent specializations. Skills, Presence, Capacity, Team membership, Assignment, and Escalation surround it.
 
-TODO.
+## Invariants
 
-## Interfaces / Dependencies
+- Presence is operational state, not authorization.
+- Assignments are tenant-scoped and concurrency-safe.
+- AI and human workforce members expose capability metadata but have different control policies.
+- Capacity influences routing but cannot grant forbidden access.
+- Handoff state is durable and visible.
 
-TODO.
+## Operations
 
-## Open Questions
+- Create/read/update operations are organization-scoped and permission-checked.
+- Cross-domain behavior goes through explicit application services or events.
+- External identifiers remain provider references and never become authorization keys.
+- State changes are observable and auditable where they affect security, money, customer communication, or workflow control.
 
-TODO.
+## Failure and Concurrency
+
+- Validation fails before side effects.
+- Concurrent state changes use constraints or explicit version checks.
+- Retries are safe only where idempotency is defined.
+- External failures produce explicit recoverable states.
+
+## Mermaid Flow
+
+```mermaid
+flowchart LR
+WORK[Workforce Member] --> HUMAN[Human]
+WORK --> AI[AIAgent]
+WORK --> SKILL[Skills]
+WORK --> PRES[Presence]
+WORK --> CAP[Capacity]
+WORK --> ASSIGN[Assignment]
+ASSIGN --> CONV[Conversation]
+```
+
+## Change Rule
+
+Changing an invariant or state transition requires updating the relevant requirements, acceptance criteria, tests, API/event contract, and this document.
