@@ -1,50 +1,216 @@
 # Workforce Domain
 
-> Status: **Target / normative engineering design**. This contract defines the intended business model and implementation rules.
+> Status: **Target production domain contract**
 
-## Purpose
+The workforce domain models the people and AI units that perform customer operations. It owns capability, presence, capacity, assignment and handoff semantics. Authorization remains a separate concern.
 
-Treat humans and AI agents as workforce capabilities with shared assignment and capacity semantics.
+## 1. Core Concepts
 
-## Core Model
+`WorkforceMember` is the common operational abstraction with two major forms:
 
-WorkforceMember is a common abstraction with HumanAgent and AIAgent specializations. Skills, Presence, Capacity, Team membership, Assignment, and Escalation surround it.
+- `HumanAgent`
+- `AIAgent`
 
-## Invariants
+Shared routing concepts include skills, queues, team membership, presence and capacity. Execution policy differs between humans and AI.
 
-- Presence is operational state, not authorization.
-- Assignments are tenant-scoped and concurrency-safe.
-- AI and human workforce members expose capability metadata but have different control policies.
-- Capacity influences routing but cannot grant forbidden access.
-- Handoff state is durable and visible.
-
-## Operations
-
-- Create/read/update operations are organization-scoped and permission-checked.
-- Cross-domain behavior goes through explicit application services or events.
-- External identifiers remain provider references and never become authorization keys.
-- State changes are observable and auditable where they affect security, money, customer communication, or workflow control.
-
-## Failure and Concurrency
-
-- Validation fails before side effects.
-- Concurrent state changes use constraints or explicit version checks.
-- Retries are safe only where idempotency is defined.
-- External failures produce explicit recoverable states.
-
-## Mermaid Flow
+## 2. Domain Model
 
 ```mermaid
-flowchart LR
-WORK[Workforce Member] --> HUMAN[Human]
-WORK --> AI[AIAgent]
-WORK --> SKILL[Skills]
-WORK --> PRES[Presence]
-WORK --> CAP[Capacity]
-WORK --> ASSIGN[Assignment]
-ASSIGN --> CONV[Conversation]
+erDiagram
+ORGANIZATION ||--o{ WORKFORCE_MEMBER : owns
+TEAM ||--o{ TEAM_MEMBER : contains
+WORKFORCE_MEMBER ||--o{ TEAM_MEMBER : joins
+WORKFORCE_MEMBER ||--o{ SKILL_ASSIGNMENT : has
+WORKFORCE_MEMBER ||--o{ PRESENCE : records
+WORKFORCE_MEMBER ||--o{ ASSIGNMENT : receives
+CONVERSATION ||--o{ ASSIGNMENT : creates
+WORKFORCE_MEMBER ||--o{ ESCALATION : participates
 ```
 
-## Change Rule
+## 3. Lifecycle vs Presence
 
-Changing an invariant or state transition requires updating the relevant requirements, acceptance criteria, tests, API/event contract, and this document.
+Do not overload one status field.
+
+`lifecycle_state` describes whether the worker can participate in work at all:
+
+`provisioning -> active -> disabled`
+
+`presence_state` describes current availability:
+
+`offline -> available -> busy -> offline`
+
+```mermaid
+stateDiagram-v2
+    [*] --> PROVISIONING
+    PROVISIONING --> ACTIVE
+    PROVISIONING --> DISABLED
+    ACTIVE --> AVAILABLE
+    ACTIVE --> OFFLINE
+    ACTIVE --> DISABLED
+    AVAILABLE --> BUSY
+    BUSY --> AVAILABLE
+    BUSY --> OFFLINE
+    OFFLINE --> AVAILABLE
+```
+
+Presence is volatile and should have a freshness/heartbeat rule.
+
+## 4. Skills
+
+Skills describe capability, not permission.
+
+Examples:
+
+- Arabic;
+- English;
+- billing;
+- technical support;
+- retention;
+- product-specific expertise.
+
+A skill can be attached to a worker with a proficiency/rating if the routing system needs it.
+
+An agent with `billing` skill can still be forbidden from a particular customer by authorization scope.
+
+## 5. Capacity
+
+Capacity is the workload budget of a worker.
+
+Human examples:
+
+`max_active_conversations`, `reserved_capacity`, `current_load`
+
+AI examples:
+
+`max_concurrent_runs`, `token_budget`, `provider_concurrency`
+
+Capacity affects routing. It must never be treated as a security control.
+
+## 6. Assignment Model
+
+Assignments are historical business records.
+
+| Field | Meaning |
+|---|---|
+| assignment_id | unique assignment |
+| conversation_id | work item |
+| workforce_member_id | assignee |
+| queue/team | operational scope |
+| state | active/released/completed |
+| assigned_at | start |
+| released_at | end |
+| assigned_by | actor |
+| reason | manual/routing/escalation |
+| routing_decision_id | decision evidence |
+
+Do not rely only on `conversation.assignee_id`; that loses history and makes auditing difficult.
+
+## 7. Assignment Concurrency
+
+Assignment is a concurrency-sensitive mutation.
+
+```mermaid
+sequenceDiagram
+participant R as Router
+participant DB as PostgreSQL
+participant W as Workforce Service
+R->>DB: Begin transaction
+R->>DB: Lock conversation control row
+R->>W: Validate candidate
+W-->>R: Candidate eligible
+R->>DB: Close active assignment
+R->>DB: Create new assignment
+DB-->>R: Commit
+```
+
+If another worker wins the same assignment race, the losing operation should retry from fresh state rather than overwrite the winner.
+
+## 8. Human Handoff
+
+Handoff transfers conversation control.
+
+A handoff records:
+
+- source controller;
+- destination worker/queue;
+- reason code;
+- trigger;
+- control version;
+- SLA effect;
+- timestamp;
+- optional recommended next action.
+
+After handoff, autonomous AI continuation must be cancelled or invalidated.
+
+## 9. Queue Model
+
+A queue is durable waiting work.
+
+Queue records should expose:
+
+- queue id;
+- organization/scope;
+- priority;
+- SLA deadline;
+- required skills;
+- current age;
+- assignment attempts;
+- escalation state.
+
+A queue is not an error sink. It is a first-class operational state.
+
+## 10. Scheduling
+
+Distinguish:
+
+- schedule = planned availability;
+- presence = observed availability;
+- capacity = allowed workload.
+
+Routing may consider all three.
+
+## 11. Cross-Domain Contracts
+
+**Tenancy:** workers belong to an organization and valid scopes.
+
+**Routing:** routing reads skills/presence/capacity and creates assignments.
+
+**Conversations:** assignments change conversation ownership/control.
+
+**AI:** AIAgent configuration points to AI policy while runtime handles execution.
+
+**Quality:** quality aggregates results by worker/team without changing workforce history.
+
+## 12. Failure Modes
+
+| Failure | Required behavior |
+|---|---|
+| disabled worker with active work | re-route or queue |
+| stale presence | exclude from new work |
+| capacity exceeded | exclude candidate |
+| assignment race | transactional conflict/re-evaluation |
+| no eligible candidate | queue + escalation policy |
+| handoff destination unavailable | queue safely, do not drop conversation |
+
+## 13. Observability
+
+Measure:
+
+- assignment latency;
+- queue depth;
+- oldest queued work;
+- utilization;
+- presence freshness;
+- handoff rate;
+- reassignment rate;
+- SLA breaches.
+
+## 14. Acceptance Criteria
+
+- Human and AI workers participate in the same operational assignment model.
+- Presence cannot grant authorization.
+- Concurrent assignments cannot create conflicting active ownership.
+- Disabled workers do not receive new work.
+- Unroutable work is durable.
+- Handoff invalidates stale AI control.
+- Assignment history is auditable.
