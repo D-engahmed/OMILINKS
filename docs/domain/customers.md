@@ -1,47 +1,204 @@
 # Customer Domain
 
-> Status: **Target / normative engineering design**. This contract defines the intended business model and implementation rules.
+> Status: **Target production domain contract**
+>
+> Customer data is the canonical identity layer connecting people to conversations across channels.
 
-## Purpose
+## 1. Domain Responsibility
 
-Maintain one canonical customer record per real customer within a tenant while preserving channel identities and provenance.
+The Customer domain owns:
 
-## Core Model
+- canonical customer identity;
+- external channel identities;
+- profile attributes;
+- tags/segments;
+- consent state;
+- identity merge/split operations;
+- customer-level lifecycle and data retention metadata.
 
-Customer owns CustomerIdentity records for WhatsApp, Instagram, Facebook, Telegram, SMS, widget, and future channels. Optional Consent, Tag, and Attribute records remain tenant-scoped.
+It does not own conversation messages or workforce assignments.
 
-## Invariants
-
-- Customer records are tenant-scoped.
-- Channel identities are unique within provider/account scope.
-- Identity merge preserves the source identities and audit history.
-- Ambiguous identities are not auto-merged.
-- Sensitive attributes require explicit permission and retention policy.
-
-## Operations
-
-- Create/read/update operations are organization-scoped and permission-checked.
-- Cross-domain behavior goes through explicit application services or events.
-- External identifiers remain provider references and never become authorization keys.
-- State changes are observable and auditable where they affect security, money, customer communication, or workflow control.
-
-## Failure and Concurrency
-
-- Validation fails before side effects.
-- Concurrent state changes use constraints or explicit version checks.
-- Retries are safe only where idempotency is defined.
-- External failures produce explicit recoverable states.
-
-## Mermaid Flow
+## 2. Core Model
 
 ```mermaid
 erDiagram
 ORGANIZATION ||--o{ CUSTOMER : owns
 CUSTOMER ||--o{ CUSTOMER_IDENTITY : has
-CUSTOMER ||--o{ CONVERSATION : participates
+CUSTOMER ||--o{ CUSTOMER_ATTRIBUTE : contains
+CUSTOMER ||--o{ CUSTOMER_TAG : tagged
 CUSTOMER ||--o{ CONSENT : grants
+CHANNEL_ACCOUNT ||--o{ CUSTOMER_IDENTITY : maps
+CUSTOMER ||--o{ CONVERSATION : participates
 ```
 
-## Change Rule
+## 3. Customer vs Identity
 
-Changing an invariant or state transition requires updating the relevant requirements, acceptance criteria, tests, API/event contract, and this document.
+`Customer` is the canonical person/business-contact record.
+
+`CustomerIdentity` is a provider-specific identity:
+
+```text
+WhatsApp:+2010...
+Instagram:provider-user-123
+Telegram:chat-456
+SMS:+2010...
+Widget:visitor-uuid
+```
+
+One customer may have many identities.
+
+## 4. Identity Uniqueness
+
+An identity should be unique within its provider/account boundary:
+
+```text
+(organization_id, channel_provider, channel_account_id, external_identity_id)
+```
+
+Do not enforce global uniqueness on phone numbers or social IDs because providers may reuse/namespace them.
+
+## 5. Customer Creation Flow
+
+```mermaid
+sequenceDiagram
+participant CH as Channel Adapter
+participant C as Customer Service
+participant DB as PostgreSQL
+participant EVT as Event Outbox
+CH->>C: Normalized external identity
+C->>DB: Lookup scoped identity
+alt Identity exists
+  DB-->>C: Existing customer
+else New identity
+  C->>DB: Create customer + identity
+  C->>EVT: customer.created
+  DB-->>C: Commit
+end
+C-->>CH: Canonical customer ID
+```
+
+## 6. Identity Matching
+
+Matching confidence levels:
+
+| Level | Action |
+|---|---|
+| exact provider identity | deterministic match |
+| exact verified customer key | deterministic match if policy allows |
+| strong business rule | configurable auto-match |
+| ambiguous | do not auto-merge |
+
+LLM-based matching must not silently perform irreversible merges.
+
+## 7. Merge Model
+
+Customer merge is privileged.
+
+```mermaid
+flowchart TD
+A[Customer A] --> REVIEW[Merge Review]
+B[Customer B] --> REVIEW
+REVIEW --> DECISION{Approved?}
+DECISION -->|No| KEEP[Keep Separate]
+DECISION -->|Yes| MERGE[Create Canonical Customer]
+MERGE --> HISTORY[Preserve Identity + Audit History]
+```
+
+The merge operation should preserve:
+
+- source customer IDs;
+- identities;
+- conversation references;
+- audit history;
+- merge actor;
+- merge reason;
+- timestamp.
+
+## 8. Attributes
+
+Customer attributes should distinguish:
+
+- system-managed fields;
+- tenant custom attributes;
+- derived attributes;
+- consented sensitive fields.
+
+Do not create an arbitrary JSON bag for everything if important fields are queried, permissioned, retained, or audited. Important attributes deserve explicit schema.
+
+## 9. Consent
+
+Consent is scoped to a purpose and channel where required.
+
+Example states:
+
+```text
+granted
+withdrawn
+expired
+unknown
+```
+
+Consent is not equivalent to authorization to access the customer record internally.
+
+## 10. Customer Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> ACTIVE
+    ACTIVE --> RESTRICTED
+    RESTRICTED --> ACTIVE
+    ACTIVE --> MERGE_PENDING
+    MERGE_PENDING --> ACTIVE
+    MERGE_PENDING --> MERGED
+    ACTIVE --> DELETION_PENDING
+    DELETION_PENDING --> DELETED
+```
+
+Deletion must coordinate with conversation, analytics, knowledge feedback, and backup retention rules.
+
+## 11. Cross-Domain Contracts
+
+### Conversations
+
+Conversation references canonical customer identity.
+
+### Channels
+
+Channel adapters resolve provider identities into CustomerIdentity.
+
+### Quality
+
+Quality may use customer/channel dimensions, but evaluation records should not duplicate authoritative customer profile fields unnecessarily.
+
+### Analytics
+
+Customer metrics must be tenant-scoped and privacy-aware.
+
+### AI
+
+AI receives only the customer attributes explicitly allowed by context policy.
+
+## 12. Failure Modes
+
+| Failure | Behavior |
+|---|---|
+| duplicate provider identity | return existing identity/customer |
+| ambiguous identity | create/review according to policy; never silently merge |
+| merge conflict | reject until resolved |
+| deleted customer referenced by new message | route through retention/recreation policy |
+| unauthorized customer lookup | deny without exposing cross-tenant existence |
+
+## 13. Privacy / Retention
+
+Customer profile fields have different retention sensitivity.
+
+PII access and export should be audited. Logs should not reproduce full profiles unnecessarily.
+
+## 14. Acceptance Criteria
+
+- Channel identities map deterministically within tenant/provider scope.
+- Ambiguous identity matches do not auto-merge.
+- Merge operations preserve history.
+- AI cannot retrieve unauthorized customer attributes.
+- Customer deletion follows defined downstream retention behavior.
+- Customer records never cross organization boundaries.
