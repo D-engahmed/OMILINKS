@@ -1,299 +1,207 @@
 # OMILINKS Engineering Documentation
 
-> **Purpose:** system operating specification  
-> **Status:** target architecture and product contract  
-> **Audience:** founders, engineers, reviewers, coding agents, operators
+> **Role:** system operating specification and implementation memory  
+> **Status:** target architecture / contracts; implementation status must be verified from code and tests
 
-## 1. What This Folder Is
+## 1. Documentation Philosophy
 
-The documentation is the engineering memory of OMILINKS.
+These documents are intentionally written as implementation specifications rather than feature descriptions.
 
-It connects:
-
-~~~text
-business intent
- -> requirements
- -> architecture
- -> domain invariants
- -> API/events
- -> integrations
- -> AI/security/data controls
- -> product behavior
- -> implementation/release
-~~~
-
-The goal is to prevent the codebase from becoming the only place where architectural decisions exist.
-
-## 2. Important Distinction
-
-A document can describe the target system before the implementation is complete.
-
-Therefore:
+A substantive design should answer:
 
 ~~~text
-specification exists
-!=
-feature is implemented
+what is owned?
+what is the invariant?
+what is the state machine?
+what is the data model?
+what is the API/event contract?
+what happens under concurrency?
+what happens when dependencies fail?
+how is it secured?
+how is it observed?
+how is it tested?
+how is it recovered?
 ~~~
 
-Implementation status must be established from code/tests/deployment evidence, not from the existence of a document.
+Documentation existence does not imply implementation existence.
 
-## 3. Authority Order
+## 2. Authority Order
 
-When documents appear to conflict, use this order:
+When artifacts conflict:
 
-1. platform security and tenant-isolation rules;
-2. explicit product requirements;
+1. platform security and tenant-isolation invariants;
+2. product/functional requirements;
 3. domain invariants;
-4. API/event compatibility contracts;
-5. architecture;
+4. API/event compatibility;
+5. architecture decisions;
 6. implementation convenience.
 
-A shortcut in implementation cannot weaken a security or domain invariant.
+## 3. Documentation Map
 
-## 4. Directory Responsibilities
-
-| Directory | Question it answers |
+| Area | Purpose |
 |---|---|
-| requirements | What must the product do? |
-| architecture | How is the system structured? |
-| domain | What business rules must always remain true? |
-| api | How do clients interact with the platform? |
-| events | How does asynchronous communication work? |
-| integrations | How do external providers map into the platform? |
-| ai | How is AI executed and governed? |
-| security | How are threats and trust boundaries controlled? |
-| data | How is information stored/recovered/retained? |
-| product | What does the operator/customer experience? |
-| engineering | How do we safely change the system? |
+| requirements | behavior and measurable quality targets |
+| architecture | system structure and deployment boundaries |
+| architecture/decisions | durable architectural decisions |
+| domain | aggregates, invariants and state transitions |
+| api | wire-level client contracts |
+| events | asynchronous contracts/reliability |
+| integrations | provider adapter behavior |
+| ai | execution, routing, guardrails, evaluation and economics |
+| security | threat/control model |
+| data | persistence, consistency, retention, recovery |
+| product | UX and screen behavior |
+| engineering | coding, Git, testing, release |
+| engineering/traceability | requirement-to-evidence chain |
 
-## 5. Core Architecture
+## 4. Architecture Spine
 
 ~~~mermaid
 flowchart TB
-REQ[Requirements] --> ARCH[Architecture]
-ARCH --> DOMAIN[Domain Contracts]
-DOMAIN --> API[API + Events]
-API --> INT[Integrations]
-DOMAIN --> AI[AI Governance]
-DOMAIN --> SEC[Security]
-DOMAIN --> DATA[Data]
-DOMAIN --> UX[Product UX]
-ALL[Engineering Policies] --> BUILD[Implementation]
-API --> BUILD
-AI --> BUILD
-SEC --> BUILD
-DATA --> BUILD
-UX --> BUILD
-BUILD --> TEST[Tests]
-TEST --> RELEASE[Release]
-RELEASE --> OBS[Production Evidence]
-OBS --> REQ
+REQ[Requirements] --> DOMAIN[Domain Invariants]
+DOMAIN --> API[API Contracts]
+DOMAIN --> EVT[Event Contracts]
+EVT --> WORK[Async Workers]
+DOMAIN --> DATA[Transactional Data]
+WORK --> AI[AI Runtime]
+WORK --> INT[Integrations]
+AI --> TOOLS[Tool Runtime]
+INT --> EXT[External Providers]
+SEC[Security] -. governs .-> DOMAIN
+BILL[Billing] -. gates .-> AI
+OBS[Observability] -. traces .-> ALL[Critical Paths]
+TEST[Testing] --> RELEASE[Release]
 ~~~
 
-## 6. Documentation Contract
+## 5. Current Architecture Decision Set
 
-A serious feature should normally touch several documents.
+The current ADR set records:
 
-Example:
+- modular monolith first;
+- PostgreSQL as transactional source of truth;
+- transactional outbox / at-least-once events;
+- tenant isolation at repository boundary;
+- AI cannot bypass Tool/Domain boundaries.
 
-~~~text
-"Add autonomous billing-support agent"
+These decisions may be superseded, but they should never disappear silently from history.
 
-requirements/
-  functional requirements
-  acceptance criteria
-
-domain/
-  ai
-  conversations
-  billing
-  tools
-
-ai/
-  agent runtime
-  tool runtime
-  guardrails
-  evaluation
-  cost control
-
-security/
-  threat model
-  permission matrix
-
-api/events/
-  run/status/event contracts
-
-product/
-  UX flow
-  screen specification
-
-engineering/
-  tests
-  release
-~~~
-
-A one-file implementation for a cross-cutting feature is a warning sign.
-
-## 7. Change Workflow
-
-~~~mermaid
-sequenceDiagram
-participant E as Engineer
-participant D as Domain Docs
-participant A as Architecture/API
-participant C as Code
-participant T as Tests
-participant R as Release
-E->>D: Identify invariants
-E->>A: Update contract if needed
-E->>C: Implement
-E->>T: Prove behavior
-T-->>E: Pass / Fail
-E->>R: Release with evidence
-R-->>D: Record architectural/product learning
-~~~
-
-## 8. Required Engineering Questions
-
-Before implementation:
-
-- What owns this data?
-- What is the tenant boundary?
-- What permission allows the action?
-- Is the operation synchronous or asynchronous?
-- What happens on duplicate delivery?
-- What happens if a provider times out after a side effect?
-- What happens if two workers execute concurrently?
-- What is the rollback/forward-fix strategy?
-- What must be observable?
-- What test proves the critical invariant?
-
-If these questions cannot be answered, the design is incomplete.
-
-## 9. Mermaid Convention
-
-Mermaid is used for:
-
-- system boundaries;
-- sequence flows;
-- state machines;
-- ER relationships;
-- deployment topology;
-- security/trust flows.
-
-A diagram is explanatory, not the sole source of truth.
-
-The prose around the diagram defines the actual invariant.
-
-## 10. Document Quality Standard
-
-Every substantive engineering document should cover as applicable:
-
-~~~text
-purpose
-scope
-ownership
-core model
-invariants
-state/lifecycle
-interfaces
-failure behavior
-concurrency
-security
-observability
-testing
-acceptance criteria
-~~~
-
-Short documents are acceptable only when the domain itself is genuinely small.
-
-## 11. Cross-Cutting Invariants
-
-These apply throughout OMILINKS:
+## 6. Cross-Cutting Invariants
 
 ### Tenant isolation
 
-No tenant-owned resource is accessible outside its authorized organization/scope.
+Every tenant-owned resource is resolved inside known organization/scope context.
 
 ### Authorization
 
-Frontend state never grants permission.
+Frontend state and model output never grant permission.
 
 ### Idempotency
 
-Retry-sensitive side effects define duplicate behavior.
+Retry-sensitive operations define duplicate behavior.
 
 ### Durability
 
-Business work that must survive a process crash is persisted.
-
-### Observability
-
-Important operations carry correlation and outcome information.
+Work that must survive process restart is persisted.
 
 ### Versioning
 
-Published contracts remain stable or change through explicit versioning.
+Published contracts remain stable or change explicitly.
 
-### AI safety
+### Observability
 
-Model output is a proposal, not an authorization decision.
+Important work propagates request/correlation/causation identity.
 
-### Billing authority
+### Recovery
 
-Frontend payment state never becomes financial truth.
+Unknown external outcomes are reconciled rather than blindly retried.
 
-## 12. Codebase Alignment
+## 7. Engineering Traceability
 
-Current repository structure:
+The intended chain is:
 
 ~~~text
-apps/web
-apps/widget
-packages/backend
-packages/ui
-packages/math
-packages/eslint-config
-packages/typescript-config
+Requirement ID
+ -> Domain Rule
+ -> API/Event Contract
+ -> Implementation
+ -> Test
+ -> Runtime Evidence
+ -> Acceptance
 ~~~
 
-The target backend architecture separates transport, application, domain, persistence, integration and worker concerns.
+The traceability matrix is the control point for production readiness.
 
-The codebase should converge toward the documented boundaries rather than creating one giant backend module.
+## 8. Event Schema Registry
 
-## 13. Review and Update Rule
+The schema directory contains concrete v1 JSON Schemas and fixtures.
 
-Update the documentation when a change alters:
+Schemas currently include:
 
-- customer-visible behavior;
-- public API;
-- event schema;
+- common event envelope;
+- conversation.message.received;
+- ai.run.completed;
+- subscription.changed;
+- usage.recorded.
+
+Production event types should follow the same versioning/fixture pattern.
+
+## 9. AI Engineering Contract
+
+The AI documentation is intentionally split:
+
+~~~text
+docs/ai/
+  agent-runtime
+  model-routing
+  tool-runtime
+  guardrails
+  evaluation
+  cost-control
+~~~
+
+This separates execution, routing, authorization, safety, evaluation and economics instead of turning "AI" into one giant module.
+
+## 10. Implementation Reality
+
+The repository currently contains a thin backend handler and Next.js application shells. The documentation therefore describes the engineering target toward which implementation should converge.
+
+Do not use the documentation itself as evidence that a subsystem is already running in production.
+
+## 11. Change Rule
+
+Update documentation when a change affects:
+
+- behavior;
+- domain invariants;
 - data model;
+- API;
+- event schemas;
 - authorization;
 - tenant isolation;
 - AI autonomy;
-- tool permissions;
-- billing semantics;
+- tools;
+- billing;
 - deployment/recovery;
-- operational failure behavior.
+- observable failure behavior.
 
-Do not create documentation for every trivial refactor, but do document behavioral architecture.
-
-## 14. Final Engineering Principle
-
-The docs are successful when an engineer can answer:
+## 12. Standard for a Production-Ready Feature
 
 ~~~text
-What does OMILINKS do?
-Why is it designed this way?
-Where does this behavior belong?
-What can go wrong?
-How is it secured?
-How is it observed?
-How is it tested?
-How is it recovered?
-How do we know the implementation is correct?
+specification
++
+implementation
++
+negative tests
++
+failure handling
++
+observability
++
+migration safety
++
+recovery
++
+release evidence
 ~~~
 
-without reverse-engineering the entire codebase first.
+A feature is not production-ready merely because the happy path works.
