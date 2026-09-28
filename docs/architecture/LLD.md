@@ -1,61 +1,270 @@
 # Low-Level Architecture
 
-> Status: **Target / normative engineering design**. This document defines behavior and implementation constraints even when the current code has not implemented the subsystem yet.
+> Status: **Target production implementation architecture**
 
-## Purpose
+## 1. Layering
 
-Low-level structure keeps transport, application, domain, persistence, integration, and event concerns separate so the system can evolve without cross-module coupling.
+Every backend operation should follow:
 
-## Request Pipeline
+~~~text
+transport
+  -> authentication / tenant resolution
+    -> authorization
+      -> application service
+        -> domain logic
+          -> persistence
+            -> outbox
+~~~
 
-HTTP adapter -> authentication -> tenant resolution -> authorization -> application service -> domain invariants -> transaction/repository -> outbox -> response mapping.
+External calls occur through integration/tool adapters.
 
-## Module Contract
+## 2. Package Boundary
 
-Each domain module owns its business rules and exposes application-level operations. Other modules use public module interfaces or domain events rather than importing internal persistence implementation.
+Recommended backend layout:
 
-## Transaction Boundary
+~~~text
+packages/backend/src/
+  app/
+  domain/
+    tenancy/
+    identity/
+    customers/
+    conversations/
+    workforce/
+    routing/
+    ai/
+    knowledge/
+    tools/
+    workflows/
+    quality/
+    billing/
+  integrations/
+  infrastructure/
+  workers/
+  api/
+~~~
 
-Business state plus the corresponding outbox record are written in one transaction. Background publication happens after commit.
+Exact filenames may change, but dependency direction should remain.
 
-## Concurrency
+## 3. Dependency Direction
 
-Use database constraints and explicit optimistic concurrency/versioning where conflicting updates are possible. Exclusive assignment/state transitions may require row-level locking.
+~~~mermaid
+flowchart TB
+API[Transport] --> APP[Application]
+APP --> DOMAIN[Domain]
+APP --> PORTS[Ports / Interfaces]
+DOMAIN --> PORTS
+INFRA[Infrastructure] --> PORTS
+INTEG[Integrations] --> PORTS
+WORKER[Workers] --> APP
+~~~
 
-## Provider Abstraction
+Domain code should not depend directly on provider SDKs.
 
-Interfaces such as verifyWebhook(), normalizeInbound(), sendMessage(), and getConnectionHealth() isolate provider SDKs. Provider-specific identifiers live in integration records.
+## 4. Request Lifecycle
 
-## Error Model
-
-Use stable categories: VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, RATE_LIMITED, UPSTREAM_ERROR, INTERNAL_ERROR. Responses carry correlation IDs without leaking secrets or unauthorized existence.
-
-## Mermaid System View
-
-```mermaid
+~~~mermaid
 sequenceDiagram
 participant C as Client
-participant A as HTTP
-participant I as Identity
+participant H as HTTP Handler
+participant A as Auth
+participant T as Tenant Context
 participant Z as Authorization
 participant U as Use Case
 participant D as Domain
-participant DB as PostgreSQL
+participant R as Repository
 participant O as Outbox
-C->>A: Request
-A->>I: Authenticate
-I-->>A: Principal + tenant
-A->>Z: Authorize
-Z-->>A: Allow
-A->>U: Execute
+C->>H: Request
+H->>A: Authenticate
+A-->>H: Principal
+H->>T: Resolve tenant
+T-->>H: Context
+H->>Z: Authorize
+Z-->>H: Allow
+H->>U: Execute
 U->>D: Validate invariants
-D->>DB: Transaction
-D->>O: Write event
-DB-->>U: Commit
-U-->>A: Result
-A-->>C: Response
-```
+D->>R: Persist
+D->>O: Record event
+R-->>U: Commit
+U-->>H: Result
+H-->>C: Response
+~~~
 
-## Change Rule
+## 5. Transaction Boundary
 
-Changes that alter these contracts must update the affected requirement, API/event contract, tests, and this document. Security and tenant-isolation constraints cannot be weakened for implementation convenience.
+Database transaction begins as close as possible to the actual business mutation.
+
+Do not include:
+
+- LLM calls;
+- HTTP calls to providers;
+- long file processing;
+- human waiting;
+
+inside the transaction.
+
+## 6. Outbox Implementation
+
+Conceptual table:
+
+| Field | Purpose |
+|---|---|
+| event_id | unique event |
+| organization_id | tenant |
+| type | event type |
+| version | schema |
+| aggregate_type | aggregate class |
+| aggregate_id | source aggregate |
+| payload | serialized event |
+| occurred_at | business time |
+| published_at | delivery |
+| attempts | retry count |
+| status | pending/published/dead |
+
+## 7. Repository Rules
+
+Repository interfaces receive organization context when data is tenant-owned.
+
+Preferred:
+
+~~~text
+customerRepository.get({
+  organizationId,
+  customerId
+})
+~~~
+
+A global get-by-ID API is discouraged for tenant-owned resources.
+
+## 8. Application Service Rules
+
+Application services:
+
+- orchestrate use cases;
+- enforce transaction scope;
+- call domain rules;
+- publish domain events;
+- map external/application errors.
+
+They should not become giant "god services."
+
+## 9. Domain Rules
+
+Domain objects/services own:
+
+- state transitions;
+- invariants;
+- calculations;
+- policy interpretation where business-specific.
+
+Pure business rules should be testable without HTTP infrastructure.
+
+## 10. Concurrency
+
+Choose intentionally:
+
+~~~text
+unique constraint
+optimistic version
+atomic update
+row lock
+idempotency record
+~~~
+
+Examples:
+
+- conversation control -> version/lock;
+- payment event -> unique provider event;
+- usage quota -> atomic reservation/counter;
+- assignment -> transaction + concurrency check.
+
+## 11. Integration Ports
+
+Canonical interface examples:
+
+~~~text
+ChannelAdapter
+PaymentAdapter
+SearchAdapter
+ModelProvider
+SecretProvider
+NotificationAdapter
+~~~
+
+Infrastructure implements ports.
+
+Business code depends on the contract.
+
+## 12. Worker Architecture
+
+~~~mermaid
+flowchart LR
+BUS[Queue] --> DISPATCH[Worker Dispatcher]
+DISPATCH --> WEBHOOK[Webhook Jobs]
+DISPATCH --> AI[AI Jobs]
+DISPATCH --> WF[Workflow Jobs]
+DISPATCH --> KNOW[Knowledge Jobs]
+DISPATCH --> BILL[Billing Jobs]
+WEBHOOK --> APP[Application Services]
+AI --> APP
+WF --> APP
+KNOW --> APP
+BILL --> APP
+~~~
+
+Each worker records attempt/state and uses shared retry policies.
+
+## 13. Error Translation
+
+Provider-specific errors are translated:
+
+~~~text
+Provider 429 -> RATE_LIMITED
+Provider timeout -> UPSTREAM_TIMEOUT
+Provider invalid auth -> PROVIDER_AUTH_FAILED
+~~~
+
+Domain/application code should not depend on provider HTTP status meanings.
+
+## 14. Realtime Boundary
+
+If realtime/WebSocket/SSE is introduced:
+
+~~~text
+domain mutation
+ -> durable state/event
+ -> realtime fan-out
+~~~
+
+Realtime notifications are derived communication, not the source of truth.
+
+## 15. Testing Boundaries
+
+Test:
+
+- domain independently;
+- application with persistence;
+- integrations against contract fixtures;
+- HTTP against OpenAPI;
+- workers with retry/recovery cases.
+
+## 16. Observability Hooks
+
+Application services accept/carry correlation context.
+
+Infrastructure emits:
+
+- request span;
+- DB timing;
+- provider span;
+- queue timing;
+- AI run span.
+
+## 17. Acceptance Criteria
+
+- Domain code does not import provider SDKs.
+- Tenant context is explicit in data access.
+- Transactions exclude slow external calls.
+- Worker jobs are durable/retryable.
+- Concurrency strategy is documented per critical mutation.
+- OpenAPI/events map to application services rather than table CRUD.

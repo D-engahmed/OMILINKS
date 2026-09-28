@@ -1,49 +1,143 @@
 # Network Architecture
 
-> Status: **Target / normative engineering design**. This document defines behavior and implementation constraints even when the current code has not implemented the subsystem yet.
+> Status: **Target production network/security architecture**
 
-## Purpose
+## 1. Trust Zones
 
-Network controls separate public ingress, application workloads, data services, external providers, and management systems.
+~~~mermaid
+flowchart TB
+INTERNET((Internet)) --> EDGE[Public Edge]
+PROVIDER[External Providers] --> EDGE
+EDGE --> PUBLIC[Public Application Endpoints]
+PUBLIC --> APP[Private Application Zone]
+APP --> DATA[Private Data Zone]
+APP --> EGRESS[Controlled Egress]
+MGMT[Management / CI / Admin] --> MGMTEDGE[Restricted Management Zone]
+MGMTEDGE --> APP
+~~~
 
-## Trust Zones
+## 2. Public Endpoints
 
-1. Public edge: browser/widget/provider webhook traffic.
-2. Application zone: web, API, workers.
-3. Data zone: PostgreSQL, Redis, object storage, search.
-4. External zone: channel providers, Paymob, n8n, model providers.
-5. Management plane: CI/CD, secrets, observability.
+Public endpoints should be limited to:
 
+- web application;
+- widget;
+- API;
+- verified provider webhooks;
+- health/readiness when required by infrastructure.
 
-## Ingress
+Databases and internal workers are not public endpoints.
 
-Only required HTTP routes are public. Webhooks are isolated by route and verified before processing. Database and internal service ports are never exposed publicly.
+## 3. Private Application Zone
 
-## Egress
+Contains:
 
-Outbound calls are restricted to required providers. API credentials and secrets are loaded server-side only.
+- backend API;
+- workers;
+- workflow processors;
+- AI runtime;
+- integration adapters.
 
-## Failure
+Services authenticate one another where required.
 
-Authorization and protected mutations fail closed when critical dependencies cannot be trusted. External provider timeouts are bounded and converted to retryable internal state where appropriate.
+## 4. Data Zone
 
-## Mermaid System View
+Contains:
 
-```mermaid
-flowchart LR
-NET((Internet)) --> EDGE[HTTPS Edge]
-EDGE --> WEB[Web]
-EDGE --> WID[Widget]
-EDGE --> API[API]
-PROVIDER[Provider Webhooks] --> API
-API --> PRIV[Private App Network]
-PRIV --> DB[(PostgreSQL)]
-PRIV --> CACHE[(Redis)]
-PRIV --> STORE[(Object Storage)]
-PRIV --> EGRESS[Controlled Egress]
-EGRESS --> EXT[External APIs]
-```
+- PostgreSQL;
+- Redis/queue;
+- object storage;
+- search/vector infrastructure.
 
-## Change Rule
+Access is restricted to approved application identities.
 
-Changes that alter these contracts must update the affected requirement, API/event contract, tests, and this document. Security and tenant-isolation constraints cannot be weakened for implementation convenience.
+## 5. Egress
+
+External egress is controlled by adapter/service responsibility.
+
+Examples:
+
+~~~text
+AI worker -> approved model provider
+integration worker -> approved channel provider
+billing worker -> approved payment provider
+automation worker -> n8n
+~~~
+
+Do not allow arbitrary model-generated URLs to become network destinations.
+
+## 6. Webhook Security
+
+Webhook traffic is public ingress but is still treated as untrusted.
+
+Flow:
+
+~~~mermaid
+sequenceDiagram
+participant P as Provider
+participant E as Edge
+participant W as Webhook Handler
+participant V as Verifier
+participant DB as Event Store
+P->>E: HTTPS callback
+E->>W: Request
+W->>V: Verify signature/token
+V-->>W: Valid
+W->>DB: Durable event
+W-->>P: Accepted
+~~~
+
+## 7. Secret Access
+
+Secret manager access is granted only to the identities that require the secret.
+
+Browser clients never access provider secrets.
+
+## 8. Network Failure
+
+On database/network partition:
+
+- authorization should fail closed for protected writes;
+- queued work remains durable where possible;
+- external provider operations stop/retry according to policy.
+
+## 9. Rate Limiting
+
+Apply limits at:
+
+- edge;
+- credential;
+- organization;
+- route;
+- expensive operation.
+
+Webhooks may also need provider/account-specific burst controls.
+
+## 10. Management Plane
+
+Privileged operations should use:
+
+- restricted network access;
+- strong authentication;
+- audit logs;
+- least-privilege identities.
+
+## 11. Monitoring
+
+Network observability includes:
+
+- connection failures;
+- unusual egress;
+- TLS errors;
+- provider latency;
+- webhook source anomalies;
+- data-zone access anomalies.
+
+## 12. Acceptance Criteria
+
+- Database services are not internet-facing.
+- Provider webhooks are verified.
+- External egress is controlled.
+- Secrets are server-side.
+- Management access is restricted and audited.
+- Failure behavior fails closed for protected actions.
