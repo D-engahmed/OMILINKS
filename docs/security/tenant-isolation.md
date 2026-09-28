@@ -1,21 +1,25 @@
-# Documentation Scaffold
+# Tenant Isolation
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Tenant isolation is a correctness property, not merely a security feature. UUID uniqueness does not authorize access.
 
-## Scope
+## Contract
 
-TODO.
+Resolve organization before resource access; require tenant scope in repository/data APIs; enforce ownership foreign keys; optionally use PostgreSQL RLS as defense in depth; carry tenant context into jobs/events; test cross-tenant reads, writes, exports and replays. Never use unscoped getById as the normal repository contract.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart TB
+REQ[Request / Job] --> TEN[Resolve Tenant]
+TEN --> Q[Scoped Query]
+Q --> AUTH[Authorization]
+AUTH --> ACT[Read / Mutate]
+RLS[(PostgreSQL RLS)] -. defense in depth .-> Q
+NEG[Negative Isolation Tests] -.-> Q
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+The design must fail closed on authorization, preserve tenant scope, make retries safe, and expose enough telemetry to diagnose production behavior.

@@ -1,21 +1,26 @@
-# Documentation Scaffold
+# UX Flows
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+The operations UX must make work, ownership, AI control and failure state obvious.
 
-## Scope
+## Contract
 
-TODO.
+BPO setup: organization -> client -> program -> sector/team -> channels -> workforce -> routing. Conversation: inbound -> queue -> human/AI -> knowledge/tools -> outbound -> resolution -> QA. AI handoff: policy/low confidence -> stop autonomous send -> assign human -> preserve context. Billing: checkout -> verified payment -> subscription -> entitlements.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart LR
+SETUP[Setup] --> CONFIG[Configure]
+CONFIG --> CONNECT[Channels]
+CONNECT --> ROUTE[Routing]
+ROUTE --> OPERATE[Operations]
+OPERATE --> QUALITY[Quality]
+QUALITY --> IMPROVE[Knowledge / Policy]
+IMPROVE --> OPERATE
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+The design must fail closed on authorization, preserve tenant scope, make retries safe, and expose enough telemetry to diagnose production behavior.

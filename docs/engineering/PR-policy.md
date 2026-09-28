@@ -1,21 +1,25 @@
-# Documentation Scaffold
+# Pull Request Policy
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+A PR is a reviewable unit of system behavior, not simply a code diff.
 
-## Scope
+## Contract
 
-TODO.
+Review correctness, invariants, tenant isolation, authorization, concurrency/idempotency, API compatibility, observability, tests, documentation, security and provider boundaries. Block PRs with missing critical tests, implicit authorization, leaked provider SDKs, or undocumented breaking changes.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart LR
+PR[Pull Request] --> CI[CI]
+PR --> REVIEW[Review]
+CI --> GATE{Gate}
+REVIEW --> GATE
+GATE -->|Pass| MERGE[Merge]
+GATE -->|Fail| FIX[Revise]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+The design must fail closed on authorization, preserve tenant scope, make retries safe, and expose enough telemetry to diagnose production behavior.

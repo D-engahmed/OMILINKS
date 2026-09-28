@@ -1,21 +1,28 @@
-# Documentation Scaffold
+# Data Model and ERD
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+PostgreSQL owns transactional truth. Search/vector, caches, analytics tables and object storage are derived or specialized.
 
-## Scope
+## Contract
 
-TODO.
+Core relationships: Organization owns Membership, Customer, Conversation, Workforce, Knowledge, Workflow, Quality and Billing. Customer has identities; Conversation has messages and assignments; AI has runs; Workflow has versioned runs; Subscription has usage. Use foreign keys and uniqueness constraints for ownership/idempotency.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+erDiagram
+ORGANIZATION ||--o{ MEMBERSHIP : has
+ORGANIZATION ||--o{ CUSTOMER : owns
+ORGANIZATION ||--o{ CONVERSATION : owns
+CUSTOMER ||--o{ CONVERSATION : participates
+CONVERSATION ||--o{ MESSAGE : contains
+CONVERSATION ||--o{ ASSIGNMENT : assigned
+ORGANIZATION ||--o{ AI_RUN : owns
+ORGANIZATION ||--o{ WORKFLOW_RUN : owns
+ORGANIZATION ||--o{ SUBSCRIPTION : has
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+The design must fail closed on authorization, preserve tenant scope, make retries safe, and expose enough telemetry to diagnose production behavior.

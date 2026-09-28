@@ -1,21 +1,26 @@
-# Documentation Scaffold
+# Release Process
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Production releases are controlled changes with validation and rollback awareness.
 
-## Scope
+## Contract
 
-TODO.
+Pipeline: install from lockfile -> lint/format -> typecheck -> tests -> build immutable artifact -> migration compatibility -> staging -> smoke tests -> production -> monitor. Rollback must respect database compatibility; disablement/forward fix can be safer than blind code rollback.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart TD
+CHANGE[Change] --> CI[CI]
+CI --> STAGE[Staging]
+STAGE --> SMOKE[Smoke]
+SMOKE --> PROD[Production]
+PROD --> MON[Monitor]
+MON -->|Healthy| DONE[Complete]
+MON -->|Unhealthy| MIT[Mitigate / Rollback]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+The design must fail closed on authorization, preserve tenant scope, make retries safe, and expose enough telemetry to diagnose production behavior.

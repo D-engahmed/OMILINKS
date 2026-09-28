@@ -1,21 +1,24 @@
-# Documentation Scaffold
+# Data Retention
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Retention is data-class specific and based on product, contractual, security, operational and legal needs.
 
-## Scope
+## Contract
 
-TODO.
+Conversation history is tenant-configurable; audit data is long-lived; raw provider webhook payloads are operationally retained; AI traces should have shorter/privacy-aware retention; billing records follow financial obligations; logs have short raw retention and longer aggregated metrics. Deletion must propagate to derived indexes and caches.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart LR
+DATA[Source Data] --> ACTIVE[Active Retention]
+ACTIVE --> ARCH[Archive / Reduced Access]
+ARCH --> PURGE[Delete]
+PURGE --> DERIVED[Derived Index Cleanup]
+BACKUP[Backups] -. expire by policy .-> PURGE
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+The design must fail closed on authorization, preserve tenant scope, make retries safe, and expose enough telemetry to diagnose production behavior.

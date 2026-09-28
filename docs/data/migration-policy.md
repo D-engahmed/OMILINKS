@@ -1,21 +1,29 @@
-# Documentation Scaffold
+# Migration Policy
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Database changes are deployed using compatibility-first migration patterns.
 
-## Scope
+## Contract
 
-TODO.
+Prefer additive migrations, deploy compatible code, backfill in bounded batches, switch reads/writes, then remove obsolete structures later. Estimate locks and query impact. Destructive/external mutations require compensating procedures, not assumptions about transaction rollback.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+sequenceDiagram
+participant DEV as Engineering
+participant CI
+participant DB as PostgreSQL
+participant APP as New App
+DEV->>CI: Migration compatibility tests
+CI-->>DEV: Pass
+DEV->>DB: Additive change
+DEV->>APP: Compatible release
+APP->>DB: Backfill / switch
+DEV->>DB: Later cleanup
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+The design must fail closed on authorization, preserve tenant scope, make retries safe, and expose enough telemetry to diagnose production behavior.

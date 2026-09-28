@@ -1,21 +1,23 @@
-# Documentation Scaffold
+# Backup and Restore
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Backup success is not proven until restoration has been tested.
 
-## Scope
+## Contract
 
-TODO.
+Use managed PostgreSQL backups plus suitable object-storage versioning/replication. Define RPO/RTO per tier. Restore into isolation, verify schema/constraints, run tenant-isolation and smoke tests, then reconcile external providers and payment state before declaring recovery.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart TB
+PG[(PostgreSQL)] --> BK[Encrypted Backup]
+BK --> RESTORE[Restore Target]
+RESTORE --> VERIFY[Integrity + Smoke Tests]
+VERIFY --> READY[Recovery Ready]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+The design must fail closed on authorization, preserve tenant scope, make retries safe, and expose enough telemetry to diagnose production behavior.

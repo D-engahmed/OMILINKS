@@ -1,21 +1,24 @@
-# Documentation Scaffold
+# Git Strategy
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Keep main releasable and use short-lived focused feature branches.
 
-## Scope
+## Contract
 
-TODO.
+Use conventional commit prefixes such as feat, fix, refactor, docs, test, chore, ci. Never commit secrets or local artifacts. Releases are tagged from the exact deployed commit; hotfixes include regression coverage.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart LR
+MAIN[main] <-- PR --> FEAT[Feature Branch]
+FEAT --> CI[CI]
+CI --> REVIEW[Review]
+REVIEW --> MAIN
+MAIN --> TAG[Release Tag]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+The design must fail closed on authorization, preserve tenant scope, make retries safe, and expose enough telemetry to diagnose production behavior.

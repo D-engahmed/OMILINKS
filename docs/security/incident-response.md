@@ -1,21 +1,25 @@
-# Documentation Scaffold
+# Incident Response
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Incidents use a repeatable lifecycle: detect, classify, contain, eradicate, recover, verify, learn.
 
-## Scope
+## Contract
 
-TODO.
+SEV-1 covers active breach, broad outage or major integrity impact; SEV-2 material degradation/contained security issue; SEV-3 limited defect. Preserve correlation IDs, audit events, provider event IDs and deployment versions. Corrective actions become tracked engineering work.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart LR
+ALERT[Alert] --> TRIAGE[Triage]
+TRIAGE --> CONTAIN[Contain]
+CONTAIN --> FIX[Eradicate]
+FIX --> RECOVER[Recover]
+RECOVER --> VERIFY[Verify]
+VERIFY --> RCA[Postmortem]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+The design must fail closed on authorization, preserve tenant scope, make retries safe, and expose enough telemetry to diagnose production behavior.

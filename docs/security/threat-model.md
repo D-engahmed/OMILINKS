@@ -1,21 +1,37 @@
-# Documentation Scaffold
+# Threat Model
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Security assets are customer data, tenant boundaries, credentials, AI policy, billing state, and audit history.
 
-## Scope
+## Contract
 
-TODO.
+`| Threat | Primary control |
+|---|---|
+| Cross-tenant access | Tenant-scoped queries + negative tests |
+| Credential theft | Secret manager + rotation |
+| Webhook spoofing | Signature verification |
+| Prompt injection | Untrusted context + tool policy |
+| AI exfiltration | Scoped retrieval + output controls |
+| Duplicate side effects | Idempotency |
+| Privilege escalation | Explicit permission checks |
+| Supply-chain risk | Lockfiles + CI review |
+`
 
-## Invariants and Decisions
+Lower-trust input can never become a higher-trust authority.
 
-TODO.
+## Mermaid Flow
 
-## Interfaces / Dependencies
+```mermaid
+flowchart TB
+U[Untrusted Input] --> V[Validate]
+V --> AUTH[Authenticate + Authorize]
+AUTH --> D[Domain Rules]
+D --> ACT[Store / Act]
+MODEL[Model Output] --> AUTH
+WEBHOOK[Webhook] --> V
+```
 
-TODO.
+## Engineering Rule
 
-## Open Questions
-
-TODO.
+The design must fail closed on authorization, preserve tenant scope, make retries safe, and expose enough telemetry to diagnose production behavior.

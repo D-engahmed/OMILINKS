@@ -1,21 +1,29 @@
-# Documentation Scaffold
+# Testing Policy
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Testing is organized around risk, not a vanity coverage number.
 
-## Scope
+## Contract
 
-TODO.
+Use unit tests for policies/domain logic, application tests for transactions, integration tests for DB/queues/providers, contract tests for APIs/webhooks, E2E tests for critical journeys, and security tests for isolation/signatures/privilege/secret redaction. Critical suites cover messaging, AI tools, billing, workflows and tenant isolation.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart TB
+UNIT[Unit] --> APP[Application]
+APP --> INT[Integration]
+INT --> CONTRACT[Contract]
+CONTRACT --> E2E[E2E]
+SEC[Security] --> GATE[Release Gate]
+UNIT --> GATE
+APP --> GATE
+INT --> GATE
+CONTRACT --> GATE
+E2E --> GATE
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+The design must fail closed on authorization, preserve tenant scope, make retries safe, and expose enough telemetry to diagnose production behavior.

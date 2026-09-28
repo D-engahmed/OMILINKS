@@ -1,21 +1,27 @@
-# Documentation Scaffold
+# Screen Specifications
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Every operational screen defines its complete UI state, not only the success state.
 
-## Scope
+## Contract
 
-TODO.
+Core screens: Inbox, Customer, Workforce, Automation, Knowledge, Quality, Analytics, Billing, Settings. Data-heavy screens must define loading, empty, error, forbidden, stale, partial and success states. Static demo data must never masquerade as live production data.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart TB
+SHELL[App Shell] --> INBOX[Inbox]
+SHELL --> CUSTOMER[Customers]
+SHELL --> WORK[Workforce]
+SHELL --> AUTO[Automation]
+SHELL --> KNOW[Knowledge]
+SHELL --> QA[Quality]
+SHELL --> BILL[Billing]
+SHELL --> SETTINGS[Settings]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+The design must fail closed on authorization, preserve tenant scope, make retries safe, and expose enough telemetry to diagnose production behavior.

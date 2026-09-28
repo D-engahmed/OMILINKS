@@ -1,21 +1,24 @@
-# Documentation Scaffold
+# Coding Standards
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+Code structure must reflect business boundaries rather than infrastructure convenience.
 
-## Scope
+## Contract
 
-TODO.
+Routes/controllers stay thin; domain modules own business rules; provider SDKs stay behind adapters; frontend never accesses databases; strict TypeScript is required; runtime validation is required for untrusted input; errors carry correlation context and never swallow failures.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart TB
+HTTP[HTTP] --> APP[Application Service]
+APP --> DOMAIN[Domain]
+DOMAIN --> DATA[Data Access]
+APP --> EVENTS[Events]
+DATA --> PG[(PostgreSQL)]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+The design must fail closed on authorization, preserve tenant scope, make retries safe, and expose enough telemetry to diagnose production behavior.

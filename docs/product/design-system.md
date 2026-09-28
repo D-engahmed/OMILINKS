@@ -1,21 +1,22 @@
-# Documentation Scaffold
+# Design System
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+The console is an operational product: readability, state clarity and fast action outrank decorative complexity.
 
-## Scope
+## Contract
 
-TODO.
+Use semantic design tokens for background, foreground, muted text, border, focus, destructive, success, warning and info. Shared primitives include Button/Input/Dialog/Table/Badge/Toast/Skeleton; operational patterns include ConversationTimeline, AssignmentPicker, AIStatus, WorkflowRunStatus and IntegrationHealth. Target WCAG 2.2 AA practices.
 
-## Invariants and Decisions
+## Mermaid Flow
 
-TODO.
+```mermaid
+flowchart LR
+TOKENS[Tokens] --> PRIMITIVES[UI Primitives]
+PRIMITIVES --> PATTERNS[Operational Patterns]
+PATTERNS --> SCREENS[Product Screens]
+```
 
-## Interfaces / Dependencies
+## Engineering Rule
 
-TODO.
-
-## Open Questions
-
-TODO.
+The design must fail closed on authorization, preserve tenant scope, make retries safe, and expose enough telemetry to diagnose production behavior.
