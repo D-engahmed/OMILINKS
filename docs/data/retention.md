@@ -1,167 +1,158 @@
-# Data Retention
+# Data Retention — Implementation Specification
 
-> Status: **Target production data lifecycle contract**
+> Status: **Target production data lifecycle blueprint**
 
-Retention controls how long OMILINKS stores, exposes and physically deletes each data class.
+Retention is defined by data class and purpose.
 
-Retention is not one global number.
+## 1. Retention Classes
 
-## 1. Data Classes
+| Class | Access | Lifecycle |
+|---|---|---|
+| security/audit | restricted | long-lived |
+| billing/payment | restricted | financial retention |
+| conversations | tenant policy | operational retention |
+| customer PII | restricted | purpose/retention bound |
+| raw webhooks | limited | short operational window |
+| AI traces | restricted | shortest useful window where practical |
+| knowledge sources | business-defined | until deleted/retention boundary |
+| embeddings/index | derived | removed with source |
+| logs | operational | short raw retention |
 
-| Data class | Typical treatment |
-|---|---|
-| audit/security events | long retention |
-| conversation messages | tenant/configurable retention |
-| customer PII | configurable + privacy requirements |
-| raw provider webhooks | short/medium operational retention |
-| AI traces | restricted, privacy-aware retention |
-| knowledge sources | until disabled/deleted + policy |
-| embeddings/indexes | derived; delete with source policy |
-| usage records | financial/operational retention |
-| payment records | financial retention |
-| application logs | short raw retention; aggregate longer |
+Exact durations are policy/configuration, not hardcoded into application logic.
 
-Exact periods are commercial/legal policy, not an engineering constant.
+## 2. Retention Metadata
 
-## 2. Lifecycle
+Records that require controlled purge can carry:
+
+~~~text
+retention_class
+retention_until
+deleted_at
+legal_hold
+purge_status
+~~~
+
+## 3. Lifecycle Pipeline
 
 ~~~mermaid
 flowchart LR
-    CREATED[Created] --> ACTIVE[Active Retention]
-    ACTIVE --> EXPIRING[Retention Approaching]
-    EXPIRING --> ARCHIVE[Reduced Access / Archive]
-    ARCHIVE --> PURGE[Physical Deletion]
-    PURGE --> DERIVED[Derived Store Cleanup]
-    BACKUP[Backups] -. expiration policy .-> PURGE
+ACTIVE[Active Record] --> EXPIRING[Near Retention]
+EXPIRING --> ARCHIVE[Archive/Restricted]
+ARCHIVE --> PURGE[Canonical Purge]
+PURGE --> DERIVED[Derived Store Cleanup]
+BACKUP[Backups] --> BACKUPEXP[Backup Expiry]
 ~~~
 
-## 3. Retention Metadata
+## 4. Logical vs Physical Delete
 
-Sensitive long-lived records may require:
-
-- retention_class;
-- retention_until;
-- legal_hold where applicable;
-- deleted_at;
-- deletion_job state.
-
-## 4. Tenant Configuration
-
-Tenants may configure retention only within platform-supported bounds.
-
-Example:
+Logical delete:
 
 ~~~text
-conversation_retention_days
-ai_trace_retention_days
-raw_webhook_retention_days
+record inaccessible
+record marked deleted
+derived cleanup queued
 ~~~
 
-A tenant setting cannot violate platform security/legal requirements.
-
-## 5. Deletion Semantics
-
-Logical deletion may hide data immediately while physical cleanup happens asynchronously.
-
-Sequence:
+Physical deletion:
 
 ~~~text
-user/admin delete
- -> canonical record disabled/deleted
- -> API access blocked
- -> derived indexes queued for deletion
- -> object storage cleanup
- -> analytics projection cleanup
- -> backup expiry according to backup policy
+remove canonical row/object
+cleanup indexes/cache
+respect backup expiry
 ~~~
+
+## 5. Deletion Ordering
+
+Canonical state changes first.
+
+~~~text
+canonical delete
+ -> deny future reads
+ -> remove from search/vector
+ -> remove object storage
+ -> cleanup projections
+ -> backup expires later
+~~~
+
+A stale index must not resurrect deleted data.
 
 ## 6. AI Trace Retention
 
-AI traces can contain:
+AI traces may contain:
 
-- customer messages;
-- retrieved documents;
-- tool outputs;
+- customer content;
+- retrieved knowledge;
+- tool output;
 - model output.
 
-Therefore raw trace retention should be shorter or more restricted than operational conversation state unless a contract requires otherwise.
+Therefore tracing policies distinguish:
 
-## 7. Knowledge Deletion
+~~~text
+metadata retained longer
+raw content retained shorter
+~~~
 
-When a knowledge source is deleted, retrieval must stop using it before index deletion completes.
+Where operationally safe, store hashes/references instead of duplicate raw content.
 
-The canonical deletion flag is authoritative.
+## 7. Legal Hold
 
-## 8. Audit Retention
-
-Audit records should preserve:
-
-- actor;
-- organization;
-- operation;
-- resource;
-- timestamp;
-- result;
-- correlation.
-
-Do not store unnecessary sensitive payloads merely to create an audit trail.
-
-## 9. Legal / Compliance Hold
-
-Where the business later requires a legal hold mechanism:
+A legal hold blocks eligible purge operations.
 
 ~~~mermaid
 stateDiagram-v2
     [*] --> RETAINING
     RETAINING --> EXPIRING
-    EXPIRING --> ON_HOLD
-    ON_HOLD --> RETAINING
+    EXPIRING --> HOLD
+    HOLD --> RETAINING
     EXPIRING --> PURGED
     RETAINING --> PURGED
 ~~~
 
-A hold prevents deletion while it is active.
+## 8. Backup Interaction
 
-## 10. Backups
+Deleting primary data does not immediately delete copies in backup.
 
-Deletion from the primary database does not imply immediate removal from backups.
+Backup retention is separate.
 
-Backup expiration follows the backup retention policy.
+A restore must reapply current authorization boundaries.
 
-Restored backups must still enforce current access controls after recovery.
+## 9. Tenant Configuration
 
-## 11. Privacy-Safe Exports
+Tenant retention settings must be constrained by platform policy.
 
-Exports should not extend retention accidentally.
+A tenant cannot choose a retention period that violates required security/financial/platform controls.
 
-Generate only requested/scope-authorized data and use expiring access.
+## 10. Purge Jobs
 
-## 12. Observability
+Purge jobs are:
 
-Track:
+- tenant-aware;
+- resumable;
+- rate limited;
+- observable;
+- idempotent;
+- auditable.
 
-- pending deletion count;
-- deletion lag;
-- failed purge jobs;
-- index cleanup lag;
-- retention-policy distribution;
-- legal holds.
-
-## 13. Failure Modes
+## 11. Failure Modes
 
 | Failure | Behavior |
 |---|---|
-| purge worker fails | retry |
-| derived index cleanup fails | canonical data remains deleted/blocked |
-| storage cleanup fails | alert + retry |
-| retention config invalid | reject configuration |
-| legal hold active | block purge |
+| purge worker crash | retry |
+| object cleanup failure | retain purge backlog + alert |
+| index cleanup failure | canonical block remains |
+| legal hold | skip purge |
+| invalid retention configuration | reject |
+| partial purge | resume from durable checkpoint |
 
-## 14. Acceptance Criteria
+## 12. Tests
 
-- Retention is defined per data class.
-- Logical deletion blocks access quickly.
-- Derived stores eventually clean up.
-- Backups follow separate expiry policy.
-- Holds can prevent deletion where implemented.
-- Retention operations are observable and auditable.
+- deletion blocks read;
+- index cannot return deleted record;
+- legal hold;
+- purge retry;
+- cross-tenant purge;
+- retention configuration validation.
+
+## 13. Acceptance
+
+Retention is complete when deletion, archival, derived cleanup, backup interaction and legal hold semantics are durable and testable.

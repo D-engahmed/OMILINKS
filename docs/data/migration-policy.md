@@ -1,153 +1,131 @@
-# Migration Policy
+# Migration Policy — Implementation Specification
 
-> Status: **Target production database-change contract**
+> Status: **Target production database-change blueprint**
 
-Database migrations are controlled changes to business state. Migration safety includes schema compatibility, lock behavior, backfill strategy, deployment ordering and recovery.
+Database migration is a compatibility problem across code versions, data and operations.
 
-## 1. Preferred Strategy
-
-Use expand -> migrate -> contract.
+## 1. Expand / Migrate / Contract
 
 ~~~mermaid
 flowchart LR
-OLD[Old Schema] --> EXPAND[Additive Schema]
-EXPAND --> COMPAT[Backward-Compatible Code]
-COMPAT --> BACKFILL[Bounded Backfill]
-BACKFILL --> SWITCH[Switch Reads / Writes]
-SWITCH --> CONTRACT[Remove Legacy Later]
+OLD[Current Schema] --> EXPAND[Add Compatible Schema]
+EXPAND --> DEPLOY[Deploy Compatible Code]
+DEPLOY --> BACKFILL[Bounded Backfill]
+BACKFILL --> SWITCH[Switch Reads/Writes]
+SWITCH --> CONTRACT[Remove Legacy]
 ~~~
 
-## 2. Expand Phase
+## 2. Expand Rules
 
-Allowed examples:
+Safe candidates:
 
-- add nullable column;
-- add new table;
-- add compatible index;
-- add new enum value when consumers tolerate it.
+- new nullable column;
+- new table;
+- new compatible index;
+- new non-required field.
 
-Do not remove data required by currently deployed code.
+Avoid removing/renaming fields used by currently deployed code.
 
-## 3. Compatibility Window
+## 3. Dual Read / Dual Write
 
-During rolling deployment, old and new application versions may run simultaneously.
-
-Therefore schema changes must remain compatible across that overlap.
-
-## 4. Backfills
-
-Large backfills should:
-
-- run in batches;
-- avoid unbounded locks;
-- expose progress;
-- be resumable;
-- be rate limited;
-- be observable.
-
-Do not make a huge backfill part of an HTTP request.
-
-## 5. Indexes and Locks
-
-Before production:
-
-- estimate row count;
-- estimate index creation time;
-- inspect hot queries;
-- determine lock behavior;
-- understand replica impact;
-- plan rollback/mitigation.
-
-Use deployment-safe index methods supported by the selected PostgreSQL version where appropriate.
-
-## 6. Data Transformation
-
-For irreversible transformations:
+For semantic changes:
 
 ~~~text
-old_value
- -> transformed_value
- -> validation
- -> cutover
+old field
+new field
+      |
+      +-> dual write during migration
+      |
+      +-> backfill
+      |
+      +-> compare
+      |
+      +-> cutover
 ~~~
 
-Retain enough information to detect and repair partial migration.
+Remove the old field only after compatibility evidence exists.
 
-## 7. Destructive Migration
+## 4. Backfill Design
 
-Destructive actions require evidence:
-
-- no supported application version reads the old field;
-- backups are current;
-- restore procedure is known;
-- monitoring exists;
-- rollback/forward-fix strategy is defined.
-
-## 8. Application + Migration Ordering
-
-Safe example:
+Large backfills should have:
 
 ~~~text
-1. deploy code that understands old + new schema
-2. apply migration
+batch size
+checkpoint
+progress
+rate limit
+retry
+pause/resume
+error count
+~~~
+
+Do not hold one transaction over millions of rows.
+
+## 5. Lock Analysis
+
+Before production migration assess:
+
+- affected rows;
+- indexes;
+- lock duration;
+- replica impact;
+- expected write amplification;
+- table rewrite risk.
+
+## 6. Constraint Rollout
+
+For large tables, introduce constraints using rollout methods that avoid long blocking operations where supported.
+
+Then validate existing data before enforcement becomes mandatory.
+
+## 7. Destructive Changes
+
+Before dropping data:
+
+- all readers migrated;
+- all writers migrated;
+- backups verified;
+- restoration proven;
+- rollback/forward-fix documented;
+- monitoring active.
+
+## 8. Application Ordering
+
+~~~text
+1. backward-compatible code
+2. additive migration
 3. backfill
 4. switch reads
-5. stop old writes
-6. later remove legacy
+5. remove old writes
+6. later contract
 ~~~
 
-Unsafe example:
+Never deploy code that requires a column before that column exists.
 
-~~~text
-drop old column
-then deploy code
-that still reads old column
-~~~
-
-## 9. Transaction Boundaries
-
-Small metadata migrations may be transactional.
-
-Large/long operations may need phased execution.
-
-Do not assume rollback is possible after external systems or irreversible data transformations are involved.
-
-## 10. Migration Testing
+## 9. Migration Testing
 
 CI should test:
 
-- fresh database;
-- migration from supported previous version;
-- migration chain;
-- application boot after migration;
-- representative queries;
-- rollback/forward-fix procedure where applicable.
+- clean database;
+- previous supported version -> current;
+- full migration chain;
+- representative data;
+- constraints;
+- application startup;
+- queries after migration.
 
-## 11. Production Checklist
+## 10. Recovery
 
-Before migration:
+If migration partially succeeds:
 
-- backup verified;
-- lock impact assessed;
-- row count estimated;
-- feature compatibility checked;
-- monitoring ready;
-- rollback/mitigation plan documented.
+~~~text
+inspect state
+ -> repair/forward-fix
+ -> do not assume rollback
+~~~
 
-After migration:
+A database rollback is not always safe once external side effects or irreversible transformations occurred.
 
-- schema version verified;
-- error rate checked;
-- latency checked;
-- data invariants sampled;
-- workers checked;
-- event processing checked.
+## 11. Acceptance
 
-## 12. Acceptance Criteria
-
-- Migrations are compatibility-first.
-- Large backfills are resumable.
-- Destructive changes are delayed until safe.
-- Production lock impact is assessed.
-- Supported migration path is tested in CI.
-- Recovery strategy exists for irreversible changes.
+Every production migration must have compatibility analysis, lock analysis, data validation, deployment ordering and recovery procedure.

@@ -1,150 +1,129 @@
-# Backup and Restore
+# Backup and Restore — Implementation Specification
 
-> Status: **Target production recovery contract**
-
-Backups exist to recover data after corruption, operational error, infrastructure loss or security incident.
-
-A successful backup job is not proof of recoverability. Restore tests are required.
+> Status: **Target production recovery blueprint**
 
 ## 1. Recovery Objectives
 
-Production must define:
+Production defines:
 
-- RPO: acceptable data loss window;
-- RTO: acceptable recovery time.
+~~~text
+RPO = maximum acceptable data loss
+RTO = maximum acceptable recovery time
+~~~
 
-These values should differ by environment/tier.
+Targets differ by environment/service criticality.
 
 ## 2. Backup Layers
 
-~~~text
-PostgreSQL
- -> automated managed backup
- -> point-in-time recovery / WAL where supported
-Object Storage
- -> versioning
- -> replication where required
-Event/Outbox
- -> retained history useful for replay
-~~~
+- PostgreSQL full/managed backups;
+- WAL/point-in-time recovery where supported;
+- object-storage versioning/lifecycle;
+- event/outbox history;
+- configuration/version artifacts.
 
-Event history complements backups but does not replace them.
+Backups are encrypted and access-controlled.
 
-## 3. Recovery Architecture
+## 3. Restore Architecture
 
 ~~~mermaid
 flowchart TB
-    PG[(Primary PostgreSQL)] --> FULL[Backup]
-    FULL --> STORE[Encrypted Backup Storage]
-    STORE --> RESTORE[Isolated Restore Target]
-    RESTORE --> VERIFY[Integrity Verification]
-    VERIFY --> SMOKE[Application Smoke Tests]
-    SMOKE --> RECON[External State Reconciliation]
-    RECON --> READY[Recovery Complete]
+PRIMARY[(Production DB)] --> BACKUP[Encrypted Backup]
+BACKUP --> RESTORE[Isolated Restore]
+RESTORE --> VERIFY[Integrity + Schema Verification]
+VERIFY --> APP[Application Smoke Tests]
+APP --> ISOLATION[Tenant Isolation Tests]
+ISOLATION --> RECON[Provider / Payment Reconciliation]
+RECON --> READY[Recovery Ready]
 ~~~
 
 ## 4. Restore Procedure
 
 1. declare recovery point;
-2. isolate restore target;
-3. restore database;
-4. verify schema/constraints;
-5. restore required object-storage references;
-6. validate tenant isolation;
-7. run application smoke tests;
-8. replay/recover safe durable events where required;
-9. reconcile provider/payment state;
-10. restore service and monitor.
+2. isolate recovery target;
+3. restore PostgreSQL;
+4. verify schema/migrations;
+5. restore object-storage dependencies;
+6. start application in recovery mode;
+7. validate tenant isolation;
+8. recover queue/event processing;
+9. reconcile external providers;
+10. resume customer traffic.
 
-## 5. Backup Integrity
+## 5. Queue Recovery
 
-Check:
+Queue state may be lost or duplicated during catastrophic failure.
 
-- backup completion;
-- size anomalies;
-- age;
-- encryption;
-- retention;
-- access permissions;
-- restore test results.
+Recovery uses durable event/outbox records as a replay source.
 
-Do not treat "backup file exists" as an integrity test.
+Duplicate events are safe only because consumers are idempotent.
 
-## 6. Restore Drill
+## 6. Provider Reconciliation
 
-A scheduled drill should measure:
+After recovery compare external state for:
+
+- payment;
+- message delivery;
+- integration connection;
+- provider jobs where relevant.
+
+Do not assume external state rolled back with the database.
+
+## 7. Restore Verification
+
+Verify:
 
 ~~~text
-backup age
-restore duration
-verification duration
-manual intervention
-missing dependencies
-RPO achieved
-RTO achieved
+authentication
+organization resolution
+customer reads
+conversation reads
+assignment state
+workflow state
+AI run metadata
+billing state
+event publication
+outbox backlog
 ~~~
 
-Store drill results.
+## 8. Security Recovery
 
-## 7. External Provider State
-
-After database restore, external systems may have advanced.
-
-Examples:
-
-- provider sent messages;
-- payment completed;
-- webhook registration changed;
-- integration credential rotated.
-
-Therefore reconciliation is required before declaring state fully recovered.
-
-## 8. Security Incident Restore
-
-If restoring after compromise:
+If compromise is suspected:
 
 ~~~mermaid
 flowchart LR
 INCIDENT[Compromise] --> CONTAIN[Contain]
-CONTAIN --> SNAPSHOT[Preserve Evidence]
-SNAPSHOT --> CLEAN[Known-good Restore]
-CLEAN --> ROTATE[Rotate Credentials]
+CONTAIN --> EVIDENCE[Preserve Evidence]
+EVIDENCE --> RESTORE[Known-good Restore]
+RESTORE --> ROTATE[Rotate Secrets]
 ROTATE --> VERIFY[Security Verification]
 VERIFY --> RECOVER[Resume]
 ~~~
 
-Do not restore compromised credentials or unsafe configuration blindly.
+## 9. Restore Drills
 
-## 9. Object Storage
+A restore drill measures:
 
-Objects should have:
+- time to first recovered DB;
+- application validation time;
+- RPO achieved;
+- RTO achieved;
+- manual steps;
+- missing dependency;
+- reconciliation duration.
 
-- tenant-aware namespace;
-- lifecycle/retention;
-- integrity checksum;
-- versioning where appropriate;
-- access control.
+Keep historical drill evidence.
 
-Database references must be checked after restore.
+## 10. Failure Modes
 
-## 10. Testing
+| Failure | Response |
+|---|---|
+| backup missing | incident |
+| restore corruption | alternate recovery point |
+| object missing | restore/version retrieval |
+| external state mismatch | reconciliation |
+| compromised credential | rotate before service resume |
+| queue duplicate | idempotent consumer |
 
-Restore tests must verify:
+## 11. Acceptance
 
-- authentication works;
-- organization boundaries work;
-- customer retrieval works;
-- conversation retrieval works;
-- workflow state is coherent;
-- billing state is coherent;
-- event/outbox processing works;
-- critical integrations can reconnect.
-
-## 11. Acceptance Criteria
-
-- RPO/RTO are defined for production.
-- Restore has been demonstrated, not assumed.
-- Tenant isolation is tested after restore.
-- External provider/payment state is reconciled.
-- Credentials are rotated when recovery involves compromise.
-- Restore drill results are retained.
+Backup readiness means a successful restore drill has demonstrated actual recovery and tenant isolation, not merely that a backup job completed.

@@ -1,32 +1,35 @@
-# Data Model and ERD
+# Data Model and ERD — Implementation Specification
 
-> Status: **Target production data contract**
+> Status: **Target production data blueprint**
 
-PostgreSQL is the transactional source of truth for OMILINKS. Search/vector indexes, caches, analytics projections and object storage are derived/specialized stores.
+## 1. Database Role
 
-## 1. Design Principles
+PostgreSQL is the transactional source of truth for:
 
-The data model must provide:
+- tenancy;
+- identity/membership;
+- customers;
+- conversations/messages;
+- workforce/assignments;
+- AI run metadata;
+- workflows;
+- quality;
+- billing;
+- usage;
+- audit;
+- outbox.
 
-- explicit tenant ownership;
-- strong relational integrity;
-- auditable state changes;
-- safe concurrent updates;
-- append-oriented history for messages/events/usage;
-- explicit versioning where business meaning changes;
-- minimal duplication of sensitive data.
+Search, vector, cache and analytics stores are derived.
 
-## 2. Core Aggregate Map
+## 2. Aggregate Map
 
 ~~~mermaid
 erDiagram
     ORGANIZATION ||--o{ MEMBERSHIP : contains
-    ORGANIZATION ||--o{ CLIENT_ACCOUNT : serves
+    ORGANIZATION ||--o{ CLIENT_ACCOUNT : owns
     ORGANIZATION ||--o{ PROGRAM : owns
-    CLIENT_ACCOUNT ||--o{ PROGRAM : contracts
     PROGRAM ||--o{ SECTOR : contains
     SECTOR ||--o{ TEAM : contains
-
     ORGANIZATION ||--o{ CUSTOMER : owns
     CUSTOMER ||--o{ CUSTOMER_IDENTITY : has
     CUSTOMER ||--o{ CONVERSATION : participates
@@ -34,264 +37,240 @@ erDiagram
     CONVERSATION ||--o{ ASSIGNMENT : has
     WORKFORCE_MEMBER ||--o{ ASSIGNMENT : receives
     ORGANIZATION ||--o{ WORKFORCE_MEMBER : owns
-
-    ORGANIZATION ||--o{ KNOWLEDGE_BASE : owns
-    KNOWLEDGE_BASE ||--o{ DOCUMENT : contains
-    DOCUMENT ||--o{ DOCUMENT_VERSION : versions
-    DOCUMENT_VERSION ||--o{ CHUNK : contains
-
-    ORGANIZATION ||--o{ AI_AGENT : owns
-    AI_AGENT ||--o{ AI_RUN : produces
+    ORGANIZATION ||--o{ AI_RUN : owns
+    AI_RUN ||--o{ AI_RUN_STEP : contains
     AI_RUN ||--o{ TOOL_INVOCATION : creates
-
-    ORGANIZATION ||--o{ WORKFLOW_DEFINITION : owns
-    WORKFLOW_DEFINITION ||--o{ WORKFLOW_VERSION : versions
-    WORKFLOW_VERSION ||--o{ WORKFLOW_RUN : executes
-
+    ORGANIZATION ||--o{ WORKFLOW_RUN : owns
     ORGANIZATION ||--o{ QUALITY_EVALUATION : owns
     ORGANIZATION ||--o{ SUBSCRIPTION : owns
-    SUBSCRIPTION ||--o{ PAYMENT : includes
     ORGANIZATION ||--o{ USAGE_RECORD : produces
+    ORGANIZATION ||--o{ OUTBOX_EVENT : publishes
 ~~~
 
-## 3. Ownership Strategy
+## 3. Tenant Column Rule
 
-Every tenant-owned aggregate carries an explicit organization ownership path.
-
-Recommended:
+Every tenant-owned table should normally have:
 
 ~~~text
-customer.organization_id
-conversation.organization_id
-ai_run.organization_id
-workflow_run.organization_id
-quality_evaluation.organization_id
-subscription.organization_id
-usage_record.organization_id
+organization_id NOT NULL
 ~~~
 
-Parent-child ownership must be consistent.
+Exceptions require documented justification.
+
+The organization ID is the first SQL predicate for tenant-owned reads.
+
+## 4. Primary Keys
+
+Use internal identifiers for domain resources.
+
+Provider identifiers are separate columns with provider-scoped uniqueness.
 
 Example:
 
 ~~~text
-conversation.organization_id
-==
-conversation.customer.organization_id
+customer.id = internal UUID
+customer_identity.external_id = provider ID
 ~~~
 
-where the customer is the conversation's canonical customer.
+Never make a provider identifier the primary key of a core domain record.
 
-## 4. UUIDs and External IDs
+## 5. Referential Integrity
 
-Internal primary keys should not depend on provider identifiers.
+Use foreign keys for:
 
-Use internal IDs for:
+- membership -> user/organization;
+- conversation -> customer/organization;
+- message -> conversation;
+- assignment -> conversation/workforce;
+- usage -> organization;
+- payment -> subscription/payment intent.
 
-- customer;
-- conversation;
-- message;
-- workflow;
-- AI run;
-- tool invocation.
+Cross-domain invariants beyond FK capability are enforced at the application/domain layer.
 
-Store external IDs separately:
+## 6. Composite Uniqueness
 
-~~~text
-provider
-provider_account_id
-external_id
-~~~
-
-Add unique constraints appropriate to provider scope.
-
-## 5. Aggregate Boundaries
-
-Do not make every table an independent domain object.
-
-Example aggregate:
-
-~~~text
-Conversation
-  -> participants
-  -> messages
-  -> active control
-  -> assignment state
-~~~
-
-Operations on that aggregate should preserve invariants atomically where necessary.
-
-## 6. Append-Oriented History
-
-Prefer append history for:
-
-- messages;
-- payment/provider events;
-- usage records;
-- assignment history;
-- AI run steps;
-- audit events;
-- workflow step runs.
-
-Mutable projections can be derived from history where useful.
-
-## 7. State vs History
-
-A current state field is useful for fast reads:
-
-~~~text
-conversation.control = human
-~~~
-
-History preserves why it is true:
-
-~~~text
-control_changed events
-~~~
-
-Do not force every UI query to replay the full history, but do not destroy history merely to keep a small table.
-
-## 8. Unique Constraints
-
-Important uniqueness classes include:
+Critical constraints:
 
 ~~~text
 organization + provider + provider_account + external_identity
 organization + provider + provider_event_id
 organization + idempotency_namespace + idempotency_key
+consumer + event_id
 workflow_run + step_id + execution_key
-subscription + external_transaction_id
 ~~~
 
-Exact constraint composition depends on business semantics.
+These constraints protect against concurrency races.
 
-## 9. Foreign Keys
+## 7. Index Strategy
 
-Use foreign keys for ownership relationships.
+Common high-value indexes:
 
-Avoid silently allowing orphaned:
+~~~text
+conversation(organization_id, status, updated_at DESC)
+conversation(organization_id, customer_id, updated_at DESC)
+message(conversation_id, occurred_at ASC)
+assignment(organization_id, status, assigned_at)
+usage_record(organization_id, occurred_at DESC)
+outbox_event(status, occurred_at)
+~~~
 
-- assignments;
-- messages;
-- AI runs;
-- payment records;
-- workflow runs.
+Index design must follow actual production query plans, not assumptions.
 
-Cross-domain references still require application-level validation because the database cannot express every business rule.
+## 8. Partial Indexes
 
-## 10. Soft Delete
+Use partial indexes for hot states where appropriate.
 
-Soft deletion is not universal.
+Example concept:
 
-Use explicit lifecycle state when:
+~~~text
+active assignments only
+active workflow runs
+pending outbox events
+~~~
 
-- historical references matter;
-- retention requires hiding but not immediate physical deletion;
-- the object has a meaningful lifecycle.
+This reduces index size for operational queries.
 
-Use physical deletion where:
+## 9. Unique Constraints vs Application Checks
 
-- data has reached retention boundary;
-- no audit/history requirement remains;
-- derived stores can be safely cleaned.
+Application check:
 
-## 11. Timestamps
+~~~text
+does identity exist?
+ -> no
+ -> insert
+~~~
 
-Use UTC timestamps with explicit semantics:
+is insufficient under concurrency.
 
-- created_at;
-- updated_at;
-- occurred_at;
-- processed_at;
-- completed_at;
-- expires_at where appropriate.
+Database uniqueness is the final arbiter.
 
-Do not mix business occurrence time and ingestion time.
+## 10. Optimistic Concurrency
 
-## 12. Concurrency
+Mutable aggregate records may contain:
 
-Mutable high-contention entities may require:
+~~~text
+version INTEGER NOT NULL
+~~~
 
-- version number;
-- updated_at + optimistic concurrency;
-- database row locking;
-- unique constraints;
-- atomic counters.
+Update:
 
-Usage/quotas may require stronger reservation semantics than ordinary CRUD.
+~~~text
+UPDATE ...
+SET version = version + 1
+WHERE id = ?
+  AND version = expected_version
+~~~
 
-## 13. Sensitive Data
+Zero affected rows means stale state.
 
-Database columns should be classified:
+## 11. Transaction Boundaries
 
-- public operational;
-- tenant confidential;
-- sensitive PII;
-- secret/credential;
-- financial;
-- security/audit.
-
-Secrets should not normally be stored as plaintext.
-
-## 14. Transaction Boundaries
-
-Use one transaction for state that must commit together.
+Use one transaction for changes that must commit together.
 
 Example:
 
 ~~~text
-conversation message create
+message insert
 +
 outbox event
++
+idempotency record
 ~~~
 
-must commit atomically.
+Do not hold transaction open during provider/model calls.
 
-Do not keep database transactions open during model/provider network calls.
+## 12. JSON Columns
 
-## 15. Derived Data
+JSON is appropriate for:
 
-Derived examples:
+- provider-specific metadata;
+- flexible workflow variables;
+- bounded integration configuration.
 
-- search indexes;
-- vector embeddings;
-- analytics aggregates;
-- materialized dashboard views;
-- caches.
+JSON is not appropriate for core fields that require:
 
-Derived data may be rebuilt.
+- foreign keys;
+- authorization;
+- frequent filtering;
+- uniqueness;
+- reliable reporting.
 
-The application should be able to identify the canonical record that produced it.
+## 13. PII Classification
 
-## 16. Analytics Separation
+Each sensitive field should have a classification:
 
-Operational queries and analytical queries may diverge in scale.
+~~~text
+PUBLIC
+INTERNAL
+CONFIDENTIAL
+PII
+SENSITIVE_PII
+FINANCIAL
+SECRET
+SECURITY_AUDIT
+~~~
 
-Start with PostgreSQL read patterns that are safe.
+Classification drives retention, logging and access policy.
 
-As load grows, use read replicas/warehouse/event-driven projections without changing the authoritative domain model.
+## 14. Soft Delete
 
-## 17. Schema Design Review Checklist
+Use lifecycle states when historical references matter.
 
-Before adding a table:
+Physical deletion is a retention process, not a normal UI CRUD operation.
 
-1. Which aggregate owns it?
-2. What is the organization boundary?
-3. What is the lifecycle?
-4. What is mutable vs historical?
-5. What must be unique?
-6. What is the concurrency model?
-7. What is the retention class?
-8. What is the deletion behavior?
-9. Does it generate/consume events?
-10. Does it expose sensitive information?
+## 15. Partitioning
 
-## 18. Acceptance Criteria
+Do not partition prematurely.
 
-- Tenant-owned data has explicit ownership.
-- Provider IDs are not internal primary keys.
-- Critical historical facts are preserved.
-- Foreign keys and uniqueness constraints cover core integrity.
-- Transaction boundaries are explicit.
-- Sensitive data has classification/retention expectations.
-- Derived stores can be rebuilt from canonical data.
+Candidates at scale may include:
+
+- messages by time/tenant strategy;
+- usage records by billing period;
+- audit events by time.
+
+Partitioning requires query/index/backup testing first.
+
+## 16. Read Models
+
+Operational dashboards can use read models/materialized projections when query cost demands it.
+
+Read models must identify their source/event position so they can be rebuilt.
+
+## 17. Consistency Classes
+
+~~~text
+strong:
+  authorization
+  tenant ownership
+  current conversation state
+  billing state
+
+eventual:
+  search
+  vector index
+  analytics
+  dashboard projections
+~~~
+
+The UI must communicate when data is eventually consistent.
+
+## 18. Migration Safety
+
+Schema changes follow expand/migrate/contract.
+
+See migration policy for the deployment sequence.
+
+## 19. Validation Queries
+
+Production data checks should periodically verify:
+
+- child organization matches parent;
+- orphaned foreign keys do not exist;
+- active assignment count is valid;
+- subscription references valid plan;
+- usage source IDs are unique where required;
+- outbox backlog is bounded.
+
+## 20. Acceptance
+
+The data model is implementation-ready when ownership, keys, constraints, indexes, transactions, concurrency and data classification are explicit.
