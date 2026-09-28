@@ -1,267 +1,335 @@
-## AI Agent Runtime
+# AI Agent Runtime — Implementation Specification
 
-> **Status:** Target production architecture
+> Status: **Target implementation blueprint**
 
-The Agent Runtime is the execution engine for autonomous and semi-autonomous customer operations. It is intentionally separated from domain persistence and authorization: the model can propose work, but the runtime and domain services decide whether that work is legal and safe.
+The Agent Runtime is the durable execution engine for autonomous and semi-autonomous operations. It is deliberately separated from customer data ownership, billing, membership and authorization.
 
-## 1. Responsibilities
+## 1. Runtime Boundary
 
-The runtime owns:
+~~~text
+Conversation / Workflow
+  -> StartAIRun
+    -> snapshot policy
+      -> build context
+        -> route model
+          -> execute model
+            -> guardrail
+              -> authorize tool
+                -> execute tool
+                  -> continue or finalize
+~~~
 
-- run lifecycle and state transitions;
-- context assembly;
-- model invocation;
-- tool-call orchestration;
-- budgets, deadlines and cancellation;
-- guardrail evaluation;
-- human handoff;
-- provider fallback;
-- AI telemetry.
+The model proposes outputs and actions. The runtime and domain services decide whether anything can actually happen.
 
-It does **not** own customer, billing, membership, or arbitrary business-data mutation.
+## 2. Required Run Context
 
-## 2. Execution Context
+~~~json
+{
+  "runId": "uuid",
+  "organizationId": "uuid",
+  "conversationId": "uuid",
+  "agentId": "uuid",
+  "agentPolicyVersion": 12,
+  "controlVersion": 41,
+  "trigger": "conversation.message.received",
+  "deadlineAt": "2026-09-28T21:00:00Z",
+  "correlationId": "req_123"
+}
+~~~
 
-Every run must carry:
+A run is invalid if organization, policy version, conversation control version, or correlation context is missing.
 
-| Field | Purpose |
-|---|---|
-| `run_id` | immutable execution identity |
-| `organization_id` | tenant boundary |
-| `conversation_id` | conversation being served |
-| `agent_id` | AI workforce identity |
-| `agent_policy_version` | exact behavior policy |
-| `model_policy_version` | routing policy |
-| `prompt_version` | instruction version |
-| `principal` | initiating human/system identity |
-| `correlation_id` | distributed trace |
-| `deadline_at` | hard execution deadline |
-| `max_steps` | loop bound |
-| `budget` | token/cost/tool constraints |
+## 3. Runtime State Machine
 
-A run without organization or agent policy context is rejected before model execution.
-
-## 3. Context Trust Model
-
-Context is assembled into explicit classes.
-
-1. Runtime security policy — trusted.
-2. Agent policy — trusted configuration, still validated by platform constraints.
-3. Conversation facts — customer-originated data.
-4. Knowledge retrieval — untrusted externalized content.
-5. Tool results — untrusted externalized content.
-
-Customer messages, retrieved documents and tool results can contain instructions, but those instructions must never become system or security policy.
-
-## 4. Run State Machine
-
-```mermaid
+~~~mermaid
 stateDiagram-v2
     [*] --> CREATED
-    CREATED --> POLICY_CHECK
-    POLICY_CHECK --> CONTEXT_BUILD
-    POLICY_CHECK --> BLOCKED
-
-    CONTEXT_BUILD --> MODEL_CALL
+    CREATED --> POLICY_SNAPSHOT
+    POLICY_SNAPSHOT --> CONTEXT_BUILD
+    POLICY_SNAPSHOT --> BLOCKED
+    CONTEXT_BUILD --> MODEL_EXECUTION
     CONTEXT_BUILD --> FAILED
-
-    MODEL_CALL --> GUARDRAIL
-    MODEL_CALL --> RETRY
-    MODEL_CALL --> FALLBACK
-    MODEL_CALL --> FAILED
-    MODEL_CALL --> TIMED_OUT
-
-    RETRY --> MODEL_CALL
-    FALLBACK --> MODEL_CALL
-
-    GUARDRAIL --> TOOL_AUTH
-    GUARDRAIL --> FINALIZE
-    GUARDRAIL --> HANDOFF
-    GUARDRAIL --> BLOCKED
-
-    TOOL_AUTH --> TOOL_EXEC
-    TOOL_AUTH --> HANDOFF
-    TOOL_AUTH --> BLOCKED
-
-    TOOL_EXEC --> MODEL_CALL
-    TOOL_EXEC --> FINALIZE
-    TOOL_EXEC --> FAILED
-
+    MODEL_EXECUTION --> MODEL_RESULT
+    MODEL_EXECUTION --> RETRY_WAIT
+    MODEL_EXECUTION --> FALLBACK
+    MODEL_EXECUTION --> TIMED_OUT
+    MODEL_EXECUTION --> FAILED
+    RETRY_WAIT --> MODEL_EXECUTION
+    FALLBACK --> MODEL_EXECUTION
+    MODEL_RESULT --> OUTPUT_GUARD
+    MODEL_RESULT --> TOOL_PLANNING
+    TOOL_PLANNING --> TOOL_AUTHORIZATION
+    TOOL_AUTHORIZATION --> TOOL_WAIT_APPROVAL
+    TOOL_AUTHORIZATION --> TOOL_EXECUTION
+    TOOL_AUTHORIZATION --> BLOCKED
+    TOOL_WAIT_APPROVAL --> TOOL_EXECUTION
+    TOOL_EXECUTION --> CONTINUE
+    TOOL_EXECUTION --> RECONCILING
+    RECONCILING --> CONTINUE
+    CONTINUE --> CONTEXT_BUILD
+    OUTPUT_GUARD --> FINALIZE
+    OUTPUT_GUARD --> HANDOFF
+    OUTPUT_GUARD --> BLOCKED
     FINALIZE --> COMPLETED
     HANDOFF --> COMPLETED
     BLOCKED --> COMPLETED
     TIMED_OUT --> COMPLETED
     FAILED --> COMPLETED
-```
+~~~
 
-A terminal outcome must be persisted exactly once even when multiple internal attempts occurred.
+All state transitions are persisted. In-memory state is an optimization, not the source of truth.
 
-## 5. End-to-End Control Loop
+## 4. Transition Preconditions
 
-```mermaid
-sequenceDiagram
-    participant C as Conversation
-    participant R as Agent Runtime
-    participant P as Policy
-    participant K as Knowledge
-    participant MR as Model Router
-    participant M as Model
-    participant G as Guardrails
-    participant T as Tool Runtime
-    participant W as Workforce
+| Transition | Preconditions |
+|---|---|
+| CREATED -> POLICY_SNAPSHOT | run exists, organization active |
+| POLICY_SNAPSHOT -> CONTEXT_BUILD | policy dependency graph resolves |
+| CONTEXT_BUILD -> MODEL_EXECUTION | context is authorized and bounded |
+| MODEL_RESULT -> TOOL_PLANNING | tool intent matches declared schema |
+| TOOL_AUTHORIZATION -> TOOL_EXECUTION | auth + entitlement + risk checks pass |
+| TOOL_WAIT_APPROVAL -> TOOL_EXECUTION | approval matches exact action/version |
+| CONTINUE -> CONTEXT_BUILD | budget, deadline and control version valid |
+| FINALIZE -> COMPLETED | output validated and canonical message persisted |
 
-    C->>R: Start run
-    R->>P: Resolve effective policy
-    P-->>R: Policy snapshot
-    R->>K: Retrieve authorized context
-    K-->>R: Grounded context
-    R->>MR: Resolve model
-    MR-->>R: Model route
-    R->>M: Generate
-    M-->>R: Answer or tool intent
-    R->>G: Evaluate
+## 5. Durable Persistence Model
 
-    alt Tool call
-      G-->>R: Allowed
-      R->>T: Execute authorized tool
-      T-->>R: Sanitized result
-      R->>M: Continue
-    else Handoff
-      G-->>R: Handoff
-      R->>W: Assign human
-    else Final
-      G-->>R: Allowed response
-    end
+| Record | Responsibility |
+|---|---|
+| ai_run | lifecycle, owner, policy snapshots, terminal outcome |
+| ai_run_step | model/tool/guardrail step state |
+| ai_handoff | human control transfer |
+| guardrail_decision | policy decision/evidence |
+| ai_budget_reservation | reserved hard budget where required |
+| ai_run_event | append-only execution facts where required |
 
-    R->>C: Outcome
-```
+Every record is organization-scoped.
 
-## 6. Loop and Termination Rules
+## 6. Step Record
 
-Autonomous execution ends when:
+~~~json
+{
+  "stepId": "uuid",
+  "runId": "uuid",
+  "sequence": 7,
+  "type": "model|tool|guardrail|handoff|finalize",
+  "status": "started|succeeded|failed|unknown",
+  "startedAt": "...",
+  "completedAt": "...",
+  "provider": "...",
+  "model": "...",
+  "inputTokens": 1200,
+  "outputTokens": 350,
+  "latencyMs": 1840,
+  "errorClass": null
+}
+~~~
 
-- a final response satisfies the output contract;
-- a tool requires approval;
-- policy blocks the operation;
-- a configured handoff condition fires;
-- max steps is reached;
-- deadline expires;
-- budget expires;
-- model/provider fallback is exhausted;
-- a human takes control;
-- the conversation becomes closed/resolved.
+Sequence numbers are monotonic inside a run.
 
-There is no implicit "keep thinking" loop.
+## 7. Transaction Boundaries
 
-## 7. Human Takeover Race Protection
+Never hold a database transaction open across an LLM or external provider call.
 
-The main race condition is:
+Preferred execution:
 
-```text
-AI Run A starts
-Human takes control
-AI Run A finishes later
-AI Run A attempts customer send
-```
+~~~text
+TX-1: create AI run + initial step + start command
+COMMIT
+worker invokes provider
+TX-2: persist provider result + next state
+COMMIT
+~~~
 
-Use a monotonic `control_version` on the conversation.
+External calls have their own invocation identity so a DB retry cannot automatically repeat a provider side effect.
 
-Every autonomous continuation carries the version it started with. Before any customer-facing side effect:
+## 8. Context Assembly
 
-```text
-if run.control_version != conversation.control_version:
-    reject stale continuation
-```
-
-A human takeover increments the control version.
-
-## 8. Tool Loop
-
-Every tool invocation follows:
-
-```mermaid
+~~~mermaid
 flowchart TD
-    INTENT[Model Tool Intent] --> LOOKUP[Tool Registry]
-    LOOKUP --> VERSION[Resolve Version]
-    VERSION --> VALIDATE[Validate Input]
-    VALIDATE --> TENANT[Resolve Tenant Scope]
-    TENANT --> AUTHZ[Permission Check]
-    AUTHZ --> ENTITLEMENT[Entitlement Check]
-    ENTITLEMENT --> APPROVAL{Approval?}
-    APPROVAL -->|yes| WAIT[Durable Approval]
-    WAIT --> EXEC[Execute]
-    APPROVAL -->|no| EXEC
-    EXEC --> RESULT[Sanitize Result]
-    RESULT --> AUDIT[Persist Invocation]
-    AUDIT --> MODEL[Return Bounded Result]
-```
+RUN[AI Run] --> POLICY[Context Policy]
+POLICY --> HISTORY[Conversation Projection]
+POLICY --> CUSTOMER[Customer Projection]
+POLICY --> KNOW[Knowledge Retrieval]
+POLICY --> WORKFLOW[Workflow State]
+POLICY --> TOOLS[Prior Tool Results]
+HISTORY --> BOUND[Authorize + Bound]
+CUSTOMER --> BOUND
+KNOW --> BOUND
+WORKFLOW --> BOUND
+TOOLS --> BOUND
+BOUND --> PROMPT[Model Context]
+~~~
 
-## 9. Persistence Model
+Never serialize arbitrary database entities directly into prompts.
 
-Conceptual records:
+## 9. Prompt Layering
 
-- `ai_agent`
-- `agent_policy_version`
-- `prompt_version`
-- `ai_run`
-- `ai_run_step`
-- `guardrail_decision`
-- `tool_invocation`
-- `ai_handoff`
+~~~text
+platform policy
+ -> tenant policy
+ -> agent policy
+ -> task instructions
+ -> authorized context
+ -> untrusted customer/document content
+~~~
 
-The run references versions of every policy component that materially affected execution.
+Customer messages, retrieved documents and tool outputs remain untrusted data even when presented inside the prompt.
 
-## 10. Failure Semantics
+## 10. Control-Version Race
 
-### Provider timeout
+The conversation contains a monotonic `controlVersion`.
 
-Retry only if the operation is read-like or the provider operation is demonstrably safe to repeat.
+Example:
 
-### Tool timeout
+~~~text
+AI started with controlVersion = 41
+human takeover changes controlVersion = 42
+AI later attempts send with version 41
+runtime rejects as stale
+~~~
 
-A timeout does not prove the external action failed. For write operations, the runtime may need reconciliation before retry.
+The check is repeated immediately before every customer-visible side effect.
 
-### Worker crash
+Cancellation alone is not sufficient because cancellation and external completion can race.
 
-The persisted run state determines whether recovery can resume. Never resume an arbitrary state after an unknown external side effect without checking idempotency/reconciliation rules.
+## 11. Runtime Budgets
 
-### Human takeover
+Every run can have hard limits:
 
-Mark stale autonomous continuations as cancelled before sending further output.
+- maximum steps;
+- maximum model calls;
+- maximum tool calls;
+- maximum duration;
+- maximum estimated cost;
+- maximum input/context tokens;
+- maximum repeated failure count.
 
-## 11. Observability
+Budget state is updated after every completed step.
 
-Every run should expose:
+## 12. Retry Matrix
 
-- run duration;
-- model/provider;
+| Operation | Retry policy |
+|---|---|
+| model timeout | bounded retry |
+| model 429 | provider-aware retry |
+| model 5xx | bounded retry |
+| tool read timeout | retry if safe |
+| tool write timeout | reconcile first |
+| authorization denial | no retry |
+| validation error | no retry |
+| stale control version | stale/cancel |
+
+## 13. Cancellation Sources
+
+- human takeover;
+- conversation closure;
+- run deadline;
+- tenant automation disabled;
+- entitlement suspension;
+- security incident;
+- operator cancellation.
+
+Cancellation is persisted and checked before continuation and before side effects.
+
+## 14. Worker Leases
+
+To prevent two workers executing one run concurrently, use a short lease:
+
+~~~text
+run_id
+worker_id
+lease_until
+heartbeat_at
+~~~
+
+Lease loss prevents the worker from starting new side effects.
+
+## 15. Recovery Algorithm
+
+After a worker crash:
+
+1. acquire the run lease;
+2. load the latest persisted state;
+3. verify deadline, budget and control version;
+4. inspect the last step status;
+5. reconcile any unknown external side effect;
+6. continue only from a safe state;
+7. emit recovery telemetry.
+
+Never blindly replay an unknown payment/message/write operation.
+
+## 16. Tool Continuation
+
+A tool result is returned to the model only after:
+
+~~~text
+authorization
+ -> entitlement
+ -> execution
+ -> output sanitization
+ -> audit
+~~~
+
+Tool output is untrusted input for the next reasoning step.
+
+## 17. Finalization
+
+Before customer-visible finalization:
+
+1. verify run is still active;
+2. verify conversation control version;
+3. validate response contract;
+4. apply output guardrails;
+5. persist canonical outbound message;
+6. enqueue provider delivery;
+7. mark run terminal.
+
+This deliberately separates canonical message creation from external delivery.
+
+## 18. Observability Contract
+
+Every run must expose enough telemetry for:
+
+- queue wait;
+- model latency;
 - first-token latency;
-- input/output tokens;
+- tool latency;
+- guardrail latency;
+- retry/fallback counts;
+- token usage;
 - estimated/actual cost;
-- retrieval source identifiers;
-- tool count and latency;
-- guardrail decisions;
-- handoff reason;
-- terminal outcome;
-- error classification.
+- handoff/block rate;
+- terminal outcome.
 
-Raw prompts/responses follow retention and privacy policy rather than unlimited logging.
+Trace identity should include run ID, conversation ID, organization ID, agent policy version, model route and correlation ID.
 
-## 12. Security Invariants
+## 19. Security Invariants
 
-- organization scope is mandatory;
-- model output never grants permission;
-- tool access is independently authorized;
-- raw provider credentials never enter model context;
-- knowledge retrieval is tenant/scope filtered;
-- stale autonomous continuations cannot mutate conversation state;
-- AI writes only through application/domain services.
+- model output never grants authorization;
+- every tool call is independently authorized;
+- tenant scope is explicit on repository access;
+- provider credentials never enter model context;
+- stale control versions cannot send;
+- high-risk actions can fail closed.
 
-## 13. Acceptance Criteria
+## 20. Test Vectors
 
-- Runs are resumable only from known safe states.
-- Human takeover prevents stale sends.
-- Tool authorization is checked on every call.
-- Every side-effecting operation defines idempotency/reconciliation.
-- Every completed run has traceable model/policy/tool versions.
-- The runtime cannot access another organization through a valid identifier.
+- normal single-response run;
+- multi-tool run;
+- duplicate worker delivery;
+- model timeout;
+- model 429;
+- provider timeout after external write;
+- human takeover during generation;
+- conversation closure during tool execution;
+- budget exhaustion;
+- prompt injection;
+- unauthorized resource identifier supplied by model;
+- worker crash after side effect but before result persistence.
+
+## 21. Definition of Done
+
+An execution path is complete only when it has:
+
+`precondition -> transaction -> side effect -> durable outcome -> telemetry -> recovery behavior`.
