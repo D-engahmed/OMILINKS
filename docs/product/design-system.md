@@ -1,47 +1,48 @@
-# Design System
+# Design System — Implementation Contract
 
 > Status: **Target production UI system**
 
-The design system should make the operational product consistent, accessible and fast to use.
+## 1. Architecture
 
-## 1. Design Principles
+The design system has three layers:
 
-1. State clarity over decoration.
-2. Consistent action hierarchy.
-3. Dense information where operations require it.
-4. Strong distinction between human, AI, system and provider actions.
-5. Accessibility as a component property, not a page afterthought.
+~~~text
+tokens
+ -> primitives
+   -> semantic product components
+     -> screens
+~~~
 
-## 2. Semantic Tokens
+## 2. Token System
 
-Define tokens for:
+Semantic tokens:
 
-- background;
-- surface;
-- foreground;
-- muted foreground;
-- border;
-- focus;
-- primary action;
-- destructive;
-- warning;
-- success;
-- information;
-- disabled.
+~~~text
+surface
+surface-muted
+foreground
+foreground-muted
+border
+focus
+primary
+success
+warning
+danger
+info
+disabled
+~~~
 
-Components consume semantic tokens rather than hard-coded values.
+Components must use tokens, not page-specific colors.
 
-## 3. Primitive Layer
+## 3. Primitives
 
-Core primitives:
+Examples:
 
 ~~~text
 Button
 Input
 Textarea
 Select
-Checkbox
-Radio
 Dialog
 Drawer
 Popover
@@ -53,21 +54,18 @@ Toast
 Skeleton
 Table
 Pagination
-Breadcrumb
 Command
 ~~~
 
-## 4. Operational Components
+## 4. Product Components
 
 Examples:
 
 ~~~text
 ConversationTimeline
-ConversationStatus
 ConversationControl
 AssignmentPicker
 SLAIndicator
-AIAgentStatus
 AIActionCard
 ToolInvocation
 ApprovalCard
@@ -77,56 +75,41 @@ EntitlementBanner
 QualityScorecard
 ~~~
 
-These components encode product semantics, not merely visual styles.
+These components encode business semantics.
 
-## 5. Component State Model
+## 5. Component Contract
 
-Every interactive component supports:
+Each component defines:
 
-~~~mermaid
-stateDiagram-v2
-    [*] --> IDLE
-    IDLE --> HOVER
-    IDLE --> FOCUS
-    IDLE --> DISABLED
-    IDLE --> LOADING
-    FOCUS --> ERROR
-    LOADING --> SUCCESS
-    LOADING --> ERROR
-    SUCCESS --> IDLE
-    ERROR --> IDLE
-~~~
+- inputs;
+- outputs/events;
+- loading;
+- disabled;
+- error;
+- focus behavior;
+- keyboard behavior;
+- responsive behavior;
+- accessibility behavior.
 
-## 6. Accessibility
+## 6. Status Semantics
 
-Components should provide:
-
-- keyboard interaction;
-- accessible names;
-- correct focus order;
-- visible focus state;
-- adequate target size;
-- screen-reader semantics;
-- reduced-motion handling.
-
-## 7. Status Representation
-
-Do not rely only on color.
+Use text + icon, not color alone.
 
 Example:
 
 ~~~text
-[●] Connected
-[!] Degraded
+[check] Connected
+[warning] Degraded
 [x] Failed
-[~] Processing
+[spinner] Processing
+[clock] Awaiting Approval
+[human] Human Control
+[bot] AI Control
 ~~~
 
-Icon + text is more robust than color alone.
+## 7. Typography
 
-## 8. Typography
-
-Define a scale with predictable hierarchy:
+Define a stable scale:
 
 ~~~text
 display
@@ -139,76 +122,95 @@ caption
 code
 ~~~
 
-Operations tables should use legible text and clear row density.
+Operations tables prioritize legibility over decorative typography.
 
-## 9. Spacing
+## 8. Spacing
 
-Use a spacing scale so:
+Use a shared spacing scale across navigation, forms, tables and dialogs.
 
-- tables;
-- forms;
-- dialogs;
-- navigation;
-- cards
+## 9. Motion
 
-share consistent rhythm.
+Motion communicates state transition and feedback.
 
-## 10. Motion
+Avoid animation that obscures rapidly changing operational data.
 
-Motion communicates:
+Respect reduced-motion preferences.
 
-- transition;
-- progress;
-- acknowledgment.
+## 10. Themes
 
-Do not animate data-heavy tables excessively. Respect reduced-motion preferences.
+Light/dark are token transformations.
 
-## 11. Dark Mode
+Do not maintain two unrelated visual systems.
 
-Dark mode is a semantic token transformation, not a separate set of arbitrary styles.
+## 11. RTL
 
-Information hierarchy must remain understandable in both themes.
+The product must support Arabic layouts.
 
-## 12. Error Patterns
+Components must avoid:
 
-Use:
+- hardcoded left/right assumptions;
+- directional icons without mirroring rules;
+- fixed text alignment;
+- layout logic that assumes LTR.
 
-- inline validation for field errors;
-- alert for section-level failures;
-- toast for completed background notifications;
-- persistent banners for degraded dependencies;
-- dedicated failure state for blocked workflows.
+Use logical properties where possible.
 
-Do not use toasts as the only way to communicate critical failures.
+## 12. AI Visual Language
 
-## 13. AI Visual Language
+Standard states:
 
-AI state should use consistent labels:
+~~~text
+AI Suggested
+AI Executing
+AI Blocked
+AI Awaiting Approval
+AI Handed Off
+Human Control
+~~~
 
-- AI suggested;
-- AI executing;
-- AI blocked;
-- AI awaiting approval;
-- AI handed off;
-- Human control.
+Do not display false precision such as arbitrary confidence percentages.
 
-Do not imply certainty through decorative confidence meters.
+## 13. Accessibility
 
-## 14. Component Governance
+Target WCAG 2.2 AA practices:
 
-A shared component is promoted only when:
+- keyboard navigation;
+- visible focus;
+- semantic structure;
+- correct labels;
+- status announcements;
+- sufficient contrast;
+- reduced motion.
 
-- at least two product areas need it;
-- behavior is stable;
-- accessibility behavior is defined;
-- API is documented;
-- visual semantics are tokenized.
+## 14. Governance
 
-## 15. Acceptance Criteria
+Promote a shared component only when:
 
-- All operational screens use semantic tokens.
-- Component states are explicit.
-- Status does not depend on color alone.
-- AI/human/system actions are distinguishable.
-- Accessibility behavior is part of component contracts.
-- Dark/light theme semantics remain consistent.
+- reused;
+- behavior stable;
+- accessibility specified;
+- API documented;
+- tokens defined;
+- tests exist.
+
+## 15. Testing
+
+Component tests include:
+
+~~~text
+render
+interaction
+keyboard
+focus
+loading
+error
+disabled
+responsive
+RTL
+theme
+accessibility
+~~~
+
+## 16. Acceptance
+
+A component is production-ready when semantics, accessibility, state behavior and theme/RTL behavior are specified and tested—not merely visually correct.

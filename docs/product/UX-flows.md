@@ -1,257 +1,234 @@
-# UX Flows
+# UX Flows — Implementation Specification
 
-> Status: **Target production product contract**
+> Status: **Target production UX blueprint**
 
-OMILINKS is an operational platform. UX should optimize for work completion, control visibility, error recovery and trustworthy AI behavior rather than dashboard decoration.
+## 1. UX Principle
 
-## 1. BPO Onboarding Flow
+OMILINKS is an operational control surface. Every important UI state should answer:
 
-~~~mermaid
-flowchart LR
-START[Create Organization] --> OWNER[Owner Membership]
-OWNER --> CLIENT[Optional Client Account]
-CLIENT --> PROGRAM[Program]
-PROGRAM --> SECTOR[Sector]
-SECTOR --> TEAM[Team]
-TEAM --> WORKFORCE[Workforce]
-WORKFORCE --> CHANNEL[Connect Channel]
-CHANNEL --> ROUTING[Configure Routing]
-ROUTING --> READY[Operations Ready]
+~~~text
+what is happening?
+who owns it?
+what can I do?
+what will happen next?
+what failed?
+is the state current?
 ~~~
 
-Every setup step should make the resulting scope explicit.
-
-## 2. Direct Business Onboarding
-
-~~~mermaid
-flowchart LR
-ORG[Organization] --> SITE[Site / Operating Unit]
-SITE --> WORK[Workforce]
-WORK --> CHANNEL[Channel]
-CHANNEL --> ROUTE[Routing]
-ROUTE --> INBOX[Operations Inbox]
-~~~
-
-The user should not be forced through BPO-specific concepts that are irrelevant.
-
-## 3. Incoming Conversation Flow
-
-~~~mermaid
-sequenceDiagram
-participant C as Customer
-participant CH as Channel
-participant O as OMILINKS
-participant R as Routing
-participant A as AI/Human
-C->>CH: Message
-CH->>O: Webhook
-O->>O: Create/update conversation
-O->>R: Routing request
-R->>A: Assign
-A->>O: Response
-O->>CH: Provider delivery
-CH-->>C: Message
-~~~
-
-The UI should make each control boundary visible:
-
-- source channel;
-- current owner;
-- AI/human control;
-- delivery status;
-- SLA status.
-
-## 4. AI Handoff
+## 2. Organization Onboarding
 
 ~~~mermaid
 stateDiagram-v2
-    [*] --> AI_CONTROL
-    AI_CONTROL --> HUMAN_REQUEST: customer asks
-    AI_CONTROL --> POLICY_HANDOFF: risk/policy
-    AI_CONTROL --> LOW_CONFIDENCE: confidence rule
-    HUMAN_REQUEST --> HUMAN_CONTROL
-    POLICY_HANDOFF --> HUMAN_CONTROL
-    LOW_CONFIDENCE --> HUMAN_CONTROL
-    HUMAN_CONTROL --> AI_CONTROL: explicitly returned
+    [*] --> ACCOUNT_CREATED
+    ACCOUNT_CREATED --> ORG_PROVISIONING
+    ORG_PROVISIONING --> ORG_READY
+    ORG_PROVISIONING --> PROVISIONING_ERROR
+    PROVISIONING_ERROR --> ORG_PROVISIONING
+    ORG_READY --> CONFIGURING
+    CONFIGURING --> OPERATIONS_READY
 ~~~
 
-The customer-facing timeline should show that control changed.
+UI must distinguish account creation from completed organization provisioning.
 
-## 5. Supervisor Workflow
-
-A supervisor should be able to:
-
-1. filter queue by SLA/risk/team;
-2. open conversation;
-3. inspect customer/context;
-4. review AI actions;
-5. reassign;
-6. take control;
-7. request QA;
-8. initiate remediation.
-
-The UI should expose reasons and history, not only current state.
-
-## 6. Channel Connection UX
-
-~~~mermaid
-flowchart TD
-SELECT[Select Integration] --> CRED[Configure Credential]
-CRED --> VERIFY[Verify]
-VERIFY --> WEBHOOK[Configure Webhook]
-WEBHOOK --> TEST[Test Event]
-TEST --> ACTIVE[Activate]
-VERIFY --> ERROR[Connection Error]
-WEBHOOK --> ERROR
-TEST --> ERROR
-ERROR --> REPAIR[Repair / Reconnect]
-REPAIR --> VERIFY
-~~~
-
-Do not show an integration as active while webhook/credential health is incomplete.
-
-## 7. AI Configuration UX
-
-Agent configuration should be staged:
+## 3. BPO Setup
 
 ~~~text
-Identity
- -> Purpose
- -> Knowledge
- -> Model policy
- -> Tool policy
- -> Handoff policy
- -> Budget
- -> Evaluation
- -> Test
- -> Publish
+organization
+ -> client account
+ -> program
+ -> sector
+ -> team
+ -> workforce
+ -> channels
+ -> routing
+ -> quality
 ~~~
 
-Publishing should validate dependencies before allowing activation.
+Each scope change should display the current organization/client/program context.
 
-## 8. Workflow Builder UX
-
-A workflow editor needs:
-
-- version state;
-- trigger;
-- steps;
-- conditions;
-- retries;
-- approvals;
-- test mode;
-- publish action.
-
-Do not allow editing a published version in place.
-
-## 9. Billing Flow
+## 4. Conversation Workspace
 
 ~~~mermaid
 flowchart LR
-PLAN[Select Plan] --> CHECKOUT[Checkout]
-CHECKOUT --> PROVIDER[Payment Provider]
-PROVIDER --> VERIFIED[Verified Payment]
-VERIFIED --> SUB[Subscription]
-SUB --> ENT[Entitlements]
-ENT --> UI[Feature Availability]
+LIST[Inbox] --> CONV[Conversation]
+CONV --> CUSTOMER[Customer Context]
+CONV --> CONTROL[AI / Human / Queue]
+CONV --> ACTIONS[Authorized Actions]
+CONV --> TIMELINE[Message + Event Timeline]
+CONV --> AUDIT[Operational History]
 ~~~
 
-The UI can show "payment processing" until the verified backend state changes.
+The conversation view should not require navigation away from the conversation to understand assignment/control.
 
-## 10. Error UX
+## 5. AI Control UX
 
-Every important screen defines:
-
-- loading;
-- empty;
-- error;
-- forbidden;
-- stale;
-- partial;
-- success;
-- processing.
-
-Example:
+Control states:
 
 ~~~text
-Outbound message:
-  queued
-  sending
-  delivered
-  failed
-  retrying
-  unknown / reconciling
+AI CONTROL
+HUMAN CONTROL
+QUEUE CONTROL
 ~~~
 
-Do not show "failed" when the provider state is actually unknown.
+Human takeover should visibly change the control state immediately.
 
-## 11. AI Trust UX
+Pending AI actions must be visually marked stale/canceled after takeover.
 
-AI-generated actions should be visually distinguishable from human actions.
+## 6. Outbound State UX
 
-Show where appropriate:
+~~~text
+CREATED
+QUEUED
+SENDING
+SENT
+DELIVERED
+FAILED
+UNKNOWN
+RECONCILING
+~~~
 
-- AI/human author;
-- policy status;
-- tool action;
-- approval state;
-- source/grounding;
-- confidence indicator when valid;
-- handoff reason.
+Never show UNKNOWN as FAILED. A timeout is not proof of failed delivery.
 
-Avoid false precision such as displaying a numeric confidence score unless the measurement is meaningful and calibrated.
+## 7. Routing UX
 
-## 12. Operations First Navigation
+Routing decision details should be available to authorized supervisors:
 
-Recommended information architecture:
+~~~text
+policy version
+candidate count
+rejection reasons
+selected worker/queue
+SLA/priority reason
+~~~
+
+The UI should not expose sensitive internal policy data to ordinary agents.
+
+## 8. AI Agent Publishing
 
 ~~~mermaid
-flowchart TB
-APP[OMILINKS Console]
-APP --> INBOX[Inbox]
-APP --> CUSTOMERS[Customers]
-APP --> WORKFORCE[Workforce]
-APP --> AUTOMATION[Automation]
-APP --> KNOWLEDGE[Knowledge]
-APP --> QUALITY[Quality]
-APP --> ANALYTICS[Analytics]
-APP --> BILLING[Billing]
-APP --> SETTINGS[Settings]
+flowchart LR
+DRAFT[Draft] --> VALIDATE[Validate Dependencies]
+VALIDATE --> TEST[Test]
+TEST --> REVIEW[Review]
+REVIEW --> PUBLISH[Publish Version]
+PUBLISH --> ACTIVE[Active]
+VALIDATE --> ERROR[Error]
+TEST --> ERROR
+ERROR --> FIX[Fix]
+FIX --> VALIDATE
 ~~~
 
-Navigation visibility depends on permission and entitlement, but direct URL access still receives server authorization.
+Published versions become read-only.
 
-## 13. Responsive Behavior
+## 9. Workflow UX
 
-The operations console should preserve critical workflow information on smaller screens.
+Versioning must be explicit:
 
-Do not merely shrink desktop tables.
+~~~text
+Workflow
+ v3 published
+ v4 draft
+~~~
 
-For complex tables:
+Editing v4 cannot mutate v3.
 
-- prioritize critical columns;
-- use expandable row details;
-- maintain access to action state;
-- preserve filters and selection.
+## 10. Knowledge UX
 
-## 14. Accessibility
+Display:
 
-Use:
+- source;
+- document version;
+- ingestion state;
+- freshness;
+- scope;
+- indexing errors.
 
-- keyboard navigation;
-- semantic headings;
-- accessible labels;
-- focus management;
-- sufficient contrast;
-- non-color status cues;
-- reduced-motion support;
-- meaningful error messages.
+Deleting a source should show that retrieval is immediately disabled while cleanup continues asynchronously.
 
-## 15. Acceptance Criteria
+## 11. Quality UX
 
-- The user always knows who/what controls a conversation.
-- Integration status reflects verified backend state.
-- AI/human actions are distinguishable.
-- Errors represent actual system state.
-- Permissions hide UI but do not replace backend authorization.
-- Published workflows/agents are not edited in place.
+Reviewer view displays:
+
+~~~text
+conversation evidence
+scorecard version
+criteria
+scores
+critical findings
+remediation
+~~~
+
+AI-generated findings should be clearly identified as proposals.
+
+## 12. Billing UX
+
+Billing status:
+
+~~~text
+trialing
+active
+past_due
+suspended
+canceled
+~~~
+
+Feature availability must come from backend entitlement state.
+
+The UI must not turn a successful payment redirect into immediate entitlement activation.
+
+## 13. Integration UX
+
+~~~mermaid
+stateDiagram-v2
+    [*] --> CONFIGURING
+    CONFIGURING --> VERIFYING
+    VERIFYING --> ACTIVE
+    VERIFYING --> ERROR
+    ACTIVE --> DEGRADED
+    DEGRADED --> ACTIVE
+    ACTIVE --> DISCONNECTED
+    ERROR --> CONFIGURING
+~~~
+
+A provider connection is active only after backend verification succeeds.
+
+## 14. Error Handling
+
+Every asynchronous feature requires:
+
+- queued;
+- running;
+- succeeded;
+- failed;
+- retrying;
+- canceled;
+- unknown/reconciling where appropriate.
+
+Errors must tell the operator whether retry is safe.
+
+## 15. Accessibility
+
+Critical controls need:
+
+- keyboard access;
+- focus restoration;
+- semantic labels;
+- text alternatives;
+- non-color status;
+- screen-reader state announcements.
+
+## 16. Telemetry
+
+UI telemetry should capture:
+
+- action attempted;
+- action outcome;
+- latency;
+- recovery action;
+- feature usage.
+
+Avoid collecting full customer message content.
+
+## 17. Acceptance
+
+UX is complete only when every important domain state has a truthful visual representation and every operator action maps to a real backend authorization/state transition.

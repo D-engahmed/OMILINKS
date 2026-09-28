@@ -1,223 +1,234 @@
-# Screen Specifications
+# Screen Specifications — Implementation Contract
 
-> Status: **Target production UI contract**
+> Status: **Target production screen blueprint**
 
-Every screen specification must define purpose, data, actions, permissions, states, loading/error behavior and telemetry.
+## 1. Screen Contract
 
-## 1. Application Shell
+Every screen specifies:
 
-### Purpose
+~~~text
+purpose
+route
+required permission
+data dependencies
+actions
+loading state
+empty state
+forbidden state
+error state
+stale state
+partial state
+telemetry
+~~~
 
-Provide stable navigation and global context.
+## 2. Application Shell
 
-### Regions
+### Route
 
-- organization/context selector;
-- primary navigation;
-- alert/incident center;
-- global search;
-- user/session menu.
+~~~text
+/app
+/app/inbox
+/app/customers
+/app/workforce
+/app/automation
+/app/knowledge
+/app/quality
+/app/billing
+/app/settings
+~~~
 
-### Rules
+### Global state
 
-Organization switch must refetch authorized context. Local UI state cannot keep showing data from the previous organization after the switch.
+- active organization;
+- effective scope;
+- user identity;
+- unread/task indicators;
+- integration alerts.
 
-## 2. Inbox
+Organization switch invalidates organization-scoped cached data.
 
-### Primary data
+## 3. Inbox
 
-- conversation list;
-- status;
-- channel;
+### Data
+
+- conversation;
 - customer;
+- channel;
 - assignment;
 - SLA;
-- AI/human control;
-- last message;
-- unread state.
+- control state;
+- message timeline.
 
 ### Actions
 
-- open;
 - reply;
 - assign;
-- take control;
-- release control;
-- add tag;
-- escalate;
+- takeover;
+- release;
 - resolve;
-- trigger workflow;
-- inspect AI trace where permitted.
+- escalate;
+- run workflow;
+- inspect AI trace.
 
-~~~mermaid
-flowchart LR
-LIST[Conversation List] --> DETAIL[Conversation Detail]
-DETAIL --> CUSTOMER[Customer Context]
-DETAIL --> CONTROL[Human / AI Control]
-DETAIL --> ACTIONS[Authorized Actions]
-DETAIL --> HISTORY[Audit / Assignment History]
+### Concurrency
+
+Sending/assignment uses server-side version/control checks.
+
+## 4. Customer Detail
+
+Sections:
+
+~~~text
+summary
+channel identities
+consent
+attributes
+conversation history
+operational tags
+audit-relevant activity
 ~~~
 
-## 3. Customer Screen
+Sensitive attributes are rendered only when permission allows.
 
-Display:
+## 5. Workforce
 
-- canonical profile;
-- channel identities;
-- consent state where allowed;
-- tags;
-- conversation history;
-- relevant business attributes.
+Show:
 
-The customer screen must not merge identities silently.
-
-## 4. Workforce Screen
-
-Display:
-
-- team hierarchy;
-- worker state;
-- presence;
-- skills;
+- worker lifecycle;
+- presence freshness;
+- skill set;
 - capacity;
-- active assignments;
-- queue load.
+- team;
+- current assignments;
+- queue.
 
-Provide supervisor actions only when authorized.
+Supervisor operations require explicit permissions.
 
-## 5. AI Screen
+## 6. AI Agents
 
-Display:
+List:
 
-- AI agents;
-- lifecycle state;
-- policy version;
-- model policy;
-- knowledge policy;
-- tool policy;
-- budget;
-- recent run outcomes;
-- handoff/block metrics.
-
-Published configuration should be read-only.
-
-## 6. Knowledge Screen
-
-Display:
-
-- knowledge base;
-- source list;
-- source status;
-- document versions;
-- indexing status;
-- errors;
-- scope;
-- freshness.
-
-~~~mermaid
-flowchart TD
-KB[Knowledge Base] --> SOURCE[Source]
-SOURCE --> VERSION[Document Version]
-VERSION --> INDEX[Index Status]
-INDEX --> READY[Retrieval Ready]
-INDEX --> ERROR[Indexing Error]
+~~~text
+agent
+status
+current policy version
+model policy
+knowledge policy
+tool policy
+autonomy
+last deployment
+failure/handoff rate
 ~~~
 
-## 7. Workflow Screen
+Published configuration has no direct edit action.
 
-Provide:
+## 7. Knowledge
 
-- workflow definition;
-- version history;
-- trigger;
+Show:
+
+- KB;
+- source;
+- version;
+- ingestion state;
+- scope;
+- freshness;
+- chunk/index status;
+- errors.
+
+## 8. Workflows
+
+Show:
+
+- workflow;
+- versions;
+- published state;
 - graph;
-- step configuration;
-- test execution;
-- run history;
+- validation;
+- runs;
+- approvals;
 - dead letters.
 
-Published version cannot be edited directly.
+Run detail displays current step and retry history.
 
-## 8. Quality Screen
+## 9. Quality
 
-Provide:
+Show:
 
-- sampling backlog;
-- reviewer queue;
-- scorecard;
-- evaluation evidence;
+- review queue;
+- scorecard version;
+- evidence;
 - findings;
 - remediation;
 - calibration.
 
-## 9. Billing Screen
+## 10. Billing
 
-Display:
+Show:
 
-- current subscription;
+- subscription;
 - plan;
 - entitlement usage;
 - invoices;
 - payment state;
 - reconciliation warnings.
 
-Do not claim a plan is active based only on frontend checkout completion.
+Provider return URL state is informational only.
 
-## 10. Settings
+## 11. Integrations
+
+Each card exposes:
+
+~~~text
+connection status
+provider/account
+last successful inbound
+last successful outbound
+last webhook
+error summary
+reconnect
+disable
+~~~
+
+## 12. Settings
 
 Areas:
 
-- organization;
-- members;
-- roles/scopes;
-- integrations;
-- AI policy;
-- channels;
-- security;
-- billing.
+~~~text
+organization
+members
+roles
+integrations
+AI
+workflows
+security
+billing
+~~~
 
-Sensitive configuration changes may require recent authentication.
+Sensitive changes can require recent authentication.
 
-## 11. UI State Matrix
+## 13. State Matrix
 
-Every resource screen should implement:
+~~~mermaid
+stateDiagram-v2
+    [*] --> LOADING
+    LOADING --> READY
+    LOADING --> EMPTY
+    LOADING --> FORBIDDEN
+    LOADING --> ERROR
+    READY --> STALE
+    READY --> PARTIAL
+    READY --> PROCESSING
+    PROCESSING --> READY
+    PROCESSING --> ERROR
+    STALE --> READY
+~~~
 
-| State | Meaning |
-|---|---|
-| loading | request in progress |
-| empty | valid no-data state |
-| forbidden | user lacks permission |
-| not_found | resource not available |
-| error | recoverable/unexpected failure |
-| stale | data known outdated |
-| processing | background operation |
-| partial | some dependent data unavailable |
-| success | normal state |
+## 14. URL State
 
-## 12. URL State
+Filters/pagination can be URL state.
 
-Search, filters and pagination should be URL-addressable when appropriate.
+Authorization is never URL state.
 
-The URL is navigation state, not authorization state.
+## 15. Acceptance
 
-## 13. Telemetry
-
-Capture useful UI telemetry:
-
-- feature usage;
-- failed actions;
-- screen load time;
-- background-job visibility;
-- handoff controls;
-- user recovery actions.
-
-Avoid recording sensitive customer content.
-
-## 14. Acceptance Criteria
-
-- Each screen handles all required states.
-- UI actions reflect actual server authorization.
-- Resource scope is visible.
-- Long-running work displays durable status.
-- Published configuration is not editable in place.
-- Sensitive data is not unnecessarily emitted to analytics.
+A screen is complete only when its data dependency graph and all lifecycle/error states are specified before implementation.
