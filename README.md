@@ -1,96 +1,90 @@
 # OMNILINKS
 
-OmniLinks is a multi-tenant Customer Operations Platform for direct businesses and service providers/BPOs.
+OmniLinks is a multi-tenant Customer Operations Platform for direct businesses and BPO/service providers.
 
-It combines:
-- customer conversations
-- human workforce
-- AI workforce
-- channels
-- knowledge/RAG
-- authorized business actions
-- workflows
-- quality
-- analytics
-- billing
-- integrations
+It combines customer conversations, human workforce, AI workforce, channels, knowledge/RAG, authorized business actions, workflows, quality, analytics, billing, and integrations.
 
 ## Architecture
 
-OmniLinks starts as a modular monolith with explicit domain boundaries.
+OmniLinks starts as a **modular monolith with explicit domain boundaries**.
 
-    Organization
-      -> Client Account (optional)
-      -> Program
-      -> Sector
-      -> Team
-      -> Human + AI Workforce
-      -> Customers
-      -> Conversations
-      -> AI / Workflows / Actions
-      -> Analytics / Billing
+```mermaid
+flowchart LR
+  ORG[Organization] --> CA[Client Account]
+  ORG --> P[Program]
+  P --> S[Sector]
+  S --> T[Team]
+  T --> W[Human + AI Workforce]
+  W --> C[Conversations]
+  C --> AI[AI Runtime]
+  AI --> K[Knowledge]
+  AI --> TOOLS[Tools]
+  C --> WF[Workflows]
+  C --> Q[Quality]
+  ORG --> BILL[Billing]
+```
 
-PostgreSQL is the transactional source of truth.
+PostgreSQL is the transactional source of truth. Supporting infrastructure may include Redis, queues/event streams, object storage, and vector/search infrastructure.
 
-Supporting infrastructure may include Redis, object storage and vector search.
-
-Tenant isolation is enforced by application authorization with PostgreSQL RLS as defense in depth.
+Tenant isolation is enforced by server-side authorization and tenant-scoped data access, with PostgreSQL RLS available as defense in depth.
 
 ## Repository
 
-    OMNILINKS/
-    ├── apps/
-    │   ├── web/
-    │   └── widget/
-    ├── packages/
-    │   ├── backend/
-    │   ├── ui/
-    │   ├── math/
-    │   ├── eslint-config/
-    │   └── typescript-config/
-    ├── docs/
-    ├── package.json
-    ├── pnpm-workspace.yaml
-    └── turbo.json
+```text
+OMILINKS/
+├── apps/
+│   ├── web/
+│   └── widget/
+├── packages/
+│   ├── backend/
+│   ├── ui/
+│   ├── math/
+│   ├── eslint-config/
+│   └── typescript-config/
+├── docs/
+├── package.json
+├── pnpm-workspace.yaml
+└── turbo.json
+```
 
-The repository is currently a scaffold. The docs describe the target system and the ordered implementation plan.
+The codebase is currently an implementation scaffold. The documentation describes the target product, architecture, contracts, and engineering rules that implementation should converge toward.
 
 ## Documentation
 
-Start with:
-- docs/00-PRD.md
-- docs/01-system-design.md
-- docs/02-domain-model.md
-- docs/03-data-model.md
-- docs/04-api-contract.md
-- docs/13-roadmap.md
+1. `docs/README.md`
+2. `docs/requirements/functional-requirements.md`
+3. `docs/requirements/acceptance-criteria.md`
+4. `docs/architecture/HLD.md`
+5. Relevant `docs/domain/*`
+6. `docs/api/*` and `docs/events/*`
+7. `docs/security/*`, `docs/ai/*`, `docs/data/*`
+8. `docs/product/*` and `docs/engineering/*`
 
-Then use the security, AI, channel, workflow, billing, observability and testing documents for implementation constraints.
+## Engineering Rules
 
-## Engineering rule
+- Routes/controllers stay thin.
+- Domain modules own business rules.
+- Provider SDKs stay behind adapters.
+- Frontend state is never an authorization source.
+- PostgreSQL owns transactional truth.
+- Events are at-least-once and consumers are idempotent.
+- Tenant scope is established before resource access.
+- AI can only perform explicitly authorized actions.
+- Payment state is verified server-side.
+- A feature is not complete without tests, observability, documented contracts, and failure handling.
 
-Do not clone Echo's domain model into OmniLinks.
+## Product Direction
 
-Echo is a reference for useful patterns such as AI interaction and realtime behavior. OmniLinks owns its own tenancy, BPO hierarchy, workforce, channel, AI-governance and billing architecture.
+The platform serves both companies operating their own customer operations and BPO/service organizations operating multiple client accounts, programs, sectors, teams, and workforce pools.
 
-## Local development
+Automation providers such as n8n are integrations, not the source of truth for customer, conversation, authorization, or billing state.
 
-The current repository uses pnpm and Turborepo.
+## Local Development
 
-    pnpm install
-    pnpm dev
-
-Use package-specific scripts as they are added.
-
-Production infrastructure and database setup are not yet represented as a completed system; follow the roadmap before treating them as available.
-
-## Quality bar
-
-A feature is complete only when:
-- the domain behavior is documented
-- authorization is enforced
-- tenant isolation is tested
-- failures are handled
-- observability exists
-- contracts are documented
-- CI passes
+```bash
+pnpm install
+pnpm dev
+pnpm lint
+pnpm typecheck
+pnpm build
+```

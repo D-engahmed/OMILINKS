@@ -1,6 +1,168 @@
 openapi: 3.1.0
 info:
   title: OMILINKS API
-  version: 0.1.0
-  description: API contract scaffold for the OMILINKS platform.
-paths: {}
+  version: 1.0.0
+  description: |
+    Versioned HTTP contract for the OMILINKS Customer Operations Platform.
+    Authentication, tenant resolution, authorization and idempotency are server-side.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: Health
+  - name: Organizations
+  - name: Customers
+  - name: Conversations
+  - name: Workforce
+  - name: AI
+  - name: Workflows
+  - name: Billing
+  - name: Webhooks
+paths:
+  /health:
+    get:
+      security: []
+      tags: [Health]
+      responses:
+        '200':
+          description: Service healthy
+  /organizations/me:
+    get:
+      tags: [Organizations]
+      responses:
+        '200':
+          description: Current organization context
+  /customers:
+    get:
+      tags: [Customers]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Customer collection
+    post:
+      tags: [Customers]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerCreate'
+      responses:
+        '201':
+          description: Customer created
+        '409':
+          description: Idempotency or identity conflict
+  /conversations:
+    get:
+      tags: [Conversations]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Conversation collection
+  /conversations/{conversationId}/messages:
+    post:
+      tags: [Conversations]
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageSend'
+      responses:
+        '202':
+          description: Accepted for provider delivery
+        '403':
+          description: Forbidden
+        '409':
+          description: Idempotency conflict
+  /workforce/assignments:
+    post:
+      tags: [Workforce]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignmentCreate'
+      responses:
+        '201':
+          description: Assignment created
+  /webhooks/{provider}:
+    post:
+      security: []
+      tags: [Webhooks]
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+      responses:
+        '202':
+          description: Verified and durably accepted
+        '401':
+          description: Invalid webhook authentication
+        '400':
+          description: Authenticated but malformed payload
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      schema: {type: string}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema: {type: string, maxLength: 255}
+    ConversationId:
+      name: conversationId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  schemas:
+    CustomerCreate:
+      type: object
+      required: [externalIdentity]
+      properties:
+        displayName: {type: string, maxLength: 200}
+        externalIdentity:
+          type: object
+          required: [provider, externalId]
+          properties:
+            provider: {type: string}
+            externalId: {type: string}
+    MessageSend:
+      type: object
+      required: [content]
+      properties:
+        content: {type: string, minLength: 1}
+        clientMessageId: {type: string, maxLength: 255}
+    AssignmentCreate:
+      type: object
+      required: [conversationId, workforceMemberId]
+      properties:
+        conversationId: {type: string, format: uuid}
+        workforceMemberId: {type: string, format: uuid}

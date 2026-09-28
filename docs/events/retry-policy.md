@@ -1,21 +1,42 @@
-# Documentation Scaffold
+# Event and Job Retry Policy
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+## Retry Classes
 
-## Scope
+| Failure | Retry | Handling |
+|---|---:|---|
+| Network timeout | Yes | Exponential backoff + jitter |
+| HTTP 429 | Yes | Respect provider retry window |
+| Temporary database/network failure | Yes | Bounded retry |
+| Invalid schema | No | Quarantine/dead-letter |
+| Authorization failure | Usually no | Repair credential/policy then resume |
+| Deterministic business conflict | No | Record conflict and action path |
+| Unknown exception | Limited | Retry, alert, then dead-letter |
 
-TODO.
+## Policy
 
-## Invariants and Decisions
+Retry delays increase with attempt count and include jitter. Long retry delays must use scheduled retry state instead of blocking worker threads.
 
-TODO.
+Every retryable side effect must have an idempotency design. Replay cannot assume the earlier attempt had no effect.
 
-## Interfaces / Dependencies
+## Dead Letters
 
-TODO.
+A dead-letter record contains event/job ID, organization, handler, handler version, attempt count, last error, timestamps and replay status. Replay creates a new attempt chain without erasing the original history.
 
-## Open Questions
+## Poison Protection
 
-TODO.
+Deterministic failures stop consuming worker capacity indefinitely. The failed item is isolated so healthy traffic continues.
+
+## Mermaid Flow
+
+```mermaid
+flowchart LR
+E[Event / Job] --> C{Retryable?}
+C -->|Yes| B[Backoff + Jitter]
+B --> Q[Retry Queue]
+Q --> H[Handler]
+H -->|Success| ACK[Ack]
+H -->|Failure| C
+C -->|No| DLQ[Dead Letter]
+```
