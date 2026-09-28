@@ -1,21 +1,49 @@
-# Documentation Scaffold
+# Webhook Contract
 
-> This document is intentionally scaffolded as part of the OMILINKS documentation architecture.
+> Status: **Target / normative engineering design**. This document defines behavior and implementation constraints even when the current code has not implemented the subsystem yet.
 
-Define the authoritative scope, requirements, invariants, interfaces, dependencies, examples, implementation guidance, and open questions for the area represented by this file.
+## Purpose
 
-## Scope
+Webhook endpoints are fast, authenticated ingress points. They persist verified provider events before expensive business processing.
 
-TODO.
+## Processing
 
-## Invariants and Decisions
+Receive -> verify signature/token -> normalize identity -> persist raw event and dedupe key -> acknowledge -> process asynchronously.
 
-TODO.
+## Idempotency
 
-## Interfaces / Dependencies
+Prefer provider event/update IDs. When unavailable, compose provider + account + message/update identifiers. Never rely on browser-visible state.
 
-TODO.
+## Replay
 
-## Open Questions
+Security replay protection follows provider semantics. Internal replay uses stored verified payloads and explicit operator authorization.
 
-TODO.
+## Failure
+
+Invalid signature: reject without mutation. Authenticated malformed payload: quarantine. Transient internal error: retry after durable persistence. Downstream failure: retain event and retry asynchronously.
+
+## Observability
+
+Record provider, account identifier, event ID, correlation ID, verification outcome, processing state, attempt count, and latency.
+
+## Mermaid System View
+
+```mermaid
+sequenceDiagram
+participant P as Provider
+participant W as Webhook
+participant V as Verifier
+participant DB
+participant Q as Queue
+P->>W: Signed callback
+W->>V: Verify
+V-->>W: Valid
+W->>DB: Persist + dedupe
+W->>Q: Enqueue
+W-->>P: 202
+Q->>Q: Normalize + process
+```
+
+## Change Rule
+
+Changes that alter these contracts must update the affected requirement, API/event contract, tests, and this document. Security and tenant-isolation constraints cannot be weakened for implementation convenience.
