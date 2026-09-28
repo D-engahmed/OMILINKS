@@ -1,100 +1,96 @@
-# OMILINKS
+# OMNILINKS
 
-Multi-channel AI support platform — redesigned from the original NXG/MedixAi build.
-This repository now contains the **actual implementation**, driven by the architecture
-docs under [`docs/`](docs/) (BRD / PRD / SAD / SRS).
+OmniLinks is a multi-tenant Customer Operations Platform for direct businesses and service providers/BPOs.
 
-> The docs describe a 3-plane model (Platform / Tenant / Customer), a `tenant → teams →
-> users → roles` hierarchy, permission-based RBAC with 6 system role templates, and an
-> ingestion pipeline (channels → webhooks → Kafka → AI engine). See
-> [`docs/13-tenancy-teams-access-control.md`](13-tenancy-teams-access-control.md) and the
-> SAD container/domain chapters for the authoritative design.
+It combines:
+- customer conversations
+- human workforce
+- AI workforce
+- channels
+- knowledge/RAG
+- authorized business actions
+- workflows
+- quality
+- analytics
+- billing
+- integrations
 
-## Stack
+## Architecture
 
-| Layer | Tech |
-|---|---|
-| API | FastAPI (Python 3.12), SQLAlchemy 2.0 async |
-| DB | PostgreSQL 16 + Row-Level Security (per-tenant `tenant_id`) |
-| Cache / Queue / Blacklist | Redis 7 |
-| Vector store (RAG) | Qdrant |
-| Streaming (ingestion) | Kafka |
-| Frontend | Next.js 15, React 19, Tailwind, Zustand |
-| Infra | Docker Compose (postgres, redis, qdrant, zookeeper, kafka, backend, frontend) |
+OmniLinks starts as a modular monolith with explicit domain boundaries.
 
-## Repo layout
+    Organization
+      -> Client Account (optional)
+      -> Program
+      -> Sector
+      -> Team
+      -> Human + AI Workforce
+      -> Customers
+      -> Conversations
+      -> AI / Workflows / Actions
+      -> Analytics / Billing
 
-```
-OMILINKS/
-├── backend/                 # FastAPI service
-│   ├── app/
-│   │   ├── core/            # config, security (bcrypt), JWT, request context
-│   │   ├── db/              # engine, session, base, sa_enum helper
-│   │   ├── domains/
-│   │   │   ├── tenants/     # tenant / team / user models, provisioning
-│   │   │   ├── access/      # RBAC: roles, permissions, resolver, seed
-│   │   │   └── platform/    # platform-plane users (separate from tenant RBAC)
-│   │   ├── events/          # Kafka producer + consumer (ingestion)
-│   │   └── main.py          # app factory
-│   ├── migrations/          # Alembic
-│   ├── pyproject.toml       # uv-managed deps
-│   └── .env                 # local settings (gitignored)
-├── frontend/                # Next.js app (src/app, src/store, src/lib)
-├── infra/                   # docker-compose.yml, Dockerfiles
-└── docs/                    # BRD / PRD / SAD / SRS (the spec this code implements)
-```
+PostgreSQL is the transactional source of truth.
 
-## Quick start (local)
+Supporting infrastructure may include Redis, object storage and vector search.
 
-### Backend
-```bash
-cd backend
-uv venv && uv pip install -e ".[dev]"
-cp .env .env.local          # edit DATABASE_URL / REDIS_URL as needed
-alembic upgrade head        # create schema
-python -m app.domains.access.services.seed_cli   # seed 67 perms + 6 role templates
-uvicorn app.main:app --reload
-```
-Health: `GET http://localhost:8000/health`
+Tenant isolation is enforced by application authorization with PostgreSQL RLS as defense in depth.
 
-### Provision a tenant (ch.13 §8.1)
-```bash
-curl -X POST localhost:8000/tenants \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"Acme","slug":"acme","email":"admin@acme.com","type":"startup"}'
-```
-This creates the tenant, a default team `General`, and the first user as **Tenant Admin +
-Team Admin**. Login at `POST /auth/login` to get a plane=`tenant` JWT.
+## Repository
 
-### Frontend
-```bash
-cd frontend
-npm install
-npm run dev          # http://localhost:3000
-```
-The Zustand `useAuthStore` (src/store/auth.ts) holds the JWT and exposes `apiFetch`.
+    OMNILINKS/
+    ├── apps/
+    │   ├── web/
+    │   └── widget/
+    ├── packages/
+    │   ├── backend/
+    │   ├── ui/
+    │   ├── math/
+    │   ├── eslint-config/
+    │   └── typescript-config/
+    ├── docs/
+    ├── package.json
+    ├── pnpm-workspace.yaml
+    └── turbo.json
 
-### Full stack via Docker
-```bash
-docker compose -f infra/docker-compose.yml up -d
-```
-Brings up postgres, redis, qdrant, kafka, backend (:8000) and frontend (:3000).
+The repository is currently a scaffold. The docs describe the target system and the ordered implementation plan.
 
-## Authorization model (summary)
+## Documentation
 
-- Permissions are **codes** (`conversation.reply`, `team.manage.all`, …) — never role names.
-- A user's effective permissions = **union** of tenant-scope role + each team-membership role.
-- `.team` permissions are scoped to the teams the user belongs to; `.all` is tenant-wide.
-- JWTs carry `plane` (`tenant` | `platform`) and are verified against separate secrets;
-  tenant tokens can never reach platform endpoints.
-- Permissions are resolved at request time and cached in Redis (TTL 5 min, ch.13 §7.2).
+Start with:
+- docs/00-PRD.md
+- docs/01-system-design.md
+- docs/02-domain-model.md
+- docs/03-data-model.md
+- docs/04-api-contract.md
+- docs/13-roadmap.md
 
-See `backend/app/domains/access/services/permission_resolver.py` and `core/auth.py`.
+Then use the security, AI, channel, workflow, billing, observability and testing documents for implementation constraints.
 
-## Status
+## Engineering rule
 
-- **Done:** tenancy + RBAC domains (models, provisioning, permission resolution, JWT auth),
-  Alembic init migration, RBAC seed, Kafka ingestion scaffold, frontend skeleton,
-  Docker Compose.
-- **Next:** conversations/contacts ingestion domain, AI decision engine (ch.19/29),
-  billing (Paymob), analytics, and the agent dashboard UI.
+Do not clone Echo's domain model into OmniLinks.
+
+Echo is a reference for useful patterns such as AI interaction and realtime behavior. OmniLinks owns its own tenancy, BPO hierarchy, workforce, channel, AI-governance and billing architecture.
+
+## Local development
+
+The current repository uses pnpm and Turborepo.
+
+    pnpm install
+    pnpm dev
+
+Use package-specific scripts as they are added.
+
+Production infrastructure and database setup are not yet represented as a completed system; follow the roadmap before treating them as available.
+
+## Quality bar
+
+A feature is complete only when:
+- the domain behavior is documented
+- authorization is enforced
+- tenant isolation is tested
+- failures are handled
+- observability exists
+- contracts are documented
+- CI passes
