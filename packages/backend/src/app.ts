@@ -163,9 +163,7 @@ async function route(
       {
         organization: {
           id: result.principal.membership.organizationId,
-          name: result.principal.user.displayName
-            ? stringValue(body.organizationName).trim()
-            : "",
+          name: stringValue(body.organizationName).trim(),
           slug: stringValue(body.slug) || slugify(stringValue(body.organizationName)),
           status: "ACTIVE",
         },
@@ -224,7 +222,7 @@ async function route(
   )
 
   if (customerMatch && method === "GET") {
-    return json(appApplication.getCustomer(context, customerMatch[1]))
+    return json(appApplication.getCustomer(context, customerMatch[1]!))
   }
 
   if (customerMatch && method === "PATCH") {
@@ -273,7 +271,7 @@ async function route(
 
   if (conversationMatch && method === "GET") {
     return json(
-      appApplication.getConversation(context, conversationMatch[1])
+      appApplication.getConversation(context, conversationMatch[1]!)
     )
   }
 
@@ -285,7 +283,7 @@ async function route(
     const body = await readJson(request)
 
     return json(
-      appApplication.createMessage(context, messageMatch[1], {
+      appApplication.createMessage(context, messageMatch[1]!, {
         content: stringValue(body.content),
         clientMessageId: nullableStringValue(body.clientMessageId),
       }),

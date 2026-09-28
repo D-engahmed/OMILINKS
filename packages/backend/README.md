@@ -39,7 +39,7 @@ POST /api/v1/workforce/members
 POST /api/v1/workforce/assignments
 ~~~
 
-## Invariants implemented
+## Security invariants implemented
 
 - organization context is derived from authenticated membership;
 - customer resources are tenant-scoped;
@@ -51,9 +51,23 @@ POST /api/v1/workforce/assignments
 - request bodies have a bounded size;
 - protected endpoints require bearer authentication.
 
-## Persistence status
+## Explicit current-slice limitations
 
-The runtime uses the Store interface so PostgreSQL can replace MemoryStore without changing the application/domain contracts.
+This is the first vertical slice, not the completed production identity system.
+
+Current limitations:
+
+- only the first active membership is selected during authentication;
+- sessions are stored in MemoryStore and are non-expiring;
+- PostgreSQL is represented by migration/schema, not yet wired into the runtime;
+- outbox publication is not yet implemented;
+- real identity-provider login/password/MFA is not yet implemented.
+
+These are deliberate next milestones, not hidden capabilities.
+
+## Persistence boundary
+
+The Store interface is the seam for replacing MemoryStore with PostgreSQL without changing application/domain contracts.
 
 Next database milestone:
 
@@ -62,5 +76,3 @@ Next database milestone:
 3. integration test environment;
 4. transactional outbox publisher;
 5. persistent idempotency implementation.
-
-The current code intentionally does not claim that PostgreSQL persistence is already wired.

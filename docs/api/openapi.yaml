@@ -489,9 +489,9 @@ components:
         minLength: 1
         maxLength: 255
     IfMatch:
-      name: If-Match
+      name: If-Match-Version
       in: header
-      description: Optimistic concurrency token
+      description: Optimistic concurrency version
       schema:
         type: string
     CustomerId:
