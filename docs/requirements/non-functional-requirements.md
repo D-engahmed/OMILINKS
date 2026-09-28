@@ -1,198 +1,159 @@
-# Non-Functional Requirements
+# Non-Functional Requirements — Engineering Specification
 
-> Status: **Target production engineering contract**
+> Status: **Target measurable NFR baseline**
 
-## 1. Performance
+## Performance
 
-Initial engineering targets:
+### NFR-PERF-001 API Latency
 
-| Operation | Target |
-|---|---|
-| authenticated API | p95 < 300 ms excluding long jobs/AI |
-| routing | p95 < 150 ms warm path |
-| webhook acknowledgement | target < 2 s after durable acceptance |
-| readiness | < 1 s |
-| AI first token | target p95 < 4 s excluding unusual provider conditions |
+Target p95 < 300 ms for normal authenticated transactional API operations excluding asynchronous/AI/provider execution.
 
-Targets are measured in production-like environments and revised using observed data.
+Measure at API edge and application service.
 
-## 2. Availability
+### NFR-PERF-002 Webhook Acknowledgement
 
-Core API target: 99.9% monthly availability.
+Target p95 < 2 seconds after durable event acceptance.
 
-Channel providers are independent failure domains.
+Webhook handlers must not wait for AI/workflow completion.
 
-A provider outage must not make unrelated customer operations unavailable.
+### NFR-PERF-003 Routing
 
-## 3. Scalability
+Target p95 < 150 ms for warm deterministic routing.
 
-The system should scale horizontally for:
+## Availability
 
-- API requests;
-- websocket/realtime connections if introduced;
-- background jobs;
-- AI runs;
-- webhook processing;
-- workflow workers.
+### NFR-AVL-001 Core API
 
-PostgreSQL remains the transactional authority.
+Target 99.9% monthly availability.
 
-## 4. Consistency
+### NFR-AVL-002 Failure Isolation
 
-| Data | Consistency |
-|---|---|
-| tenant authorization | strong |
-| customer/conversation state | strong |
-| billing state | strong + reconciled |
-| events | at-least-once |
-| search indexes | eventual |
-| analytics projections | eventual |
-| AI evaluation projections | eventual |
+Provider-specific failures shall not take unrelated channels/core reads offline.
 
-## 5. Durability
+## Scalability
 
-Business records must survive normal process failure.
+### NFR-SCL-001 Horizontal Compute
 
-Durable state includes:
+API and worker pools shall scale independently.
 
-- messages;
-- assignments;
-- workflow state;
-- AI run state;
-- payments;
-- usage;
-- audit records;
-- outbox events.
+### NFR-SCL-002 Queue Backpressure
 
-## 6. Security
+Workers shall enforce bounded concurrency and expose queue age.
 
-Minimum controls:
+### NFR-SCL-003 Tenant Fairness
 
-- TLS externally;
-- secret isolation;
-- tenant-scoped queries;
-- least privilege;
-- immutable security/audit records;
-- credential rotation;
-- authorization negative tests;
-- dependency/security scanning.
+One tenant's workload shall not consume unlimited shared concurrency.
 
-## 7. Privacy
+## Consistency
 
-Customer and AI data is minimized.
+### NFR-CON-001 Strong Security Consistency
 
-Sensitive categories have retention classes.
+Tenant ownership, authorization and protected writes require strong consistency.
 
-Logs must not become a second ungoverned customer database.
+### NFR-CON-002 Eventual Derived State
 
-## 8. Observability
+Search/vector/analytics projections may be eventual and must expose freshness metadata when relevant.
 
-Use:
+### NFR-CON-003 Billing Consistency
 
-- structured logs;
-- metrics;
-- traces;
-- audit events;
-- correlation IDs;
-- provider event IDs;
-- AI run IDs;
-- workflow run IDs.
+Billing state is strongly maintained locally and reconciled against provider truth.
 
-The platform should support:
+## Durability
+
+### NFR-DUR-001 Durable Business State
+
+Messages, assignments, workflow state, payment state, usage and audit records survive process restart.
+
+### NFR-DUR-002 Durable Async Work
+
+Queued work shall be recoverable after worker failure.
+
+## Security
+
+### NFR-SEC-001 Least Privilege
+
+Services, users, tools and credentials receive minimum required authority.
+
+### NFR-SEC-002 Tenant Isolation
+
+Cross-tenant reads/writes/search/export/tool access must fail.
+
+### NFR-SEC-003 Secret Isolation
+
+Raw secrets shall not enter browser, model, event or generic log surfaces.
+
+## Privacy
+
+### NFR-PRI-001 Data Minimization
+
+Only data necessary for the operation is copied into logs/traces/AI context.
+
+### NFR-PRI-002 Retention Enforcement
+
+Retention applies to canonical and derived data.
+
+## Observability
+
+### NFR-OBS-001 Traceability
+
+Critical operations carry request/correlation identifiers.
+
+### NFR-OBS-002 Failure Metrics
+
+Queues, workers, providers, AI, billing and security controls expose actionable metrics.
+
+## Reliability
+
+### NFR-REL-001 Idempotency
+
+Retry-sensitive external/system operations have deterministic duplicate behavior.
+
+### NFR-REL-002 Unknown Outcomes
+
+External write timeouts enter reconciliation rather than blind retry.
+
+### NFR-REL-003 Runaway Protection
+
+AI/workflow concurrency, steps, fan-out and cost are bounded.
+
+## Maintainability
+
+### NFR-MNT-001 Boundary Enforcement
+
+Domain code does not depend on provider SDKs or transport details.
+
+### NFR-MNT-002 Versioned Contracts
+
+Breaking API/event/tool/AI policy changes require explicit versioning.
+
+## Accessibility / UX
+
+### NFR-UX-001 Accessibility
+
+Critical operations target WCAG 2.2 AA practices.
+
+### NFR-UX-002 RTL
+
+Core application components support Arabic/RTL without duplicate implementations.
+
+## Recovery
+
+### NFR-DR-001 Recovery Objectives
+
+Production defines RPO/RTO per critical data/service class.
+
+### NFR-DR-002 Restore Verification
+
+Restore drills verify tenant isolation, application correctness and provider reconciliation.
+
+## Verification Rule
+
+Every NFR has:
 
 ~~~text
-customer message
- -> request ID
- -> conversation event
- -> routing decision
- -> AI run
- -> tool invocation
- -> provider delivery
+metric
+target
+measurement point
+alert threshold
+test/evidence method
 ~~~
-
-as one traceable causal chain.
-
-## 9. Recovery
-
-Production must define RPO/RTO and prove them through restore drills.
-
-Recovery includes provider/payment reconciliation.
-
-## 10. Maintainability
-
-Boundaries:
-
-~~~text
-transport
- -> application
- -> domain
- -> persistence
- -> integration
-~~~
-
-Provider SDKs are isolated.
-
-Shared packages should contain stable abstractions rather than random utility code.
-
-## 11. Testability
-
-All critical domain invariants must be testable without depending on real providers.
-
-Provider compatibility is verified separately through sandbox/integration tests.
-
-## 12. Accessibility
-
-Operations UI targets WCAG 2.2 AA practices.
-
-Critical states must not depend on color alone.
-
-## 13. Internationalization
-
-The initial product should support Arabic and English-oriented content safely.
-
-The architecture should avoid assumptions that:
-
-- text is ASCII;
-- names are one language;
-- direction is always LTR;
-- phone numbers have one formatting;
-- provider content is English.
-
-## 14. Operational Limits
-
-Bound:
-
-- request body size;
-- pagination;
-- queue retries;
-- AI steps;
-- AI tool calls;
-- workflow fan-out;
-- export size;
-- document ingestion size;
-- provider concurrency.
-
-Unbounded systems eventually become reliability incidents.
-
-## 15. Failure Isolation
-
-~~~mermaid
-flowchart TB
-CHANNEL[Channel Failure] --> CHANNEL_ONLY[Channel Degraded]
-MODEL[Model Failure] --> MODEL_ONLY[AI Degraded]
-QUEUE[Queue Failure] --> QUEUE_ONLY[Async Degraded]
-PAYMENT[Payment Failure] --> BILL_ONLY[Billing Degraded]
-DB[Database Failure] --> CORE[Core Service Degraded]
-~~~
-
-A failure domain should have the smallest possible blast radius.
-
-## 16. Acceptance Criteria
-
-- Performance targets are measured.
-- Core failure domains are isolated.
-- Critical data is durable.
-- Tenant authorization remains strong under failure.
-- Observability can trace important workflows.
-- Recovery has tested procedures.
-- Limits prevent unbounded resource consumption.

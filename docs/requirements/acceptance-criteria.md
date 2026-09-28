@@ -1,156 +1,171 @@
-# Acceptance Criteria
+# Acceptance Criteria — Engineering Verification Specification
 
-> Status: **Target production release gate**
+> Status: **Target release gate**
 
-## 1. Definition of Done
+## 1. Verification Model
 
-A feature is complete only when:
-
-1. required behavior is documented;
-2. domain invariants are explicit;
-3. authorization is implemented;
-4. tenant isolation is tested;
-5. failure behavior is defined;
-6. retries/idempotency are defined;
-7. observability exists;
-8. API/event contracts are updated;
-9. migrations are safe;
-10. tests pass;
-11. UX states are complete;
-12. release/rollback impact is understood.
-
-## 2. Security Gates
+Every criterion has:
 
 ~~~text
-cross-tenant read -> DENY
-cross-tenant write -> DENY
-invalid webhook -> NO MUTATION
-unauthorized tool -> NO EXECUTION
-AI prompt injection -> POLICY CHECK
-secret in logs -> BLOCK RELEASE
+Given
+When
+Then
+Evidence
+Failure Mode
 ~~~
 
-## 3. Core Scenario Gates
+Manual screenshots are not sufficient proof for security, billing, concurrency or data-integrity criteria.
 
-| Scenario | Must prove |
-|---|---|
-| tenant creation | atomic/idempotent provisioning |
-| multi-org user | isolation between memberships |
-| inbound channel event | verified + deduplicated |
-| conversation routing | deterministic decision evidence |
-| human takeover | stale AI action rejected |
-| AI tool | authorization + idempotency |
-| knowledge retrieval | scope filtering before model exposure |
-| workflow restart | durable resume |
-| payment webhook | verified + idempotent reconciliation |
-| quota limit | backend enforcement |
-| export | permission + audit + expiry |
+## 2. Security Criteria
 
-## 4. Acceptance Test Structure
+### AC-SEC-001 Cross-Tenant Read
 
-Every scenario records:
+Given a resource owned by Organization A, when a principal in Organization B requests it, then no protected data is disclosed.
 
-- preconditions;
-- action;
-- expected state;
-- expected event;
-- expected audit;
-- expected telemetry;
-- failure alternative.
+Evidence: automated negative test.
 
-## 5. API Acceptance
+### AC-SEC-002 Scope Escape
 
-API tests must validate:
+Given a team-scoped principal, when it requests a resource outside its scope, then the operation is denied.
 
-- authentication;
-- authorization;
-- request validation;
-- status codes;
-- error envelope;
-- pagination;
-- idempotency;
-- concurrency;
-- tenant isolation.
+Evidence: authorization test.
 
-## 6. Event Acceptance
+### AC-SEC-003 AI Privilege Escalation
 
-Event tests must validate:
+Given an AI agent configured by an administrator, when the agent requests an administrator-only tool, then execution is denied.
 
-- schema;
-- version;
-- tenant context;
-- correlation;
-- producer publication;
-- duplicate consumer handling;
-- dead-letter behavior.
+Evidence: tool-runtime test.
 
-## 7. AI Acceptance
+## 3. Conversation Criteria
 
-AI changes must validate:
+### AC-CONV-001 Duplicate Inbound
 
-- context access;
-- guardrails;
-- tool access;
-- model routing;
-- budget;
-- handoff;
-- regression dataset;
-- production monitoring.
+Given an already processed provider event, when the provider retries the event, then exactly one canonical message exists.
 
-## 8. Workflow Acceptance
+Evidence: database constraint + integration test.
 
-Validate:
+### AC-CONV-002 Human Takeover
 
-- publish/version;
-- trigger dedupe;
-- step state;
-- retry;
-- approval;
-- cancellation;
-- restart;
-- partial success;
-- compensation where supported.
+Given an AI run started under control version N, when a human takes control and increments the version, then the stale run cannot create a customer-visible send.
 
-## 9. Billing Acceptance
+Evidence: race/concurrency test.
 
-Validate:
+### AC-CONV-003 Unknown Delivery
 
-- plan/entitlement;
-- payment verification;
-- duplicate webhook;
-- reconciliation;
-- quota enforcement;
-- suspension;
-- historical pricing/usage.
+Given provider timeout after a potentially successful send, then the message enters reconciliation/unknown state and is not blindly duplicated.
 
-## 10. Release Gate
+Evidence: provider fault injection.
 
-~~~mermaid
-flowchart TD
-REQ[Requirement] --> IMPL[Implementation]
-IMPL --> UNIT[Unit]
-UNIT --> INT[Integration]
-INT --> CONTRACT[API/Event]
-CONTRACT --> SECURITY[Security]
-SECURITY --> E2E[E2E]
-E2E --> OBS[Observability]
-OBS --> RELEASE[Release Gate]
-RELEASE -->|pass| PROD[Production]
-RELEASE -->|fail| FIX[Corrective Work]
-~~~
+## 4. Routing Criteria
 
-## 11. Evidence Standard
+### AC-ROUTE-001 Deterministic Decision
 
-Do not mark an acceptance criterion complete from a screenshot or manual claim alone.
+Given identical policy/context/candidate snapshot, repeated routing produces the same decision.
 
-Prefer:
+Evidence: repeated/property test.
 
-- automated test;
-- contract fixture;
-- structured trace;
-- database assertion;
-- monitored deployment evidence.
+### AC-ROUTE-002 No-Match
 
-## 12. Acceptance Principle
+Given zero eligible candidates, routing creates durable queue state.
 
-If the team cannot explain what happens when the happy path fails, the feature is not production-ready.
+Evidence: integration test.
+
+## 5. AI Criteria
+
+### AC-AI-001 Version Traceability
+
+Given a completed run, the system can identify agent policy, prompt, model route, tool versions and knowledge snapshot.
+
+Evidence: persisted run record.
+
+### AC-AI-002 Guardrail Failure
+
+Given high-risk guardrail dependency failure, a high-risk action fails closed.
+
+Evidence: fault injection.
+
+### AC-AI-003 Budget Termination
+
+Given a run reaches its hard budget, execution stops before another expensive step.
+
+Evidence: deterministic runtime test.
+
+## 6. Workflow Criteria
+
+### AC-WF-001 Crash Recovery
+
+Given a worker crashes after persisting a StepRun, recovery resumes from the latest safe state without duplicating side effects.
+
+Evidence: worker crash test.
+
+### AC-WF-002 Approval Integrity
+
+Given approval for action hash H, a modified action with hash H2 cannot execute using the old approval.
+
+Evidence: approval test.
+
+## 7. Knowledge Criteria
+
+### AC-KNO-001 Tenant Isolation
+
+Given knowledge owned by Organization A, a retrieval request in Organization B cannot receive the content.
+
+Evidence: retrieval security test.
+
+### AC-KNO-002 Deletion Safety
+
+Given a source is disabled, retrieval stops before derived index cleanup completes.
+
+Evidence: stale-index test.
+
+## 8. Billing Criteria
+
+### AC-BILL-001 Payment Authority
+
+Given a browser reaches payment success redirect without verified provider event, subscription remains unactivated.
+
+Evidence: billing integration test.
+
+### AC-BILL-002 Duplicate Webhook
+
+Given the same payment event arrives twice, the financial result is applied once.
+
+Evidence: idempotency test.
+
+### AC-BILL-003 Quota Race
+
+Given two concurrent consumers against the last available quota unit, the system prevents silent over-consumption beyond the enforced limit.
+
+Evidence: concurrency test.
+
+## 9. Event Criteria
+
+### AC-EVT-001 Atomic Outbox
+
+Given transaction failure, business state and outbox record do not diverge.
+
+Evidence: transaction fault injection.
+
+### AC-EVT-002 Duplicate Consumer
+
+Given the same event is delivered twice, the consumer does not create duplicate side effects.
+
+Evidence: contract/integration test.
+
+## 10. Operations Criteria
+
+### AC-OPS-001 Traceability
+
+Given a customer operation traverses API, queue, AI and provider, an operator can correlate those stages using the request/correlation ID.
+
+Evidence: trace inspection.
+
+### AC-OPS-002 Restore
+
+Given a production recovery point, restore verifies schema, tenant isolation and external reconciliation before reopening service.
+
+Evidence: restore drill.
+
+## 11. Release Rule
+
+No production release may declare a criterion complete solely because the happy path works. Failure, concurrency, authorization and recovery evidence are part of acceptance.

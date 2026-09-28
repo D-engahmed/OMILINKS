@@ -1,345 +1,255 @@
-# Functional Requirements
+# Functional Requirements — Engineering Specification
 
-> Status: **Target production product contract**
+> Status: **Target requirements baseline**
 
-## 1. Product Objective
+## Requirement Convention
 
-OMILINKS is a multi-tenant Customer Operations Platform for businesses and BPO/service providers.
-
-The system must support the full operational loop:
+Every requirement has a stable identifier.
 
 ~~~text
-customer contact
- -> conversation
- -> routing
- -> human/AI handling
- -> authorized actions
- -> workflow
- -> resolution
- -> quality
- -> analytics
- -> billing
+FR-<domain>-<number>
 ~~~
 
-The design must support both direct businesses and BPOs without maintaining separate product architectures.
-
-## 2. Organization and BPO Model
-
-### Direct business
-
-An organization operates its own customer operations.
-
-### BPO
-
-An organization manages external client accounts and their operational programs.
-
-Core hierarchy:
-
-~~~mermaid
-flowchart TB
-ORG[Organization] --> CLIENT[Client Account]
-ORG --> PROGRAM[Program]
-CLIENT --> PROGRAM
-PROGRAM --> SECTOR[Sector]
-SECTOR --> TEAM[Team]
-TEAM --> WORKFORCE[Workforce]
-~~~
-
-The Client Account layer is optional.
-
-## 3. Tenancy
-
-The system shall:
-
-- create a unique Organization;
-- associate tenant-owned records with an organization;
-- support membership and scoped access;
-- support organization lifecycle;
-- prevent cross-tenant access;
-- support multiple clients/programs/sectors/teams;
-- maintain audit history for privileged tenant changes.
-
-## 4. Identity and Access
-
-The system shall:
-
-- represent human users independently of memberships;
-- support organization-specific roles;
-- support scoped permissions;
-- support service principals;
-- revoke credentials;
-- audit privileged changes;
-- prevent client input from selecting an unauthorized organization.
-
-## 5. Customer Management
-
-The system shall:
-
-- create canonical customers;
-- attach provider identities;
-- search customers within authorized scope;
-- maintain tags/attributes;
-- maintain consent where required;
-- support controlled identity merge;
-- preserve merge history.
-
-## 6. Conversation Management
-
-The system shall:
-
-- create/update canonical conversations;
-- persist inbound/outbound messages;
-- retain provider message identifiers;
-- support assignments;
-- support human/AI control;
-- track delivery state;
-- support resolution/reopen;
-- preserve operational history.
-
-## 7. Omnichannel Support
-
-Initial channel integrations:
-
-- WhatsApp;
-- Instagram;
-- Facebook;
-- Telegram;
-- SMS;
-- web/widget.
-
-Each integration shall map to the same canonical Customer/Conversation model while preserving provider-specific identifiers and capabilities.
-
-## 8. Routing
-
-The system shall:
-
-- evaluate routing policy;
-- filter candidates by tenant/scope;
-- filter by required skills;
-- consider workforce presence/capacity;
-- apply priority/SLA;
-- record routing decision evidence;
-- queue unroutable work;
-- support controlled rerouting;
-- support supervisor override.
-
-## 9. Workforce
-
-The system shall:
-
-- represent human and AI workforce members;
-- maintain skills;
-- track presence;
-- track capacity;
-- maintain assignment history;
-- support queues;
-- support human handoff.
-
-Presence is not permission.
-
-## 10. AI Workforce
-
-The system shall:
-
-- define AI agents;
-- version agent policies;
-- control model routing;
-- control context;
-- control tools;
-- enforce guardrails;
-- enforce autonomy budgets;
-- create traceable AI runs;
-- support human handoff;
-- measure usage/cost;
-- support evaluation.
-
-## 11. Knowledge
-
-The system shall:
-
-- ingest documents/sources;
-- create immutable versions;
-- chunk/index content;
-- filter retrieval by tenant/scope;
-- track freshness;
-- retain provenance;
-- remove deleted/disabled content from effective retrieval;
-- prefer deterministic business tools where live state is required.
-
-## 12. Tools
-
-The system shall:
-
-- maintain a tool registry;
-- version tool contracts;
-- validate arguments;
-- enforce permissions;
-- enforce entitlements;
-- support approval;
-- support idempotency;
-- isolate credentials;
-- sanitize results;
-- audit invocations.
-
-## 13. Workflows
-
-The system shall:
-
-- define versioned workflows;
-- create durable runs;
-- support conditions/actions/timers/approvals;
-- persist step state;
-- support retries;
-- prevent duplicate side effects;
-- survive worker restarts;
-- model partial external success;
-- support cancellation.
-
-## 14. Quality
-
-The system shall:
-
-- define quality programs;
-- define scorecards;
-- version scorecards;
-- sample conversations;
-- assign reviewers;
-- capture evidence;
-- preserve findings;
-- create remediation references;
-- support AI-assisted evaluation as proposals;
-- support calibration.
-
-## 15. Billing
-
-The system shall:
-
-- define plans;
-- define entitlements;
-- create subscriptions;
-- meter usage;
-- process payment events;
-- reconcile provider state;
-- support suspension;
-- prevent quota bypass;
-- preserve billing history.
-
-## 16. Integrations
-
-Provider integrations shall:
-
-- verify inbound requests;
-- persist integration events;
-- normalize provider payloads;
-- support provider-specific retries;
-- expose connection health;
-- isolate provider failures;
-- maintain credential lifecycle.
-
-Paymob and n8n must follow the same tenant/security boundary as channels.
-
-## 17. Analytics
-
-Analytics shall provide dimensions for:
-
-- conversations;
-- channel;
-- workforce;
-- AI;
-- routing;
-- SLA;
-- quality;
-- usage;
-- billing.
-
-Analytics is derived from operational facts; dashboards must not become the primary source of business truth.
-
-## 18. Audit
-
-Audit is required for:
-
-- authorization-sensitive changes;
-- tenant hierarchy changes;
-- credential changes;
-- customer merges;
-- conversation control;
-- privileged exports;
-- AI policy changes;
-- tool invocation;
-- workflow approval;
-- billing changes.
-
-## 19. Notifications
-
-Notification behavior should be event-driven and should not block customer message ingestion.
-
-## 20. Search and Export
-
-Search and export must respect tenant and effective scope.
-
-Exports are asynchronous, permissioned, audited and expiring.
-
-## 21. Operational Reliability
-
-The system shall:
-
-- use idempotency for retry-sensitive operations;
-- preserve durable queues;
-- use outbox for transactional event publication;
-- classify failures;
-- dead-letter poison events;
-- provide health/readiness;
-- expose operational metrics.
-
-## 22. Non-Goals for Initial Architecture
-
-The first architecture should not require:
-
-- dozens of microservices;
-- global event ordering;
-- AI to directly access databases;
-- n8n as the source of truth;
-- vector search as the source of business truth;
-- browser-side authorization;
-- synchronous completion of long AI/workflow jobs.
-
-## 23. Critical End-to-End Journey
-
-~~~mermaid
-sequenceDiagram
-participant C as Customer
-participant CH as Channel
-participant O as OMILINKS
-participant R as Routing
-participant AI as AI/Human
-participant T as Tool
-participant Q as Quality
-participant B as Billing
-C->>CH: Message
-CH->>O: Verified event
-O->>O: Persist conversation
-O->>R: Route
-R->>AI: Assign
-AI->>T: Optional authorized action
-T-->>AI: Result
-AI-->>O: Response
-O->>CH: Delivery
-O->>Q: Quality event
-O->>B: Usage event
-~~~
-
-## 24. Acceptance Criteria
-
-All functional requirements must map to:
+A requirement is not complete until it maps to:
 
 ~~~text
 requirement
- -> domain rule
+ -> domain invariant
  -> API/event contract
  -> implementation
- -> automated test
+ -> test
  -> observability
- -> acceptance test
+ -> acceptance evidence
 ~~~
 
-No feature is complete solely because its UI exists.
+## FR-TEN-001 Organization Provisioning
+
+The system shall create an Organization atomically with its mandatory owner membership, default configuration and initial subscription/trial state.
+
+Constraints:
+
+- repeated signup must be idempotent;
+- partial provisioning must not create an active tenant;
+- external side effects occur after transaction commit.
+
+Verification: integration test + database assertion.
+
+## FR-TEN-002 Tenant Isolation
+
+Every tenant-owned resource shall be scoped by organization and effective scope.
+
+Verification: cross-tenant negative test matrix.
+
+## FR-ID-001 Membership-Based Access
+
+A User shall access an Organization only through an active Membership.
+
+Verification: authorization tests.
+
+## FR-ID-002 Scoped Permissions
+
+Membership permissions shall support organization/client/program/sector/team/site scope.
+
+Verification: scope escalation tests.
+
+## FR-CUS-001 Canonical Customer
+
+Each provider identity maps to at most one canonical customer within its organization/provider-account namespace.
+
+Verification: unique constraint + concurrency test.
+
+## FR-CUS-002 Controlled Merge
+
+Customer merge shall preserve historical identities and audit history and shall never cross organization boundaries.
+
+Verification: merge transaction tests.
+
+## FR-CONV-001 Canonical Conversation
+
+Provider messages shall map to an internal Conversation and Message model independent of provider SDK types.
+
+Verification: adapter contract tests.
+
+## FR-CONV-002 Message Dedupe
+
+Repeated provider events shall not create duplicate canonical messages.
+
+Verification: duplicate webhook test.
+
+## FR-CONV-003 Control Version
+
+Every autonomous customer-visible action shall verify conversation control version immediately before the side effect.
+
+Verification: human-takeover race test.
+
+## FR-WF-001 Workforce Assignment
+
+The platform shall create durable assignments for conversations and preserve assignment history.
+
+Verification: application + concurrency test.
+
+## FR-WF-002 Workforce Presence
+
+Presence shall expire/stale independently from worker lifecycle.
+
+Verification: TTL test.
+
+## FR-ROUTE-001 Deterministic Routing
+
+Routing shall produce deterministic results for identical policy/context/candidate snapshots.
+
+Verification: routing property tests.
+
+## FR-ROUTE-002 Queue Fallback
+
+If no candidate qualifies, work shall enter a durable queue or explicit escalation state.
+
+Verification: no-match integration test.
+
+## FR-AI-001 Versioned AI Policy
+
+AI agents shall reference immutable policy versions for every run.
+
+Verification: publication/version test.
+
+## FR-AI-002 Independent AI Authorization
+
+AI tool access shall be independently authorized and shall not inherit creator permissions.
+
+Verification: privilege-inheritance negative test.
+
+## FR-AI-003 Run Recovery
+
+AI runs shall recover only from persisted safe states.
+
+Verification: worker-crash/recovery tests.
+
+## FR-KNO-001 Versioned Knowledge
+
+Knowledge documents shall be immutable once indexed and traceable by source/version.
+
+Verification: version immutability + retrieval fixture.
+
+## FR-KNO-002 Retrieval Isolation
+
+Knowledge retrieval shall filter authorized tenant/scope before model exposure.
+
+Verification: cross-tenant retrieval test.
+
+## FR-TOOL-001 Versioned Tools
+
+Every executable tool shall have a versioned input/output contract.
+
+Verification: registry validation test.
+
+## FR-TOOL-002 Side-Effect Safety
+
+Every side-effecting tool shall define idempotency/reconciliation semantics.
+
+Verification: timeout/duplicate tests.
+
+## FR-WORK-001 Durable Workflow Runs
+
+Workflow executions shall persist state and survive worker restarts.
+
+Verification: crash recovery test.
+
+## FR-WORK-002 Approval Binding
+
+Human approval shall bind to the exact action/version/arguments being approved.
+
+Verification: approval mutation test.
+
+## FR-QUAL-001 Versioned Scorecards
+
+Completed evaluations shall reference immutable scorecard versions.
+
+Verification: scorecard mutation test.
+
+## FR-QUAL-002 Evidence
+
+Quality findings shall reference durable operational evidence.
+
+Verification: evidence linkage test.
+
+## FR-BILL-001 Authoritative Entitlements
+
+Backend entitlement state shall gate governed operations.
+
+Verification: quota/security tests.
+
+## FR-BILL-002 Payment Reconciliation
+
+Subscription activation shall depend on verified provider/payment state rather than browser redirect state.
+
+Verification: payment webhook/reconciliation tests.
+
+## FR-BILL-003 Idempotent Usage
+
+Repeated usage events shall not double count the same billable fact.
+
+Verification: usage dedupe test.
+
+## FR-INT-001 Provider Isolation
+
+Provider-specific SDK types and payloads shall remain inside integration adapters.
+
+Verification: dependency/layering checks.
+
+## FR-INT-002 Channel Failure Isolation
+
+A failed provider shall not make unrelated channels unavailable.
+
+Verification: fault-injection test.
+
+## FR-API-001 Stable Public API
+
+Public endpoints shall be versioned and expose stable machine-readable errors.
+
+Verification: OpenAPI contract tests.
+
+## FR-API-002 Mutation Idempotency
+
+Retry-sensitive mutations shall support idempotency keys.
+
+Verification: duplicate-request test.
+
+## FR-EVT-001 Transactional Outbox
+
+Business state and required outbox events shall commit atomically.
+
+Verification: transaction failure injection.
+
+## FR-EVT-002 At-Least-Once Consumption
+
+Consumers shall tolerate duplicate event delivery.
+
+Verification: duplicate event tests.
+
+## FR-SEC-001 Privileged Audit
+
+Security-sensitive operations shall generate audit evidence.
+
+Verification: audit integration tests.
+
+## FR-DATA-001 Retention
+
+Data lifecycle shall be controlled by class-specific retention policy.
+
+Verification: retention/purge tests.
+
+## FR-OPS-001 Observability
+
+Critical workflows shall propagate correlation identifiers across API, events, workers and provider operations.
+
+Verification: trace integration test.
+
+## FR-OPS-002 Recovery
+
+Production systems shall have tested restore/reconciliation procedures.
+
+Verification: restore drill evidence.
+
+## Definition of Functional Completeness
+
+A requirement is not considered implemented because a route, UI component or database table exists. The behavior must satisfy the complete requirement chain and its negative/failure cases.
