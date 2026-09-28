@@ -1,17 +1,15 @@
-# Testing Policy
+# Testing Policy — Implementation Specification
 
 > Status: **Target production testing contract**
 
-Testing is organized around risk, invariants and system boundaries.
-
-## 1. Test Pyramid
+## 1. Test Architecture
 
 ~~~mermaid
 flowchart TB
 UNIT[Unit] --> APP[Application]
 APP --> INT[Integration]
-INT --> CONTRACT[Contract]
-CONTRACT --> E2E[End-to-End]
+INT --> CONTRACT[API/Event Contract]
+CONTRACT --> E2E[Critical E2E]
 SEC[Security] --> GATE[Release Gate]
 UNIT --> GATE
 APP --> GATE
@@ -20,66 +18,59 @@ CONTRACT --> GATE
 E2E --> GATE
 ~~~
 
-## 2. Unit Tests
+## 2. Unit Layer
 
 Test:
 
-- domain state transitions;
-- routing rules;
-- entitlement logic;
-- policy evaluation;
+- state transitions;
+- policy decisions;
+- calculations;
 - parsers;
-- sanitizers;
-- deterministic calculations.
+- serializers;
+- retry classification.
 
-## 3. Application Tests
+## 3. Application Layer
 
-Exercise full use cases:
+Use realistic persistence:
 
-- customer creation;
-- inbound message;
-- assignment;
-- AI agent publication;
-- workflow start;
-- subscription transition;
-- usage recording.
+- create customer;
+- ingest conversation;
+- assign workforce;
+- publish AI agent;
+- execute workflow step;
+- update subscription.
 
-Assert both happy and invalid paths.
+## 4. Integration Layer
 
-## 4. Integration Tests
+Test actual infrastructure contracts:
 
-Use real infrastructure where it gives meaningful confidence:
-
-- PostgreSQL transactions;
-- constraints;
-- queues/event consumers;
-- object-storage adapter;
+- PostgreSQL constraints;
+- transactions;
+- queue delivery;
+- object storage;
+- search adapter;
 - provider adapters.
 
-## 5. API Contract Tests
+## 5. Contract Layer
 
-Validate:
+API:
 
-- OpenAPI request/response shape;
+- schema;
 - status codes;
-- error envelope;
-- auth behavior;
-- tenant isolation;
+- error codes;
+- auth;
 - idempotency;
 - pagination;
-- optimistic concurrency.
+- concurrency.
 
-## 6. Event Contract Tests
+Events:
 
-Validate schema:
-
-- required fields;
-- versioning;
+- JSON Schema;
 - producer output;
 - consumer compatibility;
-- representative fixtures.
+- duplicate handling.
 
-## 7. Security Test Matrix
+## 6. Security Matrix
 
 ~~~text
 cross-tenant read
@@ -88,114 +79,100 @@ cross-tenant search
 cross-tenant export
 role escalation
 scope escalation
-invalid webhook
+webhook spoofing
 replay
 secret leakage
 unauthorized tool call
 AI context leakage
 ~~~
 
-## 8. Idempotency Tests
+## 7. Concurrency Tests
 
-Test first request plus duplicate request.
+Test:
+
+- two assignments;
+- two quota consumers;
+- duplicate payment webhook;
+- human takeover vs AI send;
+- simultaneous workflow run creation.
+
+## 8. Idempotency
+
+For every retry-sensitive operation:
 
 ~~~mermaid
 sequenceDiagram
 participant C as Client
-participant API
-participant DB as Database
+participant API as API
+participant DB as Idempotency Store
 C->>API: Request key K
-API->>DB: Check key
-DB-->>API: Not found
-API->>DB: Execute + store result
-API-->>C: Result
+API->>DB: Lookup K
+DB-->>API: Missing
+API->>DB: Execute + save outcome
+API-->>C: Outcome
 C->>API: Same request K
-API->>DB: Check key
-DB-->>API: Existing result
-API-->>C: Same result
+API->>DB: Lookup K
+DB-->>API: Existing outcome
+API-->>C: Same outcome
 ~~~
 
-Also test same key with different meaningful input -> conflict.
+Also test same key with changed input -> deterministic conflict.
 
-## 9. Concurrency Tests
+## 9. AI Safety
 
-Test races for:
+Regression set includes:
 
-- two assignment workers;
-- customer updates;
-- duplicate payment callbacks;
-- simultaneous quota consumption;
-- human takeover versus AI send.
-
-## 10. AI Tests
-
-Include:
-
-- direct prompt injection;
-- indirect document injection;
+- direct injection;
+- indirect injection;
 - unauthorized retrieval;
-- unauthorized tool request;
-- fabricated action claims;
-- guardrail regression;
-- model fallback;
-- budget termination.
+- tool abuse;
+- fabricated action completion;
+- budget runaway;
+- required handoff suppression.
 
-## 11. Workflow Tests
+## 10. Workflow Recovery
 
 Test:
 
-- worker restart;
-- long wait;
+- worker crash;
+- lease loss;
 - retry;
 - dead letter;
-- approval;
+- long wait;
+- approval expiry;
 - cancellation;
-- partial success;
-- duplicate trigger.
+- partial success.
 
-## 12. Provider Tests
+## 11. Provider Tests
 
-CI uses fixtures/mocks at the adapter boundary.
+CI uses deterministic fixtures.
 
-Dedicated provider sandbox tests validate real external compatibility.
+Sandbox/contract tests validate real provider behavior separately.
 
-## 13. End-to-End
+## 12. Test Data
 
-Critical path:
+Use isolated synthetic tenants.
 
-~~~mermaid
-flowchart LR
-IN[Inbound Message] --> CONV[Conversation]
-CONV --> ROUTE[Routing]
-ROUTE --> AIH[Human / AI]
-AIH --> TOOL[Optional Tool]
-TOOL --> OUT[Outbound Message]
-OUT --> DELIVERY[Delivery]
-DELIVERY --> QA[Quality]
-~~~
+Never use production customer content in normal CI.
 
-## 14. Test Data
+## 13. Coverage
 
-Use deterministic fixtures and isolated test tenants.
+Coverage measures exercised code, not correctness.
 
-Production customer data is never ordinary CI test data.
+Critical invariants require targeted tests regardless of aggregate percentage.
 
-## 15. Coverage
+## 14. Flaky Tests
 
-Coverage is a diagnostic signal. It does not prove that critical invariants are protected.
+Do not hide flaky behavior with arbitrary retries.
 
-## 16. Flaky Tests
+Classify whether the defect is:
 
-Flakiness is treated as a defect in the test or the system unless nondeterminism is explicitly part of the contract.
+- test;
+- timing;
+- dependency;
+- application;
+- infrastructure.
 
-Do not hide flaky behavior by multiplying retries.
+## 15. Acceptance
 
-## 17. Acceptance Criteria
-
-- Critical security paths have negative tests.
-- Retry-sensitive paths test duplicates.
-- Concurrent paths test races.
-- API/event contracts are tested.
-- AI safety is regression-tested.
-- Workflow recovery is tested.
-- CI is independent of production data.
+The test system is complete when every critical invariant has a deterministic proof path and every important external boundary has failure tests.

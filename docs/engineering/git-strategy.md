@@ -1,115 +1,102 @@
-# Git Strategy
+# Git Strategy — Implementation Specification
 
-> Status: **Target production engineering contract**
+> Status: **Target engineering contract**
 
-Git history provides traceability between requirements, code, schema and deployed production state.
+## 1. Main Branch
 
-## 1. Branching
+Main should remain releasable.
 
-Keep main releasable.
+Do not knowingly merge:
 
-Use short-lived branch categories:
+- broken typecheck/build;
+- plaintext secrets;
+- unsafe migrations;
+- unreviewed breaking contracts;
+- disabled critical tests.
+
+## 2. Branches
+
+Use short-lived branches:
 
 ~~~text
 feature/*
 fix/*
+security/*
 refactor/*
 docs/*
 test/*
 ci/*
-security/*
 ~~~
 
-Large initiatives should be decomposed into reviewable increments.
-
-## 2. Commit Convention
+## 3. Commit Convention
 
 Use:
 
-- feat;
-- fix;
-- refactor;
-- docs;
-- test;
-- chore;
-- ci;
-- perf;
-- security.
+~~~text
+feat
+fix
+refactor
+docs
+test
+ci
+chore
+perf
+security
+~~~
 
-A commit should represent one coherent intent.
+One coherent behavior/change per commit when practical.
 
-## 3. Branch Flow
+## 4. Change Flow
 
 ~~~mermaid
 flowchart LR
-MAIN[main] --> BRANCH[Short-lived Branch]
+MAIN[main] --> BRANCH[Short Branch]
 BRANCH --> CI[CI]
-CI --> REVIEW[PR Review]
+CI --> REVIEW[PR]
 REVIEW --> MAIN
 MAIN --> TAG[Release Tag]
-TAG --> DEPLOY[Deployment]
+TAG --> ARTIFACT[Immutable Artifact]
+ARTIFACT --> DEPLOY[Deployment]
 ~~~
 
-## 4. Main Branch
+## 5. Traceability
 
-Main should not knowingly contain:
+Significant commits/PRs reference:
 
-- broken builds;
-- plaintext secrets;
-- local generated state;
-- unsafe destructive migrations;
-- unreviewed contract-breaking behavior.
+- requirement/task;
+- affected domain;
+- migration;
+- tests;
+- ADR when architectural.
 
-Emergency fixes receive retrospective review.
+## 6. Release Identity
 
-## 5. Generated Files
-
-Do not commit:
-
-- local databases;
-- caches;
-- build output unless repository policy requires it;
-- developer-specific environment files;
-- secret material.
-
-## 6. Release Traceability
-
-Every production release identifies:
+Production state is identified by:
 
 ~~~text
 commit SHA
-release tag
+artifact digest/version
 migration version
-configuration/feature state
+feature flags
+configuration version
 ~~~
-
-This allows incident responders to identify what was actually deployed.
 
 ## 7. Reverts
 
 A code revert is not automatically a database revert.
 
-After a schema change, use:
+After schema change, use compatibility-aware rollback, feature disablement or forward fix.
 
-- compatible rollback;
-- feature disablement;
-- forward fix;
+## 8. Git Hygiene
 
-when a blind code revert would break schema compatibility.
+Do not commit:
 
-## 8. Change Traceability
+- production/local databases;
+- secrets;
+- caches;
+- build output unless intentionally tracked;
+- machine-specific environment files.
 
-Significant changes reference:
+## 9. Acceptance
 
-- requirement or task;
-- affected domain;
-- migration;
-- tests;
-- architecture decision when applicable.
-
-## 9. Acceptance Criteria
-
-- Main remains releasable.
-- Release state is traceable.
-- Reverts consider database compatibility.
-- Secrets and local artifacts remain outside Git.
+Git history must make it possible to answer what changed, why, how it was tested and what exact version reached production.

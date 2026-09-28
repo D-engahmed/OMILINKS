@@ -1,128 +1,108 @@
-# Pull Request Policy
+# Pull Request Policy — Implementation Specification
 
-> Status: **Target production engineering contract**
+> Status: **Target review contract**
 
-A pull request reviews a change in system behavior, not only syntax.
+## 1. Required PR Information
 
-## 1. Required PR Content
-
-Non-trivial PRs should describe:
+Non-trivial PRs include:
 
 - problem;
-- intended behavior;
+- design;
 - affected domains;
-- API/event changes;
-- migration impact;
-- security impact;
+- APIs/events;
+- data/migration;
+- security;
+- concurrency;
 - tests;
 - observability;
 - rollout;
-- rollback or mitigation.
+- rollback/mitigation.
 
 ## 2. Review Pipeline
 
 ~~~mermaid
 flowchart TD
-PR[Pull Request] --> CI[Automated Checks]
+PR[PR] --> CI[Automated Gates]
 PR --> CODE[Code Review]
-PR --> SECURITY[Security Review]
-PR --> ARCH[Architecture Review When Needed]
-CI --> GATE{All Required Gates?}
+PR --> SEC[Security Review if Risky]
+PR --> ARCH[Architecture Review if Cross-cutting]
+CI --> GATE{Ready?}
 CODE --> GATE
-SECURITY --> GATE
+SEC --> GATE
 ARCH --> GATE
 GATE -->|yes| MERGE[Merge]
-GATE -->|no| CHANGE[Revision]
-CHANGE --> CI
+GATE -->|no| REVISE[Revision]
+REVISE --> CI
 ~~~
 
-Security/architecture reviews can be conditional on the change risk.
+## 3. Reviewer Checklist
 
-## 3. Reviewer Questions
+Correctness:
 
-### Correctness
+- valid state transitions;
+- business invariants;
+- edge cases;
+- error behavior.
 
-- Does implementation satisfy the requirement?
-- Are state transitions valid?
-- Are failures represented honestly?
+Tenant security:
 
-### Tenant Security
+- organization scope;
+- cross-tenant IDs;
+- search/export/job isolation.
 
-- Is organization scope explicit?
-- Can another tenant's ID be accessed?
-- Are exports/search/jobs isolated?
+Concurrency:
 
-### Authorization
+- duplicate request;
+- simultaneous worker;
+- stale version;
+- provider timeout.
 
-- Can request input elevate permissions?
-- Are role and resource scope checked?
-- Does AI have narrower tool policy?
+Contract:
 
-### Concurrency
+- API changed?
+- event schema changed?
+- compatibility preserved?
 
-- What happens under duplicate requests?
-- Can two workers perform the same effect?
-- Is versioning/locking required?
+Operations:
 
-### Contracts
+- metrics;
+- logs;
+- replay/recovery;
+- provider failure.
 
-- Does OpenAPI change?
-- Does an event schema change?
-- Is compatibility preserved?
+## 4. Blocking Conditions
 
-### Operations
+Block when:
 
-- How is failure observed?
-- Can the operation be retried/replayed?
-- What happens during provider outage?
-
-## 4. Test Requirements
-
-Changed behavior needs tests.
-
-Security-sensitive changes need negative tests.
-
-Side-effecting integrations need duplicate/timeout tests.
-
-## 5. Block Conditions
-
-Block merge when:
-
-- tenant scope is missing;
 - authorization is implicit;
-- side effects lack idempotency/reconciliation;
-- migrations are unsafe;
-- API/event contracts are undocumented;
-- critical failures are swallowed;
-- secrets are exposed;
-- required tests are absent.
+- tenant scope is missing;
+- side effect lacks idempotency/reconciliation;
+- migration is unsafe;
+- API/event contract undocumented;
+- failure swallowed;
+- secret exposed;
+- critical test missing.
 
-## 6. Review Comment Standard
+## 5. Required Tests
 
-A useful comment identifies:
+Tests correspond to changed invariants.
 
-~~~text
-failure mode
-impact
-expected invariant/control
-~~~
+A UI-only change may need component/accessibility tests.
 
-Avoid comments that tooling can enforce automatically.
+A permission change needs negative authorization tests.
 
-## 7. Merge Gate
+A provider change needs timeout/rate-limit/duplicate tests.
 
-Before merge:
+## 6. Merge Gates
 
-- required CI passes;
-- required approvals exist;
-- required review threads are resolved;
-- migration/rollout impact is understood;
-- docs are updated.
+Required:
 
-## 8. Acceptance Criteria
+- CI pass;
+- approvals;
+- resolved blocking comments;
+- migration reviewed;
+- documentation updated.
 
-- PR review covers correctness and failure modes.
-- Security boundaries are explicitly checked.
-- Tests prove changed invariants.
-- API/event changes are documented.
-- Merge gates are automated when practical.
+## 7. Acceptance
+
+PR review is complete only when correctness, security, contract compatibility and operational behavior have evidence.

@@ -1,140 +1,115 @@
-# Coding Standards
+# Coding Standards — Implementation Specification
 
-> Status: **Target production engineering contract**
+> Status: **Target engineering contract**
 
-Coding standards preserve domain boundaries, security properties and maintainability as OMILINKS grows.
-
-## 1. Architecture Rules
+## 1. Dependency Direction
 
 ~~~mermaid
 flowchart TB
-HTTP[HTTP / Event Adapter] --> APP[Application Service]
-APP --> DOMAIN[Domain Logic]
-DOMAIN --> DATA[Data Access]
-APP --> EVENT[Outbox / Events]
-DATA --> PG[(PostgreSQL)]
-EVENT --> BUS[Event Bus]
-APP --> EXT[Provider Adapter]
-EXT --> PROVIDER[External Provider]
+TRANSPORT[HTTP / Event / Worker Adapter] --> APP[Application Service]
+APP --> DOMAIN[Domain]
+APP --> PORTS[Ports]
+DOMAIN --> PORTS
+INFRA[Infrastructure] --> PORTS
+INTEGRATIONS[Integrations] --> PORTS
 ~~~
 
-Rules:
-
-- routes/controllers stay thin;
-- application services orchestrate use cases;
-- domain modules own business invariants;
-- repositories/data access own persistence;
-- provider SDKs stay behind adapters;
-- external input is validated at boundaries;
-- frontend never accesses database internals.
-
-## 2. TypeScript
-
-Use strict TypeScript.
-
-Prefer:
-
-- discriminated unions for state machines;
-- explicit boundary types;
-- runtime validation for untrusted input;
-- immutable/read-only structures where useful;
-- narrow interfaces at module boundaries.
-
-Avoid widespread untyped escape hatches.
-
-## 3. Naming
-
-Names express business meaning.
-
-Prefer:
+The dependency rule is one-directional:
 
 ~~~text
-ConversationAssignmentService
-RoutingDecision
-EntitlementCheck
+transport -> application -> domain -> ports
+infrastructure/integrations -> ports
 ~~~
 
-over generic names such as:
+Domain code does not import HTTP, database drivers or provider SDKs.
 
-~~~text
-Manager
-Helper
-Utils
-Service2
-~~~
+## 2. Module Ownership
 
-## 4. State Machines
+Every module must declare:
 
-Business state is explicit.
+- public commands;
+- public queries;
+- domain events;
+- owned persistence;
+- external ports;
+- dependencies.
+
+Internal implementation details remain private to the module.
+
+## 3. Input Validation
+
+Validate all untrusted boundaries:
+
+- HTTP;
+- webhooks;
+- queue messages;
+- API clients;
+- tool arguments;
+- document imports;
+- provider callbacks.
+
+Validation happens before authorization-sensitive mutations and before expensive work.
+
+## 4. Errors
+
+Use stable error classes/categories.
 
 Example:
 
 ~~~text
-ConversationControl
-  HUMAN
-  AI
-  QUEUE
+ValidationError
+AuthorizationError
+ConflictError
+NotFoundError
+RateLimitedError
+UpstreamTimeoutError
+UpstreamUnavailableError
+UnknownOutcomeError
 ~~~
 
-State transitions should live in a domain boundary, not be duplicated across UI/controllers/database hooks.
+HTTP/event adapters map these to external contracts.
 
-## 5. Validation
+## 5. Transactions
 
-Validate:
+A transaction should contain only the database state that must commit atomically.
 
-- HTTP body;
-- query;
-- headers;
-- webhooks;
-- provider payloads;
-- job payloads;
-- tool arguments;
-- imported documents.
-
-Validation occurs before side effects.
-
-## 6. Error Handling
-
-Never silently swallow errors.
-
-Errors are:
-
-- handled intentionally;
-- translated at boundaries;
-- logged with safe structured context;
-- assigned stable categories where externally visible.
-
-Never include secrets in errors.
-
-## 7. Transactions
-
-Use transactions for operations that must commit together.
-
-Typical case:
+Good:
 
 ~~~text
-business mutation
+message
 +
-outbox record
+outbox
++
+idempotency record
+COMMIT
 ~~~
 
-Do not hold database transactions open during LLM/provider network calls.
+Bad:
 
-## 8. Concurrency
+~~~text
+BEGIN
+LLM call
+provider call
+human wait
+COMMIT
+~~~
 
-Use the correct mechanism for the invariant:
+## 6. Concurrency
 
-- optimistic versions;
-- unique constraints;
-- atomic updates;
-- row locks;
-- idempotency records.
+Choose a mechanism based on the invariant:
 
-A disabled UI button is not a concurrency control.
+| Problem | Control |
+|---|---|
+| duplicate event | unique constraint |
+| stale edit | optimistic version |
+| active assignment | row lock/transaction |
+| quota race | atomic reservation |
+| worker duplicate | lease + idempotency |
+| provider write timeout | reconciliation |
 
-## 9. Provider Adapters
+## 7. Provider Adapters
 
-Canonical adapter interfaces should expose behavior such as:
+Canonical methods should hide provider differences:
 
 ~~~text
 verifyWebhook
@@ -144,64 +119,75 @@ normalizeDelivery
 checkHealth
 ~~~
 
-Provider SDK types remain inside integration boundaries.
+Provider-specific request/response types never cross the adapter boundary.
 
-## 10. Logging
+## 8. Logging
 
-Structured logs should include:
+Structured logs contain safe metadata:
 
 - request ID;
 - correlation ID;
+- organization ID where appropriate;
 - operation;
-- safe organization context;
 - outcome;
-- latency.
+- latency;
+- error class.
 
-Do not log:
+Never log credentials or unnecessary customer content.
 
-- passwords;
-- API keys;
-- bearer tokens;
-- provider secrets;
-- unnecessary full customer payloads.
+## 9. Configuration
 
-## 11. Configuration
+Validate required configuration at startup.
 
-Validate configuration at startup.
+Environment-specific configuration stays outside domain logic.
 
-Required configuration fails fast.
+## 10. Naming
 
-Environment-specific assumptions remain outside domain logic.
+Names reflect business meaning.
 
-## 12. Tests
+Prefer:
 
-New business behavior requires tests.
+~~~text
+ConversationAssignmentService
+EntitlementCheck
+RoutingDecision
+~~~
 
-Security-sensitive changes require negative tests.
+Avoid:
 
-Provider adapters require contract/integration tests.
+~~~text
+Helper
+Manager
+Utils
+Service2
+~~~
 
-## 13. Dependency Discipline
+## 11. State Machines
 
-Review:
+State transitions belong in one authoritative domain operation.
 
-- security;
-- license;
-- maintenance;
-- runtime/bundle impact;
-- transitive dependencies.
+Do not allow arbitrary status assignment from controller code.
 
-Lockfile changes are intentional and reviewable.
+## 12. Testing
 
-## 14. Documentation
+Every new invariant has direct tests.
 
-When observable behavior changes, update the affected requirement, domain contract, API/event contract and tests.
+Security boundaries need negative tests.
 
-## 15. Acceptance Criteria
+Provider adapters need fixtures/sandbox coverage.
 
-- Business logic lives inside domain/application boundaries.
-- Provider SDKs do not leak into domain code.
-- Untrusted input is validated.
-- Concurrency is explicit.
-- Errors are observable and safe.
-- Security invariants have tests.
+Concurrency-sensitive behavior has race tests.
+
+## 13. Documentation
+
+Behavior changes update the affected:
+
+- requirement;
+- domain contract;
+- API/event contract;
+- test;
+- release notes/operational doc where needed.
+
+## 14. Acceptance
+
+Code is compliant when business semantics have clear ownership and infrastructure details cannot leak upward into domain logic.
