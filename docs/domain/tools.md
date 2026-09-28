@@ -1,38 +1,66 @@
-# Tools Domain
+# Tools Domain — Implementation Specification
 
-> Status: **Target production domain contract**
+> Status: **Target implementation blueprint**
 
-The Tools domain defines what executable capabilities exist and under what policies AI agents and workflows may use them. Execution is implemented by the AI Tool Runtime.
+## 1. Tool as a Capability
 
-## 1. Why Tools Are a Domain
-
-An AI platform becomes unsafe when model output can directly call arbitrary infrastructure.
-
-OMILINKS uses a controlled capability model:
+A tool is a named, versioned capability with a schema, risk contract and execution adapter.
 
 ~~~text
 ToolDefinition
-  -> ToolVersion
-    -> ToolPolicy
-      -> Tool Runtime
-        -> Domain / Provider Operation
+ -> ToolVersion
+ -> ToolPolicy
+ -> Tool Runtime
+ -> Domain Service / Provider Adapter
 ~~~
 
-A model can request a tool, but the request is not authorization.
+The model requests capabilities; it never receives raw infrastructure access.
 
-## 2. Core Entities
+## 2. Data Model
 
-| Entity | Responsibility |
-|---|---|
-| ToolDefinition | stable business capability identity |
-| ToolVersion | immutable executable contract |
-| ToolPolicy | allowed agents, scopes and risk rules |
-| ToolInvocation | execution and audit record |
-| CredentialRef | reference to secret material |
-| ApprovalRequest | human approval for high-risk work |
-| ToolAdapter | provider/infrastructure boundary |
+~~~mermaid
+erDiagram
+    ORGANIZATION ||--o{ TOOL_POLICY : owns
+    TOOL_DEFINITION ||--o{ TOOL_VERSION : versions
+    TOOL_VERSION ||--o{ TOOL_INVOCATION : executes
+    TOOL_POLICY ||--o{ TOOL_BINDING : permits
+    TOOL_INVOCATION ||--o| APPROVAL : may_require
+    TOOL_INVOCATION ||--o| CREDENTIAL_REF : uses
+~~~
 
-## 3. Tool Lifecycle
+## 3. Tool Definition
+
+Minimum fields:
+
+~~~text
+tool_id
+name
+description
+risk_tier
+status
+owner
+created_at
+updated_at
+~~~
+
+ToolDefinition is the stable identity. ToolVersion contains executable semantics.
+
+## 4. Tool Version
+
+Version contains:
+
+- input schema;
+- output schema;
+- side-effect class;
+- timeout;
+- retry policy;
+- idempotency strategy;
+- adapter version;
+- capability metadata.
+
+A breaking schema change creates a new version.
+
+## 5. Publication Lifecycle
 
 ~~~mermaid
 stateDiagram-v2
@@ -45,222 +73,211 @@ stateDiagram-v2
     DISABLED --> RETIRED
 ~~~
 
-Published tool versions are immutable. Breaking behavior requires a new version.
+Publishing validates all dependencies and policy references.
 
-## 4. Tool Definition Contract
-
-A published tool should specify:
-
-- stable tool ID;
-- version;
-- human-facing description;
-- model-facing description;
-- input schema;
-- output schema;
-- side-effect class;
-- risk tier;
-- required permissions;
-- required entitlement;
-- timeout;
-- retry policy;
-- idempotency strategy;
-- implementation adapter;
-- audit requirements.
-
-This metadata exists so unsafe defaults are visible before the tool reaches an AI agent.
-
-## 5. Side-Effect Classes
-
-| Class | Example | Default retry |
-|---|---|---|
-| read | lookup order | usually safe |
-| write | create ticket | idempotency required |
-| external | send message | provider semantics / reconciliation |
-| destructive | delete account | approval or strict policy |
-
-## 6. Authorization Pipeline
-
-~~~mermaid
-flowchart TD
-    REQUEST[Tool Request] --> EXISTS[Tool Exists + Active]
-    EXISTS --> VERSION[Resolve Tool Version]
-    VERSION --> TENANT[Resolve Organization + Scope]
-    TENANT --> AGENT[Check Agent Policy]
-    AGENT --> RESOURCE[Check Resource Ownership]
-    RESOURCE --> PERM[Check Permission]
-    PERM --> ENT[Check Entitlement]
-    ENT --> RISK[Evaluate Risk / Approval]
-    RISK --> EXEC[Executable]
-~~~
-
-Any failed hard constraint stops execution.
-
-## 7. Tenant Resource Protection
-
-A tool request such as:
-
-~~~json
-{
-  "tool": "customer.lookup",
-  "customer_id": "cust_123"
-}
-~~~
-
-must resolve the customer through tenant-scoped data access.
-
-~~~text
-cust_123 -> organization X
-run      -> organization Y
-X != Y
-=> DENY
-~~~
-
-A model-supplied organization identifier can never override the requesting execution context.
-
-## 8. Tool Versioning
-
-Breaking input/output semantics create a new version.
-
-~~~text
-ticket.create v1
-ticket.create v2
-~~~
-
-Historical invocation records retain the exact version used.
-
-## 9. Approval
-
-High-risk tools may pause execution for human approval.
+## 6. Invocation Pipeline
 
 ~~~mermaid
 sequenceDiagram
 participant M as Model
 participant R as Tool Runtime
-participant A as Approval Service
-participant H as Human
-participant D as Domain
-M->>R: Tool request
-R->>A: Evaluate risk
-alt Approval required
-  A->>H: Approval request
-  H-->>A: Approve / Reject
-  A-->>R: Decision
-else Low risk
-  A-->>R: Auto-approved
-end
-R->>D: Execute if allowed
-D-->>R: Outcome
+participant Z as Authorization
+participant E as Entitlement
+participant A as Approval
+participant D as Domain / Adapter
+M->>R: Tool intent
+R->>Z: Permission + tenant + resource
+Z-->>R: Allowed
+R->>E: Entitlement
+E-->>R: Allowed
+R->>A: Risk decision
+A-->>R: Approved / not required
+R->>D: Execute
+D-->>R: Result
+R-->>M: Sanitized result
 ~~~
 
-Approval must bind to the exact tool version and arguments. Approving one resource must not authorize a different resource.
+## 7. Invocation Record
 
-## 10. Idempotency
+Store:
 
-Every side-effecting tool defines duplicate behavior before publication.
+~~~text
+invocation_id
+run_id
+organization_id
+tool_id
+tool_version
+input_hash
+idempotency_key
+authorization_decision
+approval_state
+started_at
+completed_at
+outcome
+error_class
+external_reference
+~~~
 
-Examples:
+Raw arguments may require stronger retention/privacy controls.
 
-- create external ticket -> idempotency key;
-- send message -> canonical message/provider idempotency where supported;
-- update setting -> version check;
-- charge payment -> provider transaction/idempotency contract.
+## 8. Authorization
 
-A provider timeout does not prove that a side effect failed.
+Effective permission is evaluated from:
 
-## 11. Unknown External Outcome
+~~~text
+platform controls
++ tenant policy
++ agent/tool policy
++ principal permissions
++ resource ownership
++ resource state
++ entitlement
+~~~
+
+Every invocation performs the checks again.
+
+## 9. Resource Access
+
+A tool receives an organization context from the runtime.
+
+The handler must not allow:
+
+~~~text
+requested organization
+!=
+execution organization
+~~~ 
+
+unless there is an explicitly modeled cross-tenant administrative operation, which should be rare and separately permissioned.
+
+## 10. Side-Effect Classification
+
+| Class | Example | Required control |
+|---|---|---|
+| read | lookup customer | authorization |
+| internal write | update customer | transaction + idempotency |
+| external write | send message | provider idempotency/reconciliation |
+| destructive | delete/close | approval/strict policy |
+
+## 11. Idempotency
+
+For side effects, define a semantic key.
+
+~~~text
+organization
++ tool version
++ run
++ semantic request key
+~~~
+
+The runtime checks existing invocation state before another effect is attempted.
+
+## 12. Unknown Outcome
 
 ~~~mermaid
 flowchart TD
-CALL[External Tool Call] --> TIMEOUT{Timeout}
-TIMEOUT -->|No| KNOWN[Known Result]
-TIMEOUT -->|Yes| RECON[Reconciliation]
-RECON --> FOUND[Side Effect Found]
-RECON --> NOTFOUND[No Side Effect]
-FOUND --> KNOWN
-NOTFOUND --> RETRY[Retry Only When Safe]
+CALL[External Side Effect] --> RESULT{Known Result?}
+RESULT -->|yes| DONE[Persist Result]
+RESULT -->|no| UNKNOWN[UNKNOWN]
+UNKNOWN --> RECON[Reconcile]
+RECON --> EXISTS[Effect Exists]
+RECON --> ABSENT[Effect Absent]
+EXISTS --> DONE
+ABSENT --> RETRY[Retry if Safe]
 ~~~
 
-Blind retries are forbidden for unknown high-impact outcomes.
+UNKNOWN is different from failure.
 
-## 12. Credentials
+## 13. Approval Binding
 
-The model sees a logical tool, never a raw provider credential.
+Approval binds to:
 
-~~~mermaid
-flowchart LR
-MODEL[Model] --> RUNTIME[Tool Runtime]
-RUNTIME --> REF[Credential Reference]
-REF --> SECRETS[Secret Manager]
-SECRETS --> ADAPTER[Provider Adapter]
-ADAPTER --> PROVIDER[External API]
-~~~
+- organization;
+- tool ID/version;
+- normalized action hash;
+- target resource;
+- requester/run;
+- expiration;
+- approver scope.
 
-Secrets never enter prompts, tool results, browser responses, normal events or logs.
+Changing a material input invalidates the approval.
 
-## 13. Output Sanitization
+## 14. Credential Isolation
 
-Provider/internal data is projected into a bounded result.
+The tool handler resolves a credential reference inside the adapter.
+
+The model never sees the credential.
+
+Credential access should also be separated by provider/account to prevent accidental cross-connection use.
+
+## 15. Output Projection
+
+Tool outputs are normalized before returning to the model.
 
 Remove:
 
 - secrets;
-- unrelated customer records;
+- unrelated records;
 - stack traces;
-- internal authorization metadata;
-- uncontrolled payload size;
-- fields unnecessary for the current task.
+- infrastructure URLs;
+- internal permission state;
+- excessive payloads.
 
-The model should receive the minimum useful result.
+## 16. Transactions
 
-## 14. Cross-Domain Contracts
+Internal business mutation:
 
-**AI:** agent policy decides which tools are available; runtime performs the final authorization.
+~~~text
+authorize
+ -> domain command
+ -> transaction
+ -> outbox
+ -> commit
+~~~
 
-**Workflows:** workflow steps invoke tools through a bounded service identity.
+External mutation:
 
-**Tenancy:** every target resource is resolved inside organization scope.
+~~~text
+create invocation identity
+ -> provider call
+ -> reconcile if unknown
+ -> canonical result
+ -> event
+~~~
 
-**Billing:** governed tools may consume entitlements and usage.
+## 17. Retry Classes
 
-**Audit:** sensitive invocations are traceable.
-
-## 15. Failure Taxonomy
-
-| Failure | Behavior |
+| Error | Retry |
 |---|---|
-| invalid tool | block |
-| invalid arguments | block before side effect |
-| unauthorized | block |
-| entitlement denied | block |
-| approval rejected | do not execute |
-| provider timeout | reconcile when side effect possible |
-| provider rate limit | bounded retry |
-| unknown result | reconciliation state |
+| local validation | no |
+| authorization denial | no |
+| entitlement denial | no |
+| provider 429 | bounded |
+| provider 5xx | bounded |
+| provider timeout on read | bounded |
+| provider timeout on write | reconcile |
+| business conflict | re-read/re-evaluate |
+| unknown outcome | reconcile |
 
-## 16. Observability
+## 18. Test Vectors
 
-Every invocation should expose:
+- malformed schema;
+- unknown tool;
+- disabled tool;
+- unauthorized user;
+- cross-tenant resource;
+- invalid scope;
+- duplicate invocation;
+- approval mismatch;
+- provider timeout;
+- unknown external outcome;
+- credential isolation;
+- stale AI control version.
 
-- invocation ID;
-- run ID;
-- organization;
-- tool/version;
-- risk tier;
-- authorization result;
-- approval state;
-- duration;
-- retry count;
-- provider;
-- outcome;
-- error class;
-- idempotency key.
+## 19. Observability
 
-## 17. Acceptance Criteria
+Track invocation count, latency, retries, approval latency, authorization blocks, provider errors, unknown outcomes and tool-level cost.
 
-- No tool executes solely because the model requested it.
-- Every published tool has schema, timeout, retry and side-effect semantics.
-- Cross-tenant access is impossible through model input.
-- High-risk actions can require approval.
-- Side effects are idempotent or reconciled.
-- Tool versions remain available for audit/replay.
-- Credentials never reach model context.
+## 20. Acceptance
+
+A tool is production-ready only when its schema, authorization, idempotency, side-effect classification, failure behavior and audit trace are complete.
