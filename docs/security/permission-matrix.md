@@ -1,65 +1,75 @@
-# Permission Matrix
+# Permission Matrix — Implementation Specification
 
-> Status: **Target production authorization contract**
+> Status: **Target authorization blueprint**
 
-## 1. Authorization Model
-
-Authorization is:
+## 1. Effective Authorization
 
 ~~~text
-Principal
-  + Membership
-  + Permission
-  + Scope
-  + Resource Ownership
-  + Resource State
-  + Entitlement
-  -> decision
+principal
++ membership/service binding
++ permission
++ organization
++ scope
++ resource ownership
++ resource state
++ entitlement
+-> decision
 ~~~
 
-Roles are bundles of permissions. They are not themselves the final authorization decision.
+## 2. Permission Vocabulary
 
-## 2. Role Semantics
+~~~text
+organization.manage
+membership.manage
+customer.read
+customer.write
+conversation.read
+conversation.send
+conversation.assign
+workforce.manage
+routing.manage
+ai.configure
+ai.execute
+tool.execute
+knowledge.manage
+workflow.manage
+quality.review
+quality.manage
+billing.read
+billing.manage
+integration.manage
+export.execute
+~~~
 
-Baseline roles:
+Permissions should be stable identifiers used by code and tests.
 
-- Owner;
-- Admin;
-- Supervisor;
-- Agent;
-- QA;
-- BillingAdmin;
-- IntegrationAdmin;
-- AIOperator;
-- ServicePrincipal.
-
-A tenant can define additional roles without weakening platform-required security controls.
-
-## 3. Baseline Matrix
+## 3. Baseline Role Matrix
 
 | Capability | Owner | Admin | Supervisor | Agent | QA | Billing | Integration | AI |
-|---|---|---|---|---|---|---|---|---|
-| organization.manage | yes | yes | no | no | no | no | no | no |
-| membership.manage | yes | yes | no | no | no | no | no | no |
-| customer.read | yes | yes | scoped | scoped | scoped | no | scoped | policy |
-| customer.write | yes | yes | scoped | scoped | no | no | no | policy |
-| conversation.read | yes | yes | scoped | scoped | scoped | no | scoped | policy |
-| conversation.send | yes | yes | yes | yes | no | no | policy | policy |
-| conversation.assign | yes | yes | yes | no | no | no | no | policy |
-| workforce.manage | yes | yes | scoped | no | no | no | no | no |
-| ai.configure | yes | yes | scoped | no | no | no | no | no |
-| ai.run | yes | yes | scoped | no | no | no | no | policy |
-| tool.execute | yes | yes | approved | no | no | policy | policy | policy |
-| billing.read | yes | yes | no | no | no | yes | no | no |
-| billing.manage | yes | scoped | no | no | no | yes | no | no |
-| integrations.manage | yes | yes | no | no | no | no | yes | no |
-| quality.manage | yes | yes | yes | no | yes | no | no | policy |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| organization.manage | Y | Y | - | - | - | - | - | - |
+| membership.manage | Y | Y | - | - | - | - | - | - |
+| customer.read | Y | Y | scoped | scoped | scoped | - | scoped | policy |
+| customer.write | Y | Y | scoped | scoped | - | - | scoped | policy |
+| conversation.read | Y | Y | scoped | scoped | scoped | - | scoped | policy |
+| conversation.send | Y | Y | Y | Y | - | - | policy | policy |
+| conversation.assign | Y | Y | Y | - | - | - | - | policy |
+| workforce.manage | Y | Y | scoped | - | - | - | - | - |
+| routing.manage | Y | Y | scoped | - | - | - | - | - |
+| ai.configure | Y | Y | scoped | - | - | - | - | - |
+| ai.execute | Y | Y | scoped | - | - | - | - | policy |
+| tool.execute | Y | Y | policy | - | - | policy | policy | policy |
+| knowledge.manage | Y | Y | scoped | - | - | - | scoped | policy |
+| workflow.manage | Y | Y | scoped | - | - | - | - | - |
+| quality.review | Y | Y | Y | - | Y | - | - | policy |
+| billing.read | Y | Y | - | - | - | Y | - | - |
+| billing.manage | Y | scoped | - | - | - | Y | - | - |
+| integration.manage | Y | Y | - | - | - | - | Y | - |
+| export.execute | Y | scoped | scoped | - | - | scoped | scoped | policy |
 
-"Scoped" means only inside effective resource scope. "Policy" means AI/tool authorization adds another restriction layer.
+Custom tenant roles may narrow access but cannot bypass platform security controls.
 
 ## 4. Scope Dimensions
-
-Permissions can be limited by:
 
 - organization;
 - client account;
@@ -69,140 +79,115 @@ Permissions can be limited by:
 - site.
 
 ~~~mermaid
-flowchart TB
-PERM[Permission] --> SCOPE[Scope Binding]
-SCOPE --> ORG[Organization]
-SCOPE --> CLIENT[Client]
-SCOPE --> PROGRAM[Program]
-SCOPE --> SECTOR[Sector]
-SCOPE --> TEAM[Team]
-SCOPE --> SITE[Site]
-~~~
-
-A broad scope cannot be inferred from a narrow assignment.
-
-## 5. Authorization Decision
-
-~~~mermaid
 flowchart LR
-USER[Principal] --> MEMBERSHIP[Membership]
-MEMBERSHIP --> ROLE[Role]
-ROLE --> PERMISSION[Permission]
-MEMBERSHIP --> SCOPE[Scope]
-RESOURCE[Resource] --> OWNERSHIP[Ownership]
-PERMISSION --> CHECK[Authorization Check]
+ROLE[Role] --> PERM[Permission]
+MEMBERSHIP[Membership] --> SCOPE[Scope Binding]
+PERM --> CHECK[Authorization]
 SCOPE --> CHECK
-OWNERSHIP --> CHECK
-RESOURCE --> CHECK
-CHECK --> DECISION{Allow?}
+RESOURCE[Resource Ownership] --> CHECK
+CHECK --> DECISION[Allow / Deny]
 ~~~
 
-## 6. Privilege Separation
+## 5. Scope Evaluation
 
-Do not make one administrator role responsible for all sensitive areas.
+Example for team-scoped Agent:
 
-Recommended separation:
+~~~text
+permission = conversation.read
+required team = team_7
+membership scope = team_7
+conversation team = team_7
+=> eligible
+~~~
 
-- BillingAdmin for financial settings;
-- IntegrationAdmin for provider credentials;
-- AIOperator for AI policy;
-- QA for evaluation;
-- Supervisor for operational workforce.
+A different team is denied.
 
-This reduces blast radius.
+## 6. Deny by Default
 
-## 7. Service Principals
+Missing policy state is deny for protected operations.
 
-A service principal uses the same permission system but receives minimal capabilities.
+Never use:
+
+~~~text
+unknown scope -> organization-wide fallback
+~~~
+
+## 7. AI Authorization
+
+AI access is the intersection of:
+
+~~~text
+platform
++ tenant
++ agent
++ tool
++ conversation
++ resource
+~~~
+
+Configuring an agent does not transfer the administrator's role.
+
+## 8. Service Principal Permissions
 
 Example:
 
 ~~~text
-whatsapp.webhook
- -> integration.webhook.receive
- -> conversation.message.ingest
- -> event.publish
+whatsapp-webhook:
+  integration.receive
+  conversation.ingest
+  event.publish
+
+billing-reconciler:
+  billing.read_provider_state
+  billing.reconcile
+  usage.record
 ~~~
 
-It does not receive:
-
-~~~text
-billing.manage
-organization.manage
-customer.export
-~~~
-
-unless explicitly required and separately approved.
-
-## 8. AI Authorization
-
-The AI agent permission set is the intersection of:
-
-~~~text
-platform policy
-+
-tenant policy
-+
-agent tool policy
-+
-conversation scope
-+
-resource authorization
-~~~
-
-The human who configured an AI agent does not transfer their role to the agent.
+Do not give machines generic administrator roles.
 
 ## 9. Privileged Operations
 
-Require stronger controls and audit for:
+Extra controls for:
 
 - owner transfer;
 - role/permission changes;
-- tenant-wide exports;
+- credential changes;
 - API key creation;
-- provider credential changes;
-- AI tool enablement;
-- billing overrides;
-- destructive operations.
+- export;
+- billing override;
+- destructive actions.
 
-## 10. Deny by Default
+## 10. Authorization Cache
 
-If a permission is missing or scope cannot be resolved, the decision is deny.
-
-Do not implement fallback such as:
+A safe cache key may require:
 
 ~~~text
-scope unknown -> use organization-wide access
+principal
+organization
+role_version
+scope_version
+permission
+resource_type
+resource_id
 ~~~
 
-## 11. Authorization Caching
+Invalidate on membership/role/scope changes.
 
-Caches may optimize repeated checks, but must have:
+## 11. Audit
 
-- bounded TTL;
-- invalidation on membership changes;
-- tenant-safe keys;
-- stronger revalidation for high-risk actions.
+Record actor, organization, operation, target, decision, policy version, timestamp and correlation ID.
 
-## 12. Audit
+## 12. Test Matrix
 
-Authorization-sensitive mutations record:
+- horizontal escalation;
+- vertical escalation;
+- scope escape;
+- stale revoked membership;
+- service principal overreach;
+- AI privilege inheritance;
+- privileged action without required auth;
+- cross-tenant resource ID.
 
-- actor;
-- organization;
-- permission;
-- resource;
-- scope;
-- result;
-- policy/version;
-- correlation ID.
+## 13. Acceptance
 
-## 13. Acceptance Criteria
-
-- Missing permissions deny.
-- Scope cannot be widened by client input.
-- Roles do not cross organizations.
-- AI does not inherit human privileges.
-- Service principals are least-privilege.
-- Privileged changes are auditable.
-- High-risk authorization uses fresh enough policy state.
+Every permission has a defined principal type, organization boundary, scope semantics, deny behavior and automated tests.

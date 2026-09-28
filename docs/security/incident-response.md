@@ -1,208 +1,154 @@
-# Incident Response
+# Incident Response — Implementation Specification
 
-> Status: **Target production operations/security contract**
-
-Incident response is the operational system used when availability, confidentiality, integrity or financial correctness is threatened.
+> Status: **Target operational/security blueprint**
 
 ## 1. Severity
 
-| Severity | Meaning | Example |
-|---|---|---|
-| SEV-1 | active breach, broad outage, major integrity impact | tenant data exposure |
-| SEV-2 | material degradation or contained security issue | channel outage, credential compromise isolated to one integration |
-| SEV-3 | limited defect or anomaly | non-critical job failure |
+| Level | Meaning |
+|---|---|
+| SEV-1 | active breach, broad outage, major integrity/financial impact |
+| SEV-2 | material degradation or contained serious security issue |
+| SEV-3 | limited operational defect |
 
 Severity can be escalated as evidence changes.
 
-## 2. Incident Lifecycle
+## 2. Lifecycle
 
 ~~~mermaid
 flowchart LR
-DETECT[Detect] --> TRIAGE[Classify / Triage]
+DETECT[Detect] --> TRIAGE[Triage]
 TRIAGE --> CONTAIN[Contain]
 CONTAIN --> ERADICATE[Eradicate]
 ERADICATE --> RECOVER[Recover]
 RECOVER --> VERIFY[Verify]
-VERIFY --> LEARN[Post-Incident Review]
+VERIFY --> REVIEW[Post-Incident Review]
 ~~~
 
-## 3. Detection Sources
+## 3. Triage Record
 
-Incidents may originate from:
+Capture:
 
-- monitoring alerts;
-- security alerts;
-- customer reports;
-- provider alerts;
-- QA findings;
-- billing reconciliation;
-- anomaly detection;
-- audit review;
-- engineer discovery.
+- first observed time;
+- affected organizations;
+- affected resource types;
+- security impact;
+- financial impact;
+- availability impact;
+- blast radius;
+- known/unknown facts;
+- current containment.
 
-## 4. Initial Triage
+## 4. Containment
 
-First establish:
+Possible actions:
 
-- what failed;
-- when it started;
-- affected tenants;
-- affected resources;
-- security/privacy implications;
-- financial implications;
-- current blast radius;
-- whether the incident is ongoing.
-
-Do not speculate beyond evidence.
-
-## 5. Containment
-
-Possible containment actions:
-
-- disable integration;
-- pause AI automation;
+- pause AI agent;
 - disable tool;
+- disable channel;
 - revoke credential;
+- pause workflow;
+- disable feature;
 - restrict endpoint;
-- pause workflow execution;
-- suspend affected tenant operation;
-- stop a deployment;
-- block outbound automation.
+- stop deployment.
 
-Containment should minimize additional damage without destroying forensic evidence.
+Containment must preserve evidence.
 
-## 6. Security Incident Flow
+## 5. Tenant-Isolation Incident
 
-~~~mermaid
-sequenceDiagram
-participant ALERT as Alert
-participant IC as Incident Lead
-participant SEC as Security
-participant OPS as Operations
-participant ENG as Engineering
-ALERT->>IC: Incident opened
-IC->>SEC: Security assessment
-IC->>OPS: Containment action
-OPS-->>IC: Contained
-IC->>ENG: Root cause / remediation
-ENG-->>IC: Fix deployed
-IC->>OPS: Recovery verification
-OPS-->>IC: Healthy
+If data isolation is suspected:
+
+1. identify affected organizations;
+2. identify resources;
+3. determine time window;
+4. inspect authorization/audit evidence;
+5. disable vulnerable path;
+6. patch;
+7. execute isolation regression suite;
+8. verify closure;
+9. execute required notification process according to applicable obligations.
+
+## 6. AI Incident
+
+Preserve:
+
+~~~text
+run_id
+agent version
+policy version
+model route
+knowledge snapshot
+tool versions
+guardrail decisions
+control version
 ~~~
 
-## 7. Evidence Preservation
+Then:
 
-Preserve as appropriate:
+~~~text
+pause affected capability
+ -> reproduce
+ -> classify root cause
+ -> add regression test
+ -> fix
+ -> evaluate
+ -> controlled reactivation
+~~~
+
+## 7. Financial Incident
+
+For billing/payment mismatch:
+
+- stop unsafe automation;
+- preserve provider IDs;
+- compare local/provider state;
+- reconcile;
+- correct through auditable operation;
+- verify entitlements.
+
+Never erase original financial facts.
+
+## 8. Evidence
+
+Preserve:
 
 - request IDs;
 - correlation IDs;
-- audit events;
-- deployment commit/tag;
+- audit records;
+- event IDs;
+- release SHA;
 - configuration versions;
-- provider event IDs;
 - relevant logs;
-- database state;
-- access records.
+- provider references.
 
-Avoid copying unnecessary customer content into incident documents.
+Minimize copied customer content.
 
-## 8. Data Exposure
+## 9. Recovery Verification
 
-For suspected tenant data exposure:
+Recovery requires:
 
-1. identify affected organization(s);
-2. identify affected resource classes;
-3. determine time window;
-4. determine whether data was accessed or only potentially exposed;
-5. revoke attacker credentials;
-6. patch authorization gap;
-7. run cross-tenant regression suite;
-8. review audit evidence;
-9. execute required notification process according to applicable contractual/legal obligations.
+~~~text
+control restored
+security checks pass
+data checks pass
+queues healthy
+customer behavior verified
+monitoring stable
+~~~
 
-## 9. Financial Incident
+## 10. Postmortem
 
-For billing/payment anomalies:
-
-- stop unsafe automatic financial actions;
-- preserve payment/provider identifiers;
-- reconcile against provider;
-- freeze affected automation;
-- identify duplicated/missing effects;
-- correct through auditable financial operations.
-
-Never "fix" an accounting discrepancy by deleting the original event.
-
-## 10. AI Incident
-
-For AI safety incident:
-
-- pause affected agent/tool/policy;
-- preserve run IDs and policy versions;
-- inspect prompts/context/tool traces;
-- determine whether the issue was model, policy, retrieval, tool, or authorization;
-- add regression case;
-- validate fix before reactivation.
-
-## 11. Recovery Verification
-
-Recovery is complete only when:
-
-- primary failure is fixed;
-- security controls are active;
-- queues are healthy;
-- no hidden corrupted state remains;
-- customer-visible behavior is verified;
-- monitoring confirms stability.
-
-## 12. Communication
-
-Operational communication should state:
-
-- known facts;
-- affected scope;
-- current mitigation;
-- current uncertainty;
-- next control action.
-
-Avoid unsupported root-cause claims before investigation is complete.
-
-## 13. Post-Incident Review
-
-The review identifies:
+Record:
 
 - root cause;
-- contributing conditions;
-- failed control;
+- contributing factors;
+- failed controls;
 - detection gap;
 - recovery gap;
 - customer impact;
-- corrective actions;
-- documentation changes;
-- testing changes.
+- corrective work;
+- new tests;
+- documentation changes.
 
-Repeated incidents should trigger architecture review rather than repeated manual work.
+## 11. Acceptance
 
-## 14. Runbooks
-
-Critical systems should have runbooks for:
-
-- database outage;
-- queue outage;
-- Redis outage;
-- provider outage;
-- credential compromise;
-- tenant-isolation violation;
-- AI runaway loop;
-- payment mismatch;
-- backup restore.
-
-## 15. Acceptance Criteria
-
-- Severity can be assigned consistently.
-- Containment actions are documented.
-- Security incidents preserve evidence.
-- Financial incidents use reconciliation.
-- AI incidents preserve model/policy/tool traces.
-- Recovery has explicit verification checks.
-- Postmortem actions become tracked engineering work.
+Every high-impact incident class has detection, containment, evidence preservation, recovery and regression procedures.

@@ -1,155 +1,209 @@
-# Security Threat Model
+# Security Threat Model — Implementation Specification
 
-> Status: **Target production security contract**
+> Status: **Target security engineering blueprint**
 
-## 1. Security Objective
+## 1. Security Objectives
 
-The security model protects:
+Protect:
 
-- tenant data;
+- tenant isolation;
 - customer PII;
-- conversation history;
-- provider/API credentials;
-- AI policies and traces;
-- business actions;
-- subscription/payment state;
-- audit history.
-
-The most important property is that an untrusted input can never become a trusted authority.
+- conversation confidentiality;
+- credentials/secrets;
+- AI context and tool authority;
+- billing integrity;
+- audit integrity;
+- customer-operation availability.
 
 ## 2. Trust Boundaries
 
 ~~~mermaid
 flowchart TB
-    INTERNET[Internet / Customers / Providers] --> EDGE[Public Edge]
-    EDGE --> API[API Boundary]
-    API --> AUTH[Identity + Authorization]
-    AUTH --> DOMAIN[Domain Services]
-    DOMAIN --> DB[(PostgreSQL)]
-    DOMAIN --> OUTBOX[Outbox]
-    OUTBOX --> WORKER[Workers]
-    WORKER --> EXTERNAL[External Providers]
-    AI[Model Providers] --> WORKER
-    SEARCH[Search / Vector] --> WORKER
-    SECRET[Secret Manager] --> API
-    SECRET --> WORKER
+EXT[Internet / Providers] --> EDGE[Public Edge]
+EDGE --> API[API / Webhook]
+API --> AUTH[Identity / Authorization]
+AUTH --> DOMAIN[Domain Services]
+DOMAIN --> DB[(PostgreSQL)]
+DOMAIN --> OUTBOX[Outbox]
+OUTBOX --> WORKERS[Workers]
+WORKERS --> PROVIDERS[External Providers]
+WORKERS --> AI[Model Providers]
+AI --> SEARCH[Knowledge Search]
+SECRETS[Secret Manager] --> API
+SECRETS --> WORKERS
 ~~~
 
-Each transition between trust zones performs validation appropriate to that boundary.
+Every trust-boundary crossing validates the data required by that boundary.
 
-## 3. Assets and Attack Consequences
+## 3. Threat Register
 
-| Asset | Example impact |
-|---|---|
-| Customer data | privacy breach |
-| Conversation data | customer confidentiality breach |
-| Provider credentials | unauthorized external access |
-| AI tools | fraudulent/unsafe business actions |
-| Billing state | financial loss |
-| Tenant membership | privilege escalation |
-| Audit logs | loss of investigation evidence |
-| Knowledge base | confidential information disclosure |
+| Threat | Primary control | Verification |
+|---|---|---|
+| cross-tenant read | scoped query + ownership check | negative test |
+| cross-tenant write | scoped mutation | negative test |
+| privilege escalation | role/scope evaluation | authorization suite |
+| spoofed webhook | provider verification | forged callback |
+| replay | dedupe/timestamp | replay test |
+| prompt injection | trust separation + tool authorization | adversarial evaluation |
+| tool abuse | allowlist/risk/authorization | tool suite |
+| secret leakage | secret boundary + redaction | CI/runtime checks |
+| payment replay | idempotency + reconciliation | billing suite |
+| workflow explosion | budgets/fan-out limits | load test |
+| dependency compromise | lockfile/scanning | CI |
+| session theft | secure sessions/revocation | security tests |
 
-## 4. Threat Register
+## 4. Tenant Isolation Threat
 
-| Threat | Attack path | Primary control | Detection |
-|---|---|---|---|
-| cross-tenant access | valid UUID from another tenant | tenant-scoped queries | negative security tests |
-| privilege escalation | manipulated role/scope | server-side authorization | audit anomalies |
-| webhook spoofing | forged provider request | signature verification | verification metrics |
-| replay attack | valid old webhook | provider timestamp/dedupe | duplicate metrics |
-| prompt injection | malicious customer/document | trust separation | AI evaluation |
-| tool abuse | model requests unsafe action | tool policy | invocation audit |
-| credential leakage | logs/client payloads | secret boundary | secret scanning |
-| duplicate financial effect | payment replay | idempotency | reconciliation |
-| workflow explosion | unbounded fan-out | run/step limits | queue/cost metrics |
-| supply-chain compromise | malicious dependency | lockfile/CI controls | dependency scanning |
-| session theft | browser credential exposure | secure session controls | auth anomaly monitoring |
-
-## 5. Prompt Injection Threat
-
-The AI system assumes customer text, documents and tool outputs are hostile data.
-
-~~~mermaid
-flowchart LR
-INPUT[Untrusted Content] --> MODEL[Model]
-MODEL --> INTENT[Proposed Intent]
-INTENT --> POLICY[Independent Policy]
-POLICY -->|deny| BLOCK[Block]
-POLICY -->|allow| EXEC[Controlled Execution]
-~~~
-
-The policy engine, not the model, decides authorization.
-
-## 6. Data Exfiltration Threat
-
-Context access is:
+Threat:
 
 ~~~text
-requested data
-  ∩ tenant scope
-  ∩ resource authorization
-  ∩ agent context policy
-  ∩ data retention rules
+attacker has a valid resource identifier from another tenant
 ~~~
 
-A model cannot expand the intersection by asking for more data.
+Control:
 
-## 7. Abuse Controls
+~~~text
+resource lookup requires organization context
++
+ownership check
+~~~
 
-Protect against:
+Expected:
 
-- login brute force;
-- API scraping;
-- webhook floods;
-- expensive AI prompts;
-- repeated tool retries;
-- large knowledge uploads;
-- workflow fan-out;
-- export abuse.
+~~~text
+no protected data disclosed
+no state mutation
+security telemetry when appropriate
+~~~
 
-Use layered rate limits, quotas, queues and operator controls.
-
-## 8. Security Testing Model
-
-Every critical threat gets:
-
-1. preventive control;
-2. automated negative test;
-3. observable signal;
-4. incident response path.
-
-A control without detection is incomplete for high-impact threats.
-
-## 9. Security Requirements
-
-- TLS for external/intersystem transport where supported;
-- no secrets in client bundles;
-- tenant scope before resource lookup;
-- least privilege;
-- immutable security audit records;
-- explicit privileged operations;
-- safe retry/reconciliation;
-- dependency and secret scanning in CI.
-
-## 10. Threat Modeling Workflow
+## 5. AI Security Boundary
 
 ~~~mermaid
 flowchart LR
-CHANGE[Architecture / Feature Change] --> ASSET[Identify Assets]
+INPUT[Customer / Document] --> MODEL[Model]
+MODEL --> PROPOSAL[Proposed Action]
+PROPOSAL --> AUTHZ[Independent Authorization]
+AUTHZ -->|deny| BLOCK[Block]
+AUTHZ -->|allow| TOOL[Controlled Tool]
+TOOL --> DOMAIN[Domain Service]
+DOMAIN --> EFFECT[Business Effect]
+~~~
+
+A model is an untrusted action proposer.
+
+## 6. Prompt Injection
+
+Test:
+
+- direct instruction injection;
+- instruction inside knowledge documents;
+- malicious tool output;
+- system-like injected content;
+- encoded/obfuscated instructions;
+- multi-turn persistence;
+- tenant-escape attempts.
+
+## 7. Data Exfiltration
+
+Eligible data is:
+
+~~~text
+candidate data
+INTERSECT tenant
+INTERSECT scope
+INTERSECT permission
+INTERSECT agent context policy
+~~~
+
+The model cannot expand this set.
+
+## 8. Webhook Threats
+
+Controls:
+
+- provider authentication;
+- replay protection;
+- body limits;
+- rate limiting;
+- provider/account binding;
+- durable dedupe.
+
+## 9. Secret Threats
+
+Never place secrets in:
+
+- browser bundles;
+- API responses;
+- events;
+- prompts;
+- retrieval documents;
+- logs;
+- generic errors.
+
+## 10. Abuse / DoS
+
+Protect:
+
+- login;
+- search;
+- exports;
+- webhooks;
+- AI;
+- workflow fan-out;
+- knowledge ingestion;
+- bulk APIs.
+
+Use layered rate limits, concurrency budgets, size limits and queues.
+
+## 11. Security Logging
+
+Capture:
+
+~~~text
+actor
+organization
+operation
+target
+result
+correlation_id
+timestamp
+~~~
+
+Do not capture raw secret material or unnecessary full customer payloads.
+
+## 12. Detection Signals
+
+- repeated cross-tenant attempts;
+- unusual export volume;
+- invalid webhook spikes;
+- abnormal session failures;
+- credential failures;
+- AI tool blocks;
+- sudden cost spikes.
+
+## 13. Threat-Model Workflow
+
+~~~mermaid
+flowchart LR
+CHANGE[Feature / Architecture Change] --> ASSET[Identify Assets]
 ASSET --> TRUST[Map Trust Boundaries]
-TRUST --> THREATS[Enumerate Threats]
-THREATS --> CONTROLS[Select Controls]
-CONTROLS --> TESTS[Negative Tests]
-TESTS --> MONITOR[Detection]
+TRUST --> THREAT[Enumerate Threats]
+THREAT --> CONTROL[Choose Controls]
+CONTROL --> TEST[Automated Tests]
+TEST --> MONITOR[Detection]
 MONITOR --> RESPONSE[Incident Response]
 ~~~
 
-## 11. Acceptance Criteria
+## 14. Acceptance
 
-- Threats map to explicit controls.
-- Cross-tenant access has automated negative tests.
-- AI prompt injection cannot directly authorize actions.
-- Webhooks are verified before mutation.
-- Secrets are excluded from client/log/event surfaces.
-- High-risk failures are observable and actionable.
+Every high-impact threat must have:
+
+~~~text
+preventive control
++
+automated negative test
++
+detection signal
++
+incident procedure
+~~~
