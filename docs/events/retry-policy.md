@@ -1,42 +1,136 @@
 # Event and Job Retry Policy
 
-> Status: **Target / normative engineering design**.
+> Status: **Target production reliability contract**
 
-## Retry Classes
+Retries must be designed with the underlying side effect, not added as a generic loop.
 
-| Failure | Retry | Handling |
-|---|---:|---|
-| Network timeout | Yes | Exponential backoff + jitter |
-| HTTP 429 | Yes | Respect provider retry window |
-| Temporary database/network failure | Yes | Bounded retry |
-| Invalid schema | No | Quarantine/dead-letter |
-| Authorization failure | Usually no | Repair credential/policy then resume |
-| Deterministic business conflict | No | Record conflict and action path |
-| Unknown exception | Limited | Retry, alert, then dead-letter |
+## 1. Failure Classes
 
-## Policy
+| Failure | Automatic retry | Action |
+|---|---|---|
+| network timeout | yes | exponential backoff + jitter |
+| provider 429 | yes | respect provider retry window |
+| temporary 5xx | yes | bounded retry |
+| transient database error | yes | transaction retry where safe |
+| malformed schema | no | quarantine/dead-letter |
+| authorization failure | usually no | repair policy/credential |
+| deterministic business conflict | no | conflict handling |
+| unknown write outcome | reconcile first | never blind retry |
 
-Retry delays increase with attempt count and include jitter. Long retry delays must use scheduled retry state instead of blocking worker threads.
+## 2. Retry State
 
-Every retryable side effect must have an idempotency design. Replay cannot assume the earlier attempt had no effect.
+Persist:
 
-## Dead Letters
+- event/job ID;
+- attempt number;
+- scheduled time;
+- start/end time;
+- error category;
+- error fingerprint;
+- worker version;
+- next attempt.
 
-A dead-letter record contains event/job ID, organization, handler, handler version, attempt count, last error, timestamps and replay status. Replay creates a new attempt chain without erasing the original history.
+## 3. Backoff
 
-## Poison Protection
+Use increasing delay with jitter:
 
-Deterministic failures stop consuming worker capacity indefinitely. The failed item is isolated so healthy traffic continues.
+~~~text
+attempt 1 -> short delay
+attempt 2 -> longer delay
+attempt 3 -> longer delay
+...
+maximum delay -> bounded
+~~~
 
-## Mermaid Flow
+Long delays use scheduled retry state, not blocked worker threads.
 
-```mermaid
-flowchart LR
-E[Event / Job] --> C{Retryable?}
-C -->|Yes| B[Backoff + Jitter]
-B --> Q[Retry Queue]
-Q --> H[Handler]
-H -->|Success| ACK[Ack]
-H -->|Failure| C
-C -->|No| DLQ[Dead Letter]
-```
+## 4. Retry Decision
+
+~~~mermaid
+flowchart TD
+JOB[Event or Job] --> H[Handler]
+H --> RESULT{Outcome}
+RESULT -->|Success| ACK[Acknowledge]
+RESULT -->|Transient| CLASS[Classify]
+RESULT -->|Permanent| DLQ[Dead Letter]
+RESULT -->|Unknown side effect| RECON[Reconcile]
+CLASS --> REMAIN{Attempts remaining?}
+REMAIN -->|Yes| BACKOFF[Backoff + Jitter]
+BACKOFF --> Q[Retry Queue]
+Q --> H
+REMAIN -->|No| DLQ
+RECON --> STATE[Known State]
+STATE --> SAFE[Retry only if safe]
+~~~
+
+## 5. Idempotency First
+
+Before adding automatic retry, answer:
+
+"What happens if the first attempt actually succeeded but the response was lost?"
+
+If the answer is unknown, implement provider/business reconciliation.
+
+## 6. Unknown Side-Effect Outcome
+
+Especially dangerous cases:
+
+- payment creation;
+- customer-visible message send;
+- external ticket creation;
+- CRM write.
+
+Example:
+
+~~~text
+send request -> network timeout
+possible states:
+  provider never received request
+  provider performed action
+~~~
+
+Reconcile before repeating.
+
+## 7. Poison Protection
+
+Deterministic failures should not consume worker capacity forever.
+
+After the retry threshold:
+
+~~~text
+ACTIVE -> RETRYING -> DEAD_LETTERED
+~~~
+
+Operators can correct configuration and replay.
+
+## 8. Provider Rate Limits
+
+Adapters preserve provider retry metadata such as Retry-After where available and return a normalized retry decision to the worker layer.
+
+## 9. Transaction Retries
+
+Database transaction retry is different from event retry.
+
+A transaction retry must re-read concurrency-sensitive state before making the business decision again.
+
+## 10. Dead-Letter Operations
+
+Operators need:
+
+- filtering by consumer;
+- filtering by tenant;
+- filtering by error;
+- replay;
+- discard with reason;
+- audit history.
+
+Discarding a dead letter is itself an operational decision.
+
+## 11. Acceptance Criteria
+
+- Retry delays are bounded and jittered.
+- Consumers are idempotent.
+- Unknown side effects require reconciliation.
+- Poison messages cannot starve healthy traffic.
+- Dead letters preserve diagnostic history.
+- Replay is permissioned and auditable.
