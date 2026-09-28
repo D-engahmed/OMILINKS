@@ -3,47 +3,114 @@ info:
   title: OMILINKS API
   version: 1.0.0
   description: |
-    Versioned HTTP contract for the OMILINKS Customer Operations Platform.
-    Authentication, tenant resolution, authorization and idempotency are server-side.
+    Versioned API contract for the OMILINKS Customer Operations Platform.
+    Tenant isolation, authentication, authorization, idempotency, pagination,
+    optimistic concurrency and asynchronous processing are normative.
 servers:
   - url: /api/v1
+    description: Version 1 API
 security:
   - bearerAuth: []
 tags:
   - name: Health
+    description: Service and dependency health
   - name: Organizations
+    description: Current organization context
   - name: Customers
+    description: Canonical customer records
   - name: Conversations
+    description: Customer conversations and messaging
   - name: Workforce
-  - name: AI
+    description: Human and AI workforce operations
+  - name: Knowledge
+    description: Knowledge sources and retrieval assets
   - name: Workflows
+    description: Durable business automation
+  - name: AI
+    description: AI agent configuration and runs
+  - name: Quality
+    description: Quality evaluations
   - name: Billing
+    description: Subscription and entitlements
+  - name: Integrations
+    description: Connected channels and providers
   - name: Webhooks
+    description: External provider callbacks
 paths:
   /health:
     get:
       security: []
       tags: [Health]
+      summary: Health check
+      description: |
+        Returns process and dependency status. This endpoint must not require
+        tenant authentication because load balancers and deployment probes use it.
       responses:
         '200':
-          description: Service healthy
+          description: Service is accepting traffic
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          description: Critical dependency unavailable
+  /ready:
+    get:
+      security: []
+      tags: [Health]
+      summary: Readiness check
+      responses:
+        '200':
+          description: Ready to serve normal traffic
+        '503':
+          description: Not ready
   /organizations/me:
     get:
       tags: [Organizations]
+      summary: Resolve caller organization context
       responses:
         '200':
-          description: Current organization context
+          description: Active organization context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationContext'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /customers:
     get:
       tags: [Customers]
+      summary: List customers in authorized scope
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - in: query
+          name: search
+          schema:
+            type: string
+            maxLength: 200
+        - in: query
+          name: tag
+          schema:
+            type: string
+        - in: query
+          name: channel
+          schema:
+            type: string
       responses:
         '200':
-          description: Customer collection
+          description: Cursor-paginated customer collection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCustomers'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [Customers]
+      summary: Create or identify a customer
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -55,23 +122,150 @@ paths:
       responses:
         '201':
           description: Customer created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '200':
+          description: Existing customer identified by a matching external identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
-          description: Idempotency or identity conflict
+          $ref: '#/components/responses/Conflict'
+  /customers/{customerId}:
+    get:
+      tags: [Customers]
+      summary: Get a customer
+      parameters:
+        - $ref: '#/components/parameters/CustomerId'
+      responses:
+        '200':
+          description: Customer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Customers]
+      summary: Update customer
+      parameters:
+        - $ref: '#/components/parameters/CustomerId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerPatch'
+      responses:
+        '200':
+          description: Updated customer
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /conversations:
     get:
       tags: [Conversations]
+      summary: List conversations
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: control
+          schema:
+            type: string
+            enum: [human, ai, queue]
+        - in: query
+          name: channel
+          schema:
+            type: string
+        - in: query
+          name: assignedTo
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: customerId
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: Conversation collection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedConversations'
+    post:
+      tags: [Conversations]
+      summary: Create a conversation
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversationCreate'
+      responses:
+        '201':
+          description: Conversation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /conversations/{conversationId}:
+    get:
+      tags: [Conversations]
+      summary: Get a conversation
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      responses:
+        '200':
+          description: Conversation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /conversations/{conversationId}/messages:
     post:
       tags: [Conversations]
+      summary: Create an outbound message
+      description: |
+        Creates a canonical outbound message and schedules provider delivery.
+        This endpoint must reject stale conversation control versions.
       parameters:
         - $ref: '#/components/parameters/ConversationId'
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
       requestBody:
         required: true
         content:
@@ -80,14 +274,26 @@ paths:
               $ref: '#/components/schemas/MessageSend'
       responses:
         '202':
-          description: Accepted for provider delivery
+          description: Message accepted for asynchronous provider delivery
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageAcceptance'
+        '400':
+          $ref: '#/components/responses/ValidationError'
         '403':
-          description: Forbidden
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
-          description: Idempotency conflict
+          $ref: '#/components/responses/Conflict'
   /workforce/assignments:
     post:
       tags: [Workforce]
+      summary: Assign conversation to workforce member
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
       requestBody:
         required: true
         content:
@@ -97,27 +303,162 @@ paths:
       responses:
         '201':
           description: Assignment created
-  /webhooks/{provider}:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Assignment'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /knowledge-bases:
+    get:
+      tags: [Knowledge]
+      summary: List knowledge bases
+      responses:
+        '200':
+          description: Authorized knowledge bases
+  /knowledge-bases/{knowledgeBaseId}/sources:
     post:
-      security: []
-      tags: [Webhooks]
+      tags: [Knowledge]
+      summary: Register knowledge source
       parameters:
-        - name: provider
+        - name: knowledgeBaseId
           in: path
           required: true
-          schema: {type: string}
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
-            schema: {type: object, additionalProperties: true}
+            schema:
+              $ref: '#/components/schemas/KnowledgeSourceCreate'
+      responses:
+        '202':
+          description: Source accepted for asynchronous ingestion
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /workflows:
+    get:
+      tags: [Workflows]
+      summary: List workflow definitions
+      responses:
+        '200':
+          description: Authorized workflows
+    post:
+      tags: [Workflows]
+      summary: Create workflow definition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowCreate'
+      responses:
+        '201':
+          description: Workflow created
+  /workflows/{workflowId}/runs:
+    post:
+      tags: [Workflows]
+      summary: Start a workflow run
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '202':
+          description: Workflow run queued
+  /ai-agents:
+    get:
+      tags: [AI]
+      summary: List AI agents
+      responses:
+        '200':
+          description: AI agent collection
+  /ai-runs/{runId}:
+    get:
+      tags: [AI]
+      summary: Get AI run status
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: AI run
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /quality/evaluations:
+    get:
+      tags: [Quality]
+      summary: List quality evaluations
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Quality evaluation collection
+  /billing/entitlements:
+    get:
+      tags: [Billing]
+      summary: Get effective entitlements
+      responses:
+        '200':
+          description: Current organization entitlements
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntitlementSet'
+  /integrations:
+    get:
+      tags: [Integrations]
+      summary: List organization integrations
+      responses:
+        '200':
+          description: Integration collection
+  /webhooks/{provider}:
+    post:
+      security: []
+      tags: [Webhooks]
+      summary: Receive external provider callback
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [whatsapp, instagram, facebook, telegram, sms, paymob, n8n]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
       responses:
         '202':
           description: Verified and durably accepted
-        '401':
-          description: Invalid webhook authentication
         '400':
           description: Authenticated but malformed payload
+        '401':
+          description: Provider authentication failed
 components:
   securitySchemes:
     bearerAuth:
@@ -128,41 +469,315 @@ components:
     Cursor:
       name: cursor
       in: query
-      schema: {type: string}
+      description: Opaque cursor from the previous page
+      schema:
+        type: string
     Limit:
       name: limit
       in: query
-      schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
     IdempotencyKey:
       name: Idempotency-Key
       in: header
-      schema: {type: string, maxLength: 255}
+      description: Unique key for retry-safe mutation
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+    IfMatch:
+      name: If-Match
+      in: header
+      description: Optimistic concurrency token
+      schema:
+        type: string
+    CustomerId:
+      name: customerId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     ConversationId:
       name: conversationId
       in: path
       required: true
-      schema: {type: string, format: uuid}
+      schema:
+        type: string
+        format: uuid
+  headers:
+    ETag:
+      description: Current resource version
+      schema:
+        type: string
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Authenticated but not authorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found or intentionally undiscoverable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: State, version or idempotency conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
   schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            requestId:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+    Health:
+      type: object
+      required: [status, service]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        service:
+          type: string
+        version:
+          type: string
+        dependencies:
+          type: object
+          additionalProperties:
+            type: string
+    OrganizationContext:
+      type: object
+      required: [organizationId, name]
+      properties:
+        organizationId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        membershipRole:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+    Customer:
+      type: object
+      required: [id, displayName, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+        identities:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomerIdentity'
+    CustomerIdentity:
+      type: object
+      required: [provider, externalId]
+      properties:
+        provider:
+          type: string
+        externalId:
+          type: string
+        channelAccountId:
+          type: string
     CustomerCreate:
       type: object
       required: [externalIdentity]
       properties:
-        displayName: {type: string, maxLength: 200}
+        displayName:
+          type: string
+          maxLength: 200
         externalIdentity:
-          type: object
-          required: [provider, externalId]
-          properties:
-            provider: {type: string}
-            externalId: {type: string}
+          $ref: '#/components/schemas/CustomerIdentityInput'
+    CustomerIdentityInput:
+      type: object
+      required: [provider, externalId]
+      properties:
+        provider:
+          type: string
+        externalId:
+          type: string
+        channelAccountId:
+          type: string
+    CustomerPatch:
+      type: object
+      minProperties: 1
+      properties:
+        displayName:
+          type: string
+          maxLength: 200
+    Conversation:
+      type: object
+      required: [id, status, control, controlVersion]
+      properties:
+        id:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        control:
+          type: string
+          enum: [human, ai, queue]
+        controlVersion:
+          type: integer
+          minimum: 1
+        channel:
+          type: string
+    ConversationCreate:
+      type: object
+      required: [customerId, channel]
+      properties:
+        customerId:
+          type: string
+          format: uuid
+        channel:
+          type: string
     MessageSend:
       type: object
       required: [content]
       properties:
-        content: {type: string, minLength: 1}
-        clientMessageId: {type: string, maxLength: 255}
+        content:
+          type: string
+          minLength: 1
+        clientMessageId:
+          type: string
+          maxLength: 255
+    MessageAcceptance:
+      type: object
+      required: [messageId, status]
+      properties:
+        messageId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [accepted, queued]
     AssignmentCreate:
       type: object
       required: [conversationId, workforceMemberId]
       properties:
-        conversationId: {type: string, format: uuid}
-        workforceMemberId: {type: string, format: uuid}
+        conversationId:
+          type: string
+          format: uuid
+        workforceMemberId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          maxLength: 500
+    Assignment:
+      type: object
+      required: [id, conversationId, workforceMemberId, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversationId:
+          type: string
+          format: uuid
+        workforceMemberId:
+          type: string
+          format: uuid
+        status:
+          type: string
+    KnowledgeSourceCreate:
+      type: object
+      required: [name, sourceType]
+      properties:
+        name:
+          type: string
+          maxLength: 200
+        sourceType:
+          type: string
+          enum: [upload, url, faq, structured, connector]
+        location:
+          type: string
+    WorkflowCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+    EntitlementSet:
+      type: object
+      additionalProperties:
+        type: object
+        required: [allowed]
+        properties:
+          allowed:
+            type: boolean
+          limit:
+            type: number
+          used:
+            type: number
+          unit:
+            type: string
+          resetAt:
+            type: string
+            format: date-time
+    PaginatedCustomers:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Customer'
+        nextCursor:
+          type: string
+          nullable: true
+    PaginatedConversations:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Conversation'
+        nextCursor:
+          type: string
+          nullable: true
