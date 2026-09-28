@@ -1,253 +1,194 @@
-## AI Evaluation
+# AI Evaluation — Implementation Specification
 
-> **Status:** Target production architecture
+> Status: **Target evaluation platform blueprint**
 
-AI evaluation measures the complete operational system, not model text quality in isolation.
+AI quality is a property of the complete execution path, not model text alone.
 
-A useful evaluation target is:
+## 1. Evaluation Target
 
-```text
+~~~text
 model
-+ prompt
-+ context
-+ retrieval
-+ tools
++ prompt version
++ routing policy
++ retrieved knowledge
++ tool versions
 + guardrails
-+ routing
 + workflow
-```
++ channel
+~~~
 
-Changing any one of these can change customer outcome.
+Changing any component can change behavior.
 
-## 1. Evaluation Layers
+## 2. Evaluation Layers
 
-1. **Unit tests** — parsers, routing rules, schemas, guardrails, state transitions.
-2. **Offline task evaluation** — fixed representative cases.
-3. **Scenario evaluation** — multi-step conversations with retrieval/tools/handoff.
-4. **Human evaluation** — correctness, grounding, safety and operational quality.
-5. **Production sampling** — detect regressions after deployment.
+1. unit evaluation of deterministic logic;
+2. offline dataset evaluation;
+3. scenario evaluation with retrieval/tools;
+4. human review;
+5. production sampling;
+6. regression corpus growth.
 
-## 2. Evaluation Architecture
+## 3. Case Contract
 
-```mermaid
-flowchart TB
-    TRACE[Production / Synthetic Trace] --> REDACT[Privacy Redaction]
-    REDACT --> DATASET[Versioned Dataset]
-    DATASET --> CASES[Evaluation Cases]
-    CASES --> RUNNER[Evaluation Runner]
-    RUNNER --> ROUTER[Model Router]
-    RUNNER --> KNOW[Knowledge Snapshot]
-    RUNNER --> TOOLS[Tool Sandbox]
-    ROUTER --> SCORE[Scoring]
-    KNOW --> SCORE
-    TOOLS --> SCORE
-    SCORE --> HUMAN[Human Review]
-    SCORE --> GATE[Regression Gate]
-    HUMAN --> GATE
-    GATE --> CANARY[Controlled Release]
-    CANARY --> PROD[Production]
-    PROD --> SAMPLE[Production Sampling]
-    SAMPLE --> DATASET
-```
-
-## 3. Dataset Contract
-
-Every case should identify:
-
-| Field | Purpose |
-|---|---|
-| case_id | stable test identity |
-| dataset_version | frozen dataset |
-| task_type | task class |
-| input | conversation/request |
-| expected_behavior | expected output/action |
-| allowed_tools | tool policy |
-| knowledge_snapshot | evidence version |
-| risk_tier | safety class |
-| expected_outcome | resolve/handoff/block/etc. |
-
-Sensitive production cases must be minimized, redacted and access-controlled.
-
-## 4. Quality Dimensions
-
-### Correctness
-
-Does the response/action match verified business truth?
-
-### Grounding
-
-Are factual claims supported by authorized evidence?
-
-### Tool correctness
-
-Was the correct tool chosen and were arguments valid?
-
-### Safety
-
-Did the run preserve authorization, privacy and risk policy?
-
-### Conversation quality
-
-Was the interaction clear, relevant and context-aware?
-
-### Operational outcome
-
-Did the conversation achieve the intended outcome?
-
-Possible outcome labels:
-
-```text
-resolved
-partially_resolved
-handoff
-abandoned
-failed
-policy_blocked
-```
-
-## 5. Multi-Dimensional Score
-
-Do not hide all quality dimensions in one number.
-
-Represent:
-
-```json
+~~~json
 {
-  "correctness": 0.0,
-  "grounding": 0.0,
-  "toolAccuracy": 0.0,
-  "safety": 0.0,
-  "conversationQuality": 0.0,
-  "operationalOutcome": 0.0
+  "caseId": "case_001",
+  "datasetVersion": "v12",
+  "taskType": "billing_question",
+  "input": {},
+  "expectedBehavior": {},
+  "allowedTools": [],
+  "knowledgeSnapshot": "kb-v4",
+  "riskTier": "medium",
+  "expectedOutcome": "resolved"
 }
-```
+~~~
 
-Hard safety failures override aggregate quality.
+## 4. Reproducibility
 
-## 6. Regression Method
+Pin:
 
-Candidate changes are compared against a baseline under the same:
-
-- dataset version;
+- model profile version;
+- prompt version;
+- routing policy version;
+- agent policy version;
 - knowledge snapshot;
 - tool versions;
-- guardrail policy;
-- routing policy.
+- guardrail version;
+- dataset version.
 
-This isolates whether a new model/prompt actually caused a behavior change.
+A score without these references is not reliably reproducible.
 
-## 7. Release Gate
+## 5. Evaluation Pipeline
 
-```mermaid
+~~~mermaid
 flowchart TD
-CHANGE[AI Change] --> DATA[Fixed Dataset]
-DATA --> RUN[Candidate Evaluation]
-RUN --> HARD[Hard Safety Checks]
-HARD -->|Fail| REJECT[Reject]
-HARD -->|Pass| METRICS[Compute Metrics]
-METRICS --> BASELINE[Compare Baseline]
-BASELINE --> HUMAN[Human Review if Required]
-HUMAN --> DECISION{Thresholds Met?}
-DECISION -->|No| REJECT
-DECISION -->|Yes| CANARY[Canary]
-CANARY --> PROD[Production]
-PROD --> MONITOR[Monitor]
-MONITOR --> FEEDBACK[New Evaluation Cases]
-FEEDBACK --> DATA
-```
+DATA[Versioned Dataset] --> CASE[Evaluation Case]
+CASE --> RUN[Evaluation Runner]
+RUN --> ROUTE[Model Router]
+RUN --> KNOW[Knowledge Snapshot]
+RUN --> TOOLS[Sandbox Tools]
+ROUTE --> SCORE[Scoring]
+KNOW --> SCORE
+TOOLS --> SCORE
+SCORE --> HARD[Hard Safety Checks]
+HARD --> HUMAN[Human Review]
+HUMAN --> GATE[Regression Gate]
+SCORE --> GATE
+GATE --> RELEASE[Release Candidate]
+RELEASE --> SAMPLE[Production Sampling]
+SAMPLE --> NEWCASE[Regression Case]
+NEWCASE --> DATA
+~~~
 
-## 8. Hard Failure Conditions
+## 6. Quality Dimensions
 
-A candidate fails regardless of average quality when it causes:
+| Dimension | Question |
+|---|---|
+| correctness | Is the fact/action correct? |
+| grounding | Are claims supported by authorized evidence? |
+| tool accuracy | Was the tool/argument/result handling correct? |
+| safety | Were authorization and policy preserved? |
+| conversation quality | Was the interaction useful and clear? |
+| operational outcome | Was the task resolved/handoff/failed? |
+| cost | Was resource usage acceptable? |
 
-- cross-tenant data exposure;
+Do not compress all dimensions into one number.
+
+## 7. Hard Safety Gates
+
+Automatic failure includes:
+
+- cross-tenant exposure;
 - unauthorized tool execution;
-- fabricated successful action;
 - destructive action without authorization;
-- critical grounding failure for a high-risk task;
-- required handoff suppression;
-- severe output schema break;
-- guardrail regression.
+- fabricated successful external action;
+- critical guardrail regression;
+- suppressed required handoff.
+
+Average quality cannot mask a hard safety failure.
+
+## 8. Baseline Comparison
+
+Candidate changes are evaluated against a pinned baseline using the same dataset and configuration assumptions.
+
+Report:
+
+- absolute metrics;
+- delta from baseline;
+- failed cases;
+- new regressions;
+- repaired regressions.
 
 ## 9. Human Evaluation
 
-Reviewers should score evidence using a versioned rubric.
+Reviewers use versioned rubrics.
 
-| Criterion | Review question |
-|---|---|
-| Correctness | Is the answer/action factually correct? |
-| Grounding | Is it supported by allowed evidence? |
-| Safety | Did it obey policy? |
-| Tool use | Was action selection/argumentation correct? |
-| Quality | Was it operationally useful? |
-| Escalation | Was handoff appropriate? |
+Record:
 
-When disagreement is persistent, improve the rubric before treating labels as ground truth.
-
-## 10. Inter-Rater Reliability
-
-For important datasets, measure agreement between reviewers. Store:
-
-- reviewer identity;
 - rubric version;
-- case version;
+- reviewer;
 - evidence;
-- adjudication result.
+- decision;
+- adjudication.
 
-Do not average away systematic disagreement.
+Persistent disagreement should trigger rubric improvement.
 
-## 11. Production Sampling
+## 10. Production Sampling
 
-Bias sampling toward risk:
+Bias sampling toward:
 
 - handoffs;
-- tool calls;
-- low satisfaction;
-- errors;
-- unusual cost;
-- provider fallback;
 - policy blocks;
+- tool calls;
+- provider fallback;
+- unusual cost;
+- customer dissatisfaction;
+- errors;
 - rare channels.
 
-Sampling only successful conversations creates a false quality picture.
+Sampling only successful conversations produces survivorship bias.
 
-## 12. Reproducibility
+## 11. Regression Case Promotion
 
-An evaluation result must reference:
+~~~mermaid
+flowchart LR
+INC[Production Failure] --> REPRO[Minimal Reproduction]
+REPRO --> LABEL[Expected Behavior]
+LABEL --> DATASET[Dataset Version]
+DATASET --> CI[Automated Regression]
+CI --> RELEASE[Release Gate]
+~~~
 
-```text
-model_profile_version
-prompt_version
-routing_policy_version
-agent_policy_version
-knowledge_snapshot
-tool_versions
-guardrail_policy_version
-dataset_version
-```
+A resolved production failure becomes a permanent regression case.
 
-Without this, evaluation results are difficult to reproduce.
+## 12. Tool Sandbox
 
-## 13. Sandbox Tools
+Evaluation tools must not create real customer effects during ordinary CI.
 
-Evaluation tool calls must use isolated/sandbox adapters unless the test explicitly requires a provider sandbox. A regression test must never accidentally create real customer-side effects.
+Use simulated effects or provider sandboxes.
 
-## 14. Privacy
+## 13. Privacy
 
-Production traces used for evaluation follow the data-retention policy:
+Production traces used for evaluation are:
 
-- minimize;
-- redact;
-- pseudonymize;
-- restrict evaluator access;
-- expire data;
-- preserve only what is needed.
+- minimized;
+- redacted;
+- access-controlled;
+- retention-bound.
 
-## 15. Acceptance Criteria
+## 14. Evaluation Observability
 
-- AI changes are compared to a frozen baseline.
-- Safety failures cannot be masked by average score.
-- Retrieval/tool behavior is evaluated.
-- Human reviews use versioned rubrics.
-- Evaluations are reproducible from version metadata.
-- Production failures can become regression cases.
+Every evaluation emits:
+
+- case ID;
+- dataset version;
+- model/configuration versions;
+- execution result;
+- failure reasons;
+- latency;
+- usage.
+
+## 15. Acceptance
+
+An evaluation system is production-grade when a change can be reproduced, compared against a baseline, blocked for hard safety regression and converted into durable test coverage.

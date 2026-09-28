@@ -1,172 +1,128 @@
-## AI Cost Control
+# AI Cost Control — Implementation Specification
 
-> **Status:** Target production architecture
+> Status: **Target production economics blueprint**
 
-AI cost control protects both tenant budgets and OMILINKS unit economics. It must not reduce cost by silently degrading correctness or safety.
+Cost control optimizes total business cost under correctness, safety, latency and outcome constraints.
 
-The objective is:
+## 1. Cost Components
 
-```text
-minimize AI cost
-subject to
-quality + safety + latency + business-outcome constraints
-```
+~~~text
+model inference
++ embedding
++ media processing
++ tool/provider usage
++ workflow execution
+~~~
 
-## 1. Cost Dimensions
-
-Track, where measurable:
-
-| Dimension | Example |
-|---|---|
-| input tokens | prompt + context |
-| output tokens | generated response |
-| model calls | number of provider requests |
-| embeddings | document/query embeddings |
-| retrieval | billable retrieval/search operations |
-| tool calls | external action executions |
-| workflow executions | AI-triggered workflow work |
-| media processing | audio/vision processing |
-| provider-specific charges | provider extras |
-
-Measured and estimated values must be distinguished.
+Measured values and estimates must remain separate.
 
 ## 2. Budget Hierarchy
 
-Budgets can be applied at:
+Budgets may apply at:
 
 - platform;
 - organization;
 - client/program;
-- AI agent;
+- agent;
 - conversation;
 - run;
 - tool/action class.
 
-The effective budget is the most restrictive applicable limit.
+The most restrictive applicable policy wins.
 
-## 3. Preflight and Actual Usage
+## 3. Preflight Admission
 
-```mermaid
-sequenceDiagram
-    participant R as AI Runtime
-    participant B as Budget Engine
-    participant M as Model Provider
-    participant U as Usage Meter
-    participant BILL as Billing
+~~~mermaid
+flowchart TD
+RUN[AI Run Request] --> ESTIMATE[Estimate Usage]
+ESTIMATE --> ENT[Entitlement]
+ENT --> ORG[Organization Budget]
+ORG --> AGENT[Agent Budget]
+AGENT --> LIMIT[Run Limits]
+LIMIT --> DECIDE{Allowed?}
+DECIDE -->|yes| EXEC[Execute]
+DECIDE -->|no| POLICY[Overage Policy]
+POLICY --> WARN[Warn]
+POLICY --> DEGRADE[Degrade]
+POLICY --> HANDOFF[Handoff]
+POLICY --> STOP[Stop]
+EXEC --> ACTUAL[Actual Usage]
+ACTUAL --> METER[Usage Meter]
+~~~
 
-    R->>B: Preflight estimate
-    B-->>R: Allowed envelope
-    R->>M: Execute
-    M-->>R: Usage metadata
-    R->>U: Record actual usage
-    U->>B: Update remaining budget
-    U->>BILL: Usage fact
-```
+## 4. Run Budget Contract
 
-Preflight is predictive. Actual metering uses runtime/provider facts where available.
-
-## 4. Run Budget
-
-A run can have:
-
-```json
+~~~json
 {
   "maxSteps": 12,
   "maxToolCalls": 5,
   "maxDurationMs": 30000,
   "maxEstimatedCostUsd": 0.20
 }
-```
+~~~
 
-These are policy examples, not final commercial defaults.
+These are architectural examples, not final commercial defaults.
 
-## 5. Budget Decision
+## 5. Estimate vs Actual
 
-```mermaid
-flowchart TD
-RUN[AI Run] --> PRE[Preflight Estimate]
-PRE --> ENT[Entitlement]
-ENT --> ORG[Organization Budget]
-ORG --> AGENT[Agent Budget]
-AGENT --> RUNB[Run Budget]
-RUNB --> DEC{Within Limit?}
-DEC -->|Yes| EXEC[Execute]
-DEC -->|No| POLICY[Overage Policy]
-POLICY --> WARN[Warn]
-POLICY --> DEG[Degrade Model/Context]
-POLICY --> HANDOFF[Human Handoff]
-POLICY --> STOP[Hard Stop]
-EXEC --> ACTUAL[Actual Usage]
-ACTUAL --> METER[Usage Record]
-METER --> BILL[Billing]
-```
+Preflight produces an estimate.
 
-## 6. Overage Behavior
+Provider/runtime metadata produces measured usage where available.
 
-Possible tenant policies:
+~~~text
+estimated_cost != actual_cost
+~~~
 
-- warn;
-- degrade;
-- pause;
-- handoff;
-- hard stop.
+Where actual provider billing is unavailable, store actual cost as unknown and preserve the estimate separately.
 
-The platform may force a hard stop for safety/platform-level limits.
+## 6. Model Tiering
 
-## 7. Model Tiering
-
-| Tier | Typical purpose |
+| Tier | Typical use |
 |---|---|
-| Economy | routine low-risk work |
-| Standard | normal customer operations |
-| Premium | complex reasoning |
-| Specialized | vision/audio/structured domain tasks |
+| economy | repetitive low-risk tasks |
+| standard | normal operations |
+| premium | complex reasoning |
+| specialized | modality/domain requirements |
 
-Routing decides tier based on task requirements, not UI preference alone.
+Tier selection remains subject to capability, risk and tenant policy.
 
-## 8. Context Cost
-
-Repeated context can dominate cost.
+## 7. Context Cost Engineering
 
 Controls:
 
-- bounded conversation history;
+- bounded history;
 - compact summaries;
-- retrieval only when necessary;
 - deduplicated context;
-- reusable static instruction fragments;
+- selective retrieval;
 - compact tool schemas;
-- selective message inclusion.
+- reusable static instructions where safe.
 
-Do not optimize tokens by deleting information required for correctness.
+Do not reduce token count by removing evidence required for correctness.
 
-## 9. Caching
+## 8. Cache Safety
 
-Safe candidates:
+Potentially cache:
 
-- embeddings;
-- stable tool definitions;
-- static policy fragments;
-- short-lived retrieval artifacts where privacy permits.
+- model profiles;
+- immutable prompt fragments;
+- tool schemas;
+- tenant-safe retrieval artifacts.
 
-Tenant-scoped data must use tenant-safe cache keys.
+Tenant-sensitive data requires tenant-aware keys and invalidation.
 
-Never reuse a private customer result across organizations.
+## 9. Concurrency Control
 
-## 10. Concurrency
+Bound:
 
-Cost spikes can come from parallel execution.
+- concurrent runs per organization;
+- concurrent model calls;
+- provider concurrency;
+- workflow fan-out;
+- expensive tool calls.
 
-Limit:
+Concurrency spikes are simultaneously cost and reliability incidents.
 
-- concurrent runs per tenant;
-- concurrent model calls/provider;
-- concurrent tool calls;
-- workflow fan-out.
-
-Use queues/semaphores rather than unbounded asynchronous fan-out.
-
-## 11. Cost Attribution
+## 10. Cost Attribution
 
 Every usage record should identify:
 
@@ -177,102 +133,79 @@ Every usage record should identify:
 - run;
 - provider;
 - model;
-- task;
-- usage amount;
-- estimated cost;
-- actual cost;
-- pricing version;
+- operation;
+- quantity;
+- price version;
 - timestamp.
 
-This creates the chain:
+## 11. Pricing Versioning
 
-```text
-tenant
- -> program/client
-   -> agent
-     -> conversation
-       -> run
-```
+Provider pricing is versioned data.
 
-## 12. Pricing Versioning
+Historical usage retains the pricing context used to calculate its cost.
 
-Provider prices can change independently of application deployment.
+Do not recompute old financial records from today's model price.
 
-Store:
-
-```text
-provider
-model
-effective_from
-input_price
-output_price
-currency
-pricing_version
-```
-
-Historical usage must retain its pricing version.
-
-## 13. Unknown Cost
-
-When a provider does not expose authoritative billing data:
-
-```text
-actual_cost = unknown
-estimated_cost = measured estimate
-```
-
-Never silently convert estimates into billing facts.
-
-## 14. Cost and Outcomes
-
-Raw token efficiency is not enough.
+## 12. Unit Economics
 
 Track:
 
+- cost per conversation;
 - cost per resolved conversation;
-- cost per successful tool action;
+- cost per tool action;
 - cost per handoff;
-- cost per qualified business outcome.
+- cost per workflow outcome.
 
-A cheaper model that doubles human workload may worsen real operating cost.
+Token efficiency alone is not business efficiency.
 
-## 15. Abuse and Runaway Protection
+## 13. Runaway Protection
 
 Protect against:
 
-- infinite model/tool loops;
-- repeated failed tool calls;
-- adversarial context expansion;
-- workflow fan-out explosions;
-- oversized document ingestion;
-- API replay;
-- customer-triggered expensive prompts.
+- infinite tool loops;
+- recursive workflows;
+- context explosion;
+- repeated provider failures;
+- malicious expensive prompts;
+- batch fan-out explosions.
 
-These limits must exist before high-scale deployment.
+## 14. Overage Policy
 
-## 16. Observability
+Tenant policy may choose:
 
-Monitor:
+- warn;
+- degrade;
+- queue;
+- handoff;
+- hard stop.
 
-- AI spend by tenant/day;
+Platform safety/capacity limits may force hard stop.
+
+## 15. Observability
+
+Track:
+
+- spend by tenant/day;
+- cost per run;
 - tokens per run;
-- cost per conversation;
 - model distribution;
 - fallback rate;
 - budget denials;
 - concurrency saturation;
 - cost per resolution;
-- estimated vs actual cost divergence.
+- estimate-to-actual divergence.
 
-Alert on abnormal rate-of-change as well as absolute spend.
+## 16. Test Matrix
 
-## 17. Acceptance Criteria
+- budget exactly at limit;
+- budget just below limit;
+- concurrent budget consumption;
+- duplicate usage record;
+- expensive fallback;
+- cross-tenant cache attempt;
+- runaway loop;
+- pricing-version change.
 
-- Every billable AI operation is attributable.
-- Budget checks happen before expensive execution.
-- Estimates are distinct from actual billing facts.
-- Tenant isolation applies to cost records.
-- Cache keys prevent cross-tenant reuse.
-- AI and workflow execution are bounded.
-- Overage behavior is deterministic.
-- Operators can identify what agent/model/conversation created spend.
+## 17. Acceptance
+
+Cost control is complete when every expensive path has admission control, attribution, bounded execution and an explicit outcome when budget is exhausted.
