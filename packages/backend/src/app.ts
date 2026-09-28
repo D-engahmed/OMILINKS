@@ -239,10 +239,12 @@ async function route(
       )
     }
 
+    const customerId = customerMatch[1]
+    if (!customerId) throw new AppError(404, "NOT_FOUND", "Customer not found.")
     return json(
       appApplication.updateCustomer(
         context,
-        customerMatch[1],
+        customerId,
         expectedVersion,
         stringValue(body.displayName)
       )
