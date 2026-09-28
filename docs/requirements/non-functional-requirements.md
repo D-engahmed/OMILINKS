@@ -1,61 +1,198 @@
 # Non-Functional Requirements
 
-> Status: **Target / normative engineering design**. This document defines behavior and implementation constraints even when the current code has not implemented the subsystem yet.
+> Status: **Target production engineering contract**
 
-## Purpose
+## 1. Performance
 
-OMILINKS must be secure, observable, horizontally scalable, recoverable, maintainable, and predictable under external provider failure.
+Initial engineering targets:
 
-## Performance Targets
-
-| Path | Target |
+| Operation | Target |
 |---|---|
-| Authenticated CRUD API | p95 < 300 ms excluding long-running exports/AI |
-| Webhook acknowledgement | target < 2 s after durable acceptance |
-| Routing decision | p95 < 150 ms on warm path |
-| AI first token | target p95 < 4 s, measured separately from provider latency |
-| Health endpoint | < 1 s |
+| authenticated API | p95 < 300 ms excluding long jobs/AI |
+| routing | p95 < 150 ms warm path |
+| webhook acknowledgement | target < 2 s after durable acceptance |
+| readiness | < 1 s |
+| AI first token | target p95 < 4 s excluding unusual provider conditions |
 
+Targets are measured in production-like environments and revised using observed data.
 
-## Availability
+## 2. Availability
 
-Design the core API for 99.9% monthly availability. Channel providers are independently degraded and must not bring down the whole platform.
+Core API target: 99.9% monthly availability.
 
-## Consistency
+Channel providers are independent failure domains.
 
-Transactional business state is strongly consistent. Events and indexes are eventually consistent and delivered at least once, so consumers must be idempotent.
+A provider outage must not make unrelated customer operations unavailable.
 
-## Security
+## 3. Scalability
 
-TLS in transit, encrypted secrets, least-privilege machine identities, tenant isolation, authorization on every protected use case, secret redaction, and auditability for protected changes.
+The system should scale horizontally for:
 
-## Observability
+- API requests;
+- websocket/realtime connections if introduced;
+- background jobs;
+- AI runs;
+- webhook processing;
+- workflow workers.
 
-Every request, webhook, conversation message, workflow run, AI run, and background job carries correlation identifiers. Metrics distinguish operation, tenant, provider, model, and outcome.
+PostgreSQL remains the transactional authority.
 
-## Recovery
+## 4. Consistency
 
-Define RPO/RTO per deployment tier and prove restore procedures through drills. External provider state must be reconciled after database recovery.
+| Data | Consistency |
+|---|---|
+| tenant authorization | strong |
+| customer/conversation state | strong |
+| billing state | strong + reconciled |
+| events | at-least-once |
+| search indexes | eventual |
+| analytics projections | eventual |
+| AI evaluation projections | eventual |
 
-## Accessibility
+## 5. Durability
 
-The operations console targets WCAG 2.2 AA practices: keyboard operation, semantic labels, focus visibility, sufficient contrast, and non-color status cues.
+Business records must survive normal process failure.
 
-## Mermaid System View
+Durable state includes:
 
-```mermaid
+- messages;
+- assignments;
+- workflow state;
+- AI run state;
+- payments;
+- usage;
+- audit records;
+- outbox events.
+
+## 6. Security
+
+Minimum controls:
+
+- TLS externally;
+- secret isolation;
+- tenant-scoped queries;
+- least privilege;
+- immutable security/audit records;
+- credential rotation;
+- authorization negative tests;
+- dependency/security scanning.
+
+## 7. Privacy
+
+Customer and AI data is minimized.
+
+Sensitive categories have retention classes.
+
+Logs must not become a second ungoverned customer database.
+
+## 8. Observability
+
+Use:
+
+- structured logs;
+- metrics;
+- traces;
+- audit events;
+- correlation IDs;
+- provider event IDs;
+- AI run IDs;
+- workflow run IDs.
+
+The platform should support:
+
+~~~text
+customer message
+ -> request ID
+ -> conversation event
+ -> routing decision
+ -> AI run
+ -> tool invocation
+ -> provider delivery
+~~~
+
+as one traceable causal chain.
+
+## 9. Recovery
+
+Production must define RPO/RTO and prove them through restore drills.
+
+Recovery includes provider/payment reconciliation.
+
+## 10. Maintainability
+
+Boundaries:
+
+~~~text
+transport
+ -> application
+ -> domain
+ -> persistence
+ -> integration
+~~~
+
+Provider SDKs are isolated.
+
+Shared packages should contain stable abstractions rather than random utility code.
+
+## 11. Testability
+
+All critical domain invariants must be testable without depending on real providers.
+
+Provider compatibility is verified separately through sandbox/integration tests.
+
+## 12. Accessibility
+
+Operations UI targets WCAG 2.2 AA practices.
+
+Critical states must not depend on color alone.
+
+## 13. Internationalization
+
+The initial product should support Arabic and English-oriented content safely.
+
+The architecture should avoid assumptions that:
+
+- text is ASCII;
+- names are one language;
+- direction is always LTR;
+- phone numbers have one formatting;
+- provider content is English.
+
+## 14. Operational Limits
+
+Bound:
+
+- request body size;
+- pagination;
+- queue retries;
+- AI steps;
+- AI tool calls;
+- workflow fan-out;
+- export size;
+- document ingestion size;
+- provider concurrency.
+
+Unbounded systems eventually become reliability incidents.
+
+## 15. Failure Isolation
+
+~~~mermaid
 flowchart TB
-API[API] --> DB[(PostgreSQL)]
-API --> BUS[Queue/Event Bus]
-BUS --> W[Workers]
-W --> DB
-W --> EXT[Providers]
-API --> OBS[Logs Metrics Traces]
-W --> OBS
-DB --> BK[Backups]
-BK --> DR[Restore Drill]
-```
+CHANNEL[Channel Failure] --> CHANNEL_ONLY[Channel Degraded]
+MODEL[Model Failure] --> MODEL_ONLY[AI Degraded]
+QUEUE[Queue Failure] --> QUEUE_ONLY[Async Degraded]
+PAYMENT[Payment Failure] --> BILL_ONLY[Billing Degraded]
+DB[Database Failure] --> CORE[Core Service Degraded]
+~~~
 
-## Change Rule
+A failure domain should have the smallest possible blast radius.
 
-Changes that alter these contracts must update the affected requirement, API/event contract, tests, and this document. Security and tenant-isolation constraints cannot be weakened for implementation convenience.
+## 16. Acceptance Criteria
+
+- Performance targets are measured.
+- Core failure domains are isolated.
+- Critical data is durable.
+- Tenant authorization remains strong under failure.
+- Observability can trace important workflows.
+- Recovery has tested procedures.
+- Limits prevent unbounded resource consumption.
