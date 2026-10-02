@@ -1,0 +1,957 @@
+From ddf01c70053249135935144bab5cba23493b97dc Mon Sep 17 00:00:00 2001
+From: claude <claude@example.com>
+Date: Thu, 1 Oct 2026 21:18:15 +0000
+Subject: [PATCH] Backend: identity-provider boundary, session expiry/logout,
+ explicit org selection
+
+- IdentityProvider interface; signup/login use the provider-verified email, never the body
+- DevIdentityProvider refuses to run in production; production start is blocked until a real provider exists
+- POST /auth/login (no account enumeration) and /auth/logout (revokes current session only)
+- sessions always expire (SESSION_TTL_SECONDS); migration 0003 makes expires_at NOT NULL
+- replace memberships[0] with X-Organization-Id selection; ambiguous multi-org requests get 400
+- Store gains createMembership/createSession/revokeSession
+- tests for expiry, logout, multi-org role selection, provider substitution
+---
+ packages/backend/README.md                    |   9 +-
+ .../migrations/0003_session_expiry.sql        |   8 +
+ packages/backend/src/app.ts                   |  52 ++++-
+ .../backend/src/application/application.ts    | 120 +++++++++--
+ packages/backend/src/application/identity.ts  |  39 ++++
+ packages/backend/src/auth.test.ts             | 197 ++++++++++++++++++
+ packages/backend/src/config.ts                |  18 ++
+ .../src/infrastructure/postgres-store.ts      |  83 +++++++-
+ packages/backend/src/infrastructure/store.ts  |  65 +++++-
+ packages/backend/src/postgres.test.ts         |  17 +-
+ packages/backend/src/server.ts                |  12 +-
+ 11 files changed, 580 insertions(+), 40 deletions(-)
+ create mode 100644 packages/backend/migrations/0003_session_expiry.sql
+ create mode 100644 packages/backend/src/application/identity.ts
+ create mode 100644 packages/backend/src/auth.test.ts
+
+diff --git a/packages/backend/README.md b/packages/backend/README.md
+index 7a8b3cc..242de50 100644
+--- a/packages/backend/README.md
++++ b/packages/backend/README.md
+@@ -57,8 +57,11 @@ This is the first vertical slice, not the completed production identity system.
+ 
+ Current limitations:
+ 
+-- only the first active membership is selected during authentication;
+-- sessions never expire and there is no login endpoint (signup is the only way to get a session);
++- the only identity provider is `dev`, which trusts the claimed email and is therefore NOT authentication; it refuses to start in production, so a production deployment is blocked until a real provider adapter exists;
++- there is no login rate limiting, password or MFA handling, invite flow, or membership management endpoint (memberships can currently be created only through the store);
++- sessions expire (SESSION_TTL_SECONDS, default 12 h; enforced NOT NULL in the database) and can be revoked with POST /api/v1/auth/logout, but there is no refresh or session listing;
++- a user in several organizations must send X-Organization-Id on every request; with one membership the header is optional;
++- authorization is role-based within one organization. There is no client-account/program scoping; that needs a data model and query filtering, not just a parameter on authorize(), so it is deferred until a real BPO requirement exists;
+ - row-level security covers data-plane tables only (customers, conversations, messages, workforce, assignments, outbox); users, sessions, memberships, organizations and idempotency_keys are control-plane tables protected by application code;
+ - the application must connect as omnilinks_app (a superuser or table owner bypasses RLS in practice; migrations FORCE it for owners but not superusers);
+ - outbox publication is not yet implemented;
+@@ -74,4 +77,4 @@ Next database milestones:
+ 
+ 1. transactional outbox write on message creation, then a publisher;
+ 2. inbound messages and client/provider message-id deduplication (the schema has the columns but no unique index, and the code has no inbound path yet);
+-3. session expiry, login and explicit membership selection.
++3. a real identity-provider adapter, invites, and login rate limiting.
+diff --git a/packages/backend/migrations/0003_session_expiry.sql b/packages/backend/migrations/0003_session_expiry.sql
+new file mode 100644
+index 0000000..9cae93a
+--- /dev/null
++++ b/packages/backend/migrations/0003_session_expiry.sql
+@@ -0,0 +1,8 @@
++-- Sessions must always expire. Any pre-existing non-expiring session is
++-- expired immediately rather than being grandfathered in.
++BEGIN;
++
++UPDATE sessions SET expires_at = created_at WHERE expires_at IS NULL;
++ALTER TABLE sessions ALTER COLUMN expires_at SET NOT NULL;
++
++COMMIT;
+diff --git a/packages/backend/src/app.ts b/packages/backend/src/app.ts
+index 45b6466..25ad9ee 100644
+--- a/packages/backend/src/app.ts
++++ b/packages/backend/src/app.ts
+@@ -1,5 +1,6 @@
+ import { Application } from "./application/application.js"
+ import { loadConfig } from "./config.js"
++import { DevIdentityProvider, type IdentityProvider } from "./application/identity.js"
+ import type { Store } from "./infrastructure/store.js"
+ import { AppError } from "./shared/errors.js"
+ import { errorResponse, getRequestId, json } from "./shared/http.js"
+@@ -49,6 +50,10 @@ async function readJson(
+   }
+ }
+ 
++function optionalString(value: unknown): string | null {
++  return typeof value === "string" && value.length > 0 ? value : null
++}
++
+ function bearer(request: Request): string {
+   const header = request.headers.get("authorization")
+ 
+@@ -93,10 +98,19 @@ function slugify(input: string): string {
+   return slug || "organization"
+ }
+ 
++export interface AppOptions {
++  identity?: IdentityProvider
++  sessionTtlSeconds?: number
++}
++
+ export async function createApp(
+-  store: Store
++  store: Store,
++  options: AppOptions = {}
+ ): Promise<(request: Request) => Promise<Response>> {
+-  const appApplication = new Application(store)
++  const appApplication = new Application(store, {
++    identity: options.identity ?? new DevIdentityProvider(config.environment),
++    sessionTtlSeconds: options.sessionTtlSeconds ?? config.sessionTtlSeconds,
++  })
+ 
+   return async (request: Request): Promise<Response> => {
+     const requestId = getRequestId(request)
+@@ -162,6 +176,7 @@ async function route(
+       ownerDisplayName: stringValue(body.displayName),
+       slug: stringValue(body.slug) || slugify(stringValue(body.organizationName)),
+       idempotencyKey: request.headers.get("Idempotency-Key"),
++      credential: optionalString(body.credential),
+     })
+ 
+     return json(
+@@ -177,6 +192,7 @@ async function route(
+         session: {
+           tokenType: "Bearer",
+           accessToken: result.sessionToken,
++          expiresInSeconds: appApplication.sessionTtlSeconds,
+         },
+         replayed: result.replayed,
+       },
+@@ -184,7 +200,37 @@ async function route(
+     )
+   }
+ 
+-  const context = await appApplication.authenticate(bearer(request))
++  if (method === "POST" && url.pathname === "/api/v1/auth/login") {
++    const body = await readJson(request)
++
++    const result = await appApplication.login({
++      email: stringValue(body.email),
++      credential: optionalString(body.credential),
++    })
++
++    return json({
++      user: result.user,
++      memberships: result.memberships.map((membership) => ({
++        organizationId: membership.organizationId,
++        role: membership.role,
++      })),
++      session: {
++        tokenType: "Bearer",
++        accessToken: result.sessionToken,
++        expiresInSeconds: appApplication.sessionTtlSeconds,
++      },
++    })
++  }
++
++  const context = await appApplication.authenticate(
++    bearer(request),
++    request.headers.get("x-organization-id")
++  )
++
++  if (method === "POST" && url.pathname === "/api/v1/auth/logout") {
++    await appApplication.logout(context)
++    return json({ revoked: true })
++  }
+ 
+   if (method === "GET" && url.pathname === "/api/v1/organizations/me") {
+     return json(await appApplication.getOrganizationContext(context))
+diff --git a/packages/backend/src/application/application.ts b/packages/backend/src/application/application.ts
+index 8db553e..c2b0280 100644
+--- a/packages/backend/src/application/application.ts
++++ b/packages/backend/src/application/application.ts
+@@ -3,14 +3,62 @@ import type { Principal } from "../domain/types.js"
+ import { AppError } from "../shared/errors.js"
+ import { isUuid } from "../infrastructure/common.js"
+ import type { Store } from "../infrastructure/store.js"
++import type { IdentityProvider } from "./identity.js"
+ 
+ export interface AuthenticatedContext {
+   principal: Principal
+   organizationId: string
++  sessionId: string
++}
++
++export interface ApplicationOptions {
++  identity: IdentityProvider
++  sessionTtlSeconds: number
++}
++
++function unauthenticated(): AppError {
++  return new AppError(401, "AUTHENTICATION_REQUIRED", "Authentication required.")
+ }
+ 
+ export class Application {
+-  constructor(private readonly store: Store) {}
++  constructor(
++    private readonly store: Store,
++    private readonly options: ApplicationOptions
++  ) {}
++
++  get sessionTtlSeconds(): number {
++    return this.options.sessionTtlSeconds
++  }
++
++  async login(input: { email: string; credential: string | null }) {
++    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) {
++      throw new AppError(400, "VALIDATION_ERROR", "A valid email is required.")
++    }
++
++    const verified = await this.options.identity.verify(input)
++    const user = verified ? await this.store.findUserByEmail(verified.email) : null
++
++    // Same response for "bad proof" and "unknown user" so accounts cannot be
++    // enumerated through this endpoint.
++    if (!user || user.status !== "ACTIVE") {
++      throw new AppError(401, "INVALID_CREDENTIALS", "Invalid credentials.")
++    }
++
++    const memberships = await this.store.listMemberships(user.id)
++
++    return {
++      user,
++      memberships,
++      sessionToken: await this.store.createSession(
++        user.id,
++        this.options.sessionTtlSeconds
++      ),
++    }
++  }
++
++  async logout(ctx: AuthenticatedContext): Promise<void> {
++    await this.store.revokeSession(ctx.sessionId)
++  }
+ 
+   async signup(input: {
+     organizationName: string
+@@ -18,6 +66,7 @@ export class Application {
+     ownerDisplayName: string
+     slug: string
+     idempotencyKey: string | null
++    credential: string | null
+   }) {
+     if (input.organizationName.trim().length < 2) {
+       throw new AppError(400, "VALIDATION_ERROR", "Organization name is required.")
+@@ -39,8 +88,26 @@ export class Application {
+       )
+     }
+ 
++    // The owner email comes from the identity provider, never straight from
++    // the request body.
++    const verified = await this.options.identity.verify({
++      email: input.ownerEmail,
++      credential: input.credential,
++    })
++
++    if (!verified) {
++      throw new AppError(401, "INVALID_CREDENTIALS", "Invalid credentials.")
++    }
++
+     try {
+-      return await this.store.provisionOrganization(input)
++      return await this.store.provisionOrganization({
++        organizationName: input.organizationName,
++        ownerEmail: verified.email,
++        ownerDisplayName: input.ownerDisplayName,
++        slug: input.slug,
++        idempotencyKey: input.idempotencyKey,
++        sessionTtlSeconds: this.options.sessionTtlSeconds,
++      })
+     } catch (error) {
+       if (error instanceof Error && error.message === "OWNER_EMAIL_ALREADY_EXISTS") {
+         throw new AppError(
+@@ -70,37 +137,52 @@ export class Application {
+     }
+   }
+ 
+-  async authenticate(token: string): Promise<AuthenticatedContext> {
++  async authenticate(
++    token: string,
++    requestedOrganizationId: string | null
++  ): Promise<AuthenticatedContext> {
+     const session = await this.store.getSessionByToken(token)
+ 
+-    if (!session) {
+-      throw new AppError(
+-        401,
+-        "AUTHENTICATION_REQUIRED",
+-        "Authentication required."
+-      )
+-    }
++    if (!session) throw unauthenticated()
+ 
+     const user = await this.store.getUser(session.userId)
+ 
+-    if (!user || user.status !== "ACTIVE") {
+-      throw new AppError(
+-        401,
+-        "AUTHENTICATION_REQUIRED",
+-        "Authentication required."
+-      )
+-    }
++    if (!user || user.status !== "ACTIVE") throw unauthenticated()
+ 
+     const memberships = await this.store.listMemberships(user.id)
+-    const membership = memberships[0]
+ 
+-    if (!membership) {
++    if (memberships.length === 0) {
+       throw new AppError(403, "FORBIDDEN", "No active organization membership.")
+     }
+ 
++    let membership = memberships[0]!
++
++    if (requestedOrganizationId !== null) {
++      const requested = memberships.find(
++        (candidate) => candidate.organizationId === requestedOrganizationId
++      )
++
++      if (!requested) {
++        throw new AppError(
++          403,
++          "FORBIDDEN",
++          "Not a member of the requested organization."
++        )
++      }
++
++      membership = requested
++    } else if (memberships.length > 1) {
++      throw new AppError(
++        400,
++        "ORGANIZATION_REQUIRED",
++        "This user belongs to several organizations; send the X-Organization-Id header."
++      )
++    }
++
+     return {
+       principal: { user, membership },
+       organizationId: membership.organizationId,
++      sessionId: session.id,
+     }
+   }
+ 
+diff --git a/packages/backend/src/application/identity.ts b/packages/backend/src/application/identity.ts
+new file mode 100644
+index 0000000..1352343
+--- /dev/null
++++ b/packages/backend/src/application/identity.ts
+@@ -0,0 +1,39 @@
++/**
++ * Boundary between "who are you?" (an external identity provider) and
++ * "what may you do?" (OmniLinks authorization). The application never trusts
++ * an email taken from a request body: it only uses the email the provider
++ * returns as verified.
++ */
++export interface IdentityProof {
++  /** Email claimed by the client. Providers decide whether to use it. */
++  email: string
++  /** Provider-specific credential (password, OIDC id token, magic-link code). */
++  credential: string | null
++}
++
++export interface IdentityProvider {
++  readonly name: string
++  /** Returns the verified identity, or null when the proof is not valid. */
++  verify(proof: IdentityProof): Promise<{ email: string } | null>
++}
++
++/**
++ * Development-only provider: trusts the claimed email, so it is NOT
++ * authentication. It refuses to construct in production so a deployment cannot
++ * silently run without a real provider.
++ */
++export class DevIdentityProvider implements IdentityProvider {
++  readonly name = "dev"
++
++  constructor(environment: string) {
++    if (environment === "production") {
++      throw new Error(
++        "The dev identity provider cannot run in production. Configure a real identity provider."
++      )
++    }
++  }
++
++  async verify(proof: IdentityProof): Promise<{ email: string } | null> {
++    return { email: proof.email }
++  }
++}
+diff --git a/packages/backend/src/auth.test.ts b/packages/backend/src/auth.test.ts
+new file mode 100644
+index 0000000..7832848
+--- /dev/null
++++ b/packages/backend/src/auth.test.ts
+@@ -0,0 +1,197 @@
++import assert from "node:assert/strict"
++import test from "node:test"
++import { setTimeout as sleep } from "node:timers/promises"
++
++import { createApp } from "./app.js"
++import { loadConfig } from "./config.js"
++import { DevIdentityProvider, type IdentityProvider } from "./application/identity.js"
++import { storeTest } from "./test-support.js"
++
++type Handle = (request: Request) => Promise<Response>
++
++function call(
++  handle: Handle,
++  method: string,
++  path: string,
++  options: { body?: unknown; token?: string; org?: string; headers?: Record<string, string> } = {}
++): Promise<Response> {
++  const headers: Record<string, string> = { ...options.headers }
++  if (options.body !== undefined) headers["content-type"] = "application/json"
++  if (options.token) headers.authorization = "Bearer " + options.token
++  if (options.org) headers["x-organization-id"] = options.org
++
++  return handle(
++    new Request("http://localhost" + path, {
++      method,
++      headers,
++      ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
++    })
++  )
++}
++
++interface SignedUp {
++  organization: { id: string }
++  user: { id: string; email: string }
++  session: { accessToken: string; expiresInSeconds: number }
++}
++
++async function signup(handle: Handle, name: string, email: string, extra: Record<string, unknown> = {}) {
++  const response = await call(handle, "POST", "/api/v1/auth/signup", {
++    body: { organizationName: name, email, displayName: name + " Owner", ...extra },
++  })
++  assert.equal(response.status, 201)
++  return (await response.json()) as SignedUp
++}
++
++storeTest("login returns a working session and does not reveal unknown accounts", async (makeStore) => {
++  const handle = await createApp(await makeStore())
++  await signup(handle, "Alpha", "a@alpha.example")
++
++  const login = await call(handle, "POST", "/api/v1/auth/login", {
++    body: { email: "A@Alpha.example" },
++  })
++  assert.equal(login.status, 200)
++  const body = (await login.json()) as {
++    session: { accessToken: string }
++    memberships: { role: string }[]
++  }
++  assert.equal(body.memberships[0]?.role, "OWNER")
++
++  const me = await call(handle, "GET", "/api/v1/organizations/me", { token: body.session.accessToken })
++  assert.equal(me.status, 200)
++
++  const unknown = await call(handle, "POST", "/api/v1/auth/login", {
++    body: { email: "nobody@alpha.example" },
++  })
++  assert.equal(unknown.status, 401)
++  assert.equal(((await unknown.json()) as { error: { code: string } }).error.code, "INVALID_CREDENTIALS")
++})
++
++storeTest("sessions expire", async (makeStore) => {
++  const handle = await createApp(await makeStore(), { sessionTtlSeconds: 1 })
++  const owner = await signup(handle, "Alpha", "a@alpha.example")
++  assert.equal(owner.session.expiresInSeconds, 1)
++
++  const token = owner.session.accessToken
++  assert.equal((await call(handle, "GET", "/api/v1/organizations/me", { token })).status, 200)
++
++  await sleep(1300)
++  assert.equal((await call(handle, "GET", "/api/v1/organizations/me", { token })).status, 401)
++})
++
++storeTest("logout revokes only the current session", async (makeStore) => {
++  const handle = await createApp(await makeStore())
++  const owner = await signup(handle, "Alpha", "a@alpha.example")
++  const first = owner.session.accessToken
++
++  const second = (await (
++    await call(handle, "POST", "/api/v1/auth/login", { body: { email: "a@alpha.example" } })
++  ).json()) as { session: { accessToken: string } }
++
++  assert.equal((await call(handle, "POST", "/api/v1/auth/logout", { token: first })).status, 200)
++  assert.equal((await call(handle, "GET", "/api/v1/organizations/me", { token: first })).status, 401)
++  assert.equal(
++    (await call(handle, "GET", "/api/v1/organizations/me", { token: second.session.accessToken })).status,
++    200
++  )
++})
++
++storeTest("users in several organizations must choose one, and the role follows the choice", async (makeStore) => {
++  const store = await makeStore()
++  const handle = await createApp(store)
++  const alpha = await signup(handle, "Alpha", "a@alpha.example")
++  const beta = await signup(handle, "Beta", "b@beta.example")
++  const gamma = await signup(handle, "Gamma", "g@gamma.example")
++
++  await store.createMembership({
++    userId: alpha.user.id,
++    organizationId: beta.organization.id,
++    role: "AGENT",
++  })
++
++  const token = alpha.session.accessToken
++  const me = (org?: string) =>
++    call(handle, "GET", "/api/v1/organizations/me", { token, ...(org ? { org } : {}) })
++
++  const ambiguous = await me()
++  assert.equal(ambiguous.status, 400)
++  assert.equal(((await ambiguous.json()) as { error: { code: string } }).error.code, "ORGANIZATION_REQUIRED")
++
++  const asAlpha = (await (await me(alpha.organization.id)).json()) as { membership: { role: string } }
++  assert.equal(asAlpha.membership.role, "OWNER")
++
++  const asBeta = (await (await me(beta.organization.id)).json()) as { membership: { role: string } }
++  assert.equal(asBeta.membership.role, "AGENT")
++
++  assert.equal((await me(gamma.organization.id)).status, 403)
++  assert.equal((await me("not-a-uuid")).status, 403)
++
++  // The AGENT role in Beta cannot manage workforce, the OWNER role in Alpha can.
++  const member = { displayName: "Someone", type: "HUMAN" }
++  assert.equal(
++    (await call(handle, "POST", "/api/v1/workforce/members", { token, org: beta.organization.id, body: member })).status,
++    403
++  )
++  assert.equal(
++    (await call(handle, "POST", "/api/v1/workforce/members", { token, org: alpha.organization.id, body: member })).status,
++    201
++  )
++
++  // Data created under Beta's context is Beta's data.
++  const created = await call(handle, "POST", "/api/v1/customers", {
++    token,
++    org: beta.organization.id,
++    body: { displayName: "Bea", externalIdentity: { provider: "web", channelAccountId: "w", externalId: "bea" } },
++  })
++  assert.equal(created.status, 201)
++
++  const betaList = (await (
++    await call(handle, "GET", "/api/v1/customers", { token: beta.session.accessToken })
++  ).json()) as { items: unknown[] }
++  const alphaList = (await (
++    await call(handle, "GET", "/api/v1/customers", { token, org: alpha.organization.id })
++  ).json()) as { items: unknown[] }
++  assert.equal(betaList.items.length, 1)
++  assert.equal(alphaList.items.length, 0)
++
++  const login = (await (
++    await call(handle, "POST", "/api/v1/auth/login", { body: { email: "a@alpha.example" } })
++  ).json()) as { memberships: unknown[] }
++  assert.equal(login.memberships.length, 2)
++})
++
++storeTest("identity comes from the provider, not from the request body", async (makeStore) => {
++  const provider: IdentityProvider = {
++    name: "stub",
++    async verify({ credential }) {
++      return credential === "proof-for-real" ? { email: "real@example.com" } : null
++    },
++  }
++  const handle = await createApp(await makeStore(), { identity: provider })
++
++  const rejected = await call(handle, "POST", "/api/v1/auth/signup", {
++    body: { organizationName: "Alpha", email: "real@example.com", displayName: "Real Owner", credential: "wrong" },
++  })
++  assert.equal(rejected.status, 401)
++
++  const accepted = await signup(handle, "Alpha", "attacker@example.com", { credential: "proof-for-real" })
++  assert.equal(accepted.user.email, "real@example.com")
++
++  const badLogin = await call(handle, "POST", "/api/v1/auth/login", {
++    body: { email: "real@example.com", credential: "wrong" },
++  })
++  assert.equal(badLogin.status, 401)
++
++  const goodLogin = await call(handle, "POST", "/api/v1/auth/login", {
++    body: { email: "whoever@example.com", credential: "proof-for-real" },
++  })
++  assert.equal(goodLogin.status, 200)
++  assert.equal(((await goodLogin.json()) as { user: { email: string } }).user.email, "real@example.com")
++})
++
++test("the dev identity provider cannot run in production", () => {
++  assert.throws(() => new DevIdentityProvider("production"), /cannot run in production/)
++  assert.equal(loadConfig({ NODE_ENV: "production" }).identityProvider, null)
++  assert.equal(loadConfig({ NODE_ENV: "development" }).identityProvider, "dev")
++  assert.throws(() => loadConfig({ IDENTITY_PROVIDER: "magic" }), /Unsupported/)
++})
+diff --git a/packages/backend/src/config.ts b/packages/backend/src/config.ts
+index c514323..a18b374 100644
+--- a/packages/backend/src/config.ts
++++ b/packages/backend/src/config.ts
+@@ -5,6 +5,8 @@ export interface AppConfig {
+   environment: string
+   maxRequestBytes: number
+   databaseUrl: string | null
++  identityProvider: "dev" | null
++  sessionTtlSeconds: number
+ }
+ 
+ function positiveInt(value: string | undefined, fallback: number, name: string): number {
+@@ -15,6 +17,20 @@ function positiveInt(value: string | undefined, fallback: number, name: string):
+   return parsed
+ }
+ 
++function identityProvider(env: NodeJS.ProcessEnv): "dev" | null {
++  const value = env.IDENTITY_PROVIDER?.trim()
++
++  if (value === undefined || value === "") {
++    return env.NODE_ENV === "production" ? null : "dev"
++  }
++
++  if (value !== "dev") {
++    throw new Error("Unsupported IDENTITY_PROVIDER: " + value)
++  }
++
++  return value
++}
++
+ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+   return {
+     serviceName: env.SERVICE_NAME ?? "omnilinks-backend",
+@@ -23,5 +39,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+     environment: env.NODE_ENV ?? "development",
+     maxRequestBytes: positiveInt(env.MAX_REQUEST_BYTES, 1_048_576, "MAX_REQUEST_BYTES"),
+     databaseUrl: env.DATABASE_URL?.trim() || null,
++    identityProvider: identityProvider(env),
++    sessionTtlSeconds: positiveInt(env.SESSION_TTL_SECONDS, 43_200, "SESSION_TTL_SECONDS"),
+   }
+ }
+diff --git a/packages/backend/src/infrastructure/postgres-store.ts b/packages/backend/src/infrastructure/postgres-store.ts
+index 2248bbb..10e40df 100644
+--- a/packages/backend/src/infrastructure/postgres-store.ts
++++ b/packages/backend/src/infrastructure/postgres-store.ts
+@@ -58,6 +58,7 @@ function pgConstraint(error: unknown): string | undefined {
+ }
+ 
+ const UNIQUE_VIOLATION = "23505"
++const FOREIGN_KEY_VIOLATION = "23503"
+ const SIGNUP_NAMESPACE = "signup"
+ const SIGNUP_KEY_INDEX = "idempotency_global_key_idx"
+ 
+@@ -268,19 +269,75 @@ export class PostgresStore implements Store {
+ 
+   private async mintSession(
+     client: Pick<pg.PoolClient, "query">,
+-    userId: string
++    userId: string,
++    ttlSeconds: number
+   ): Promise<string> {
+     const token = randomBytes(32).toString("base64url")
+     await client.query(
+-      "INSERT INTO sessions (user_id, token_hash) VALUES ($1, $2)",
+-      [userId, hashToken(token)]
++      `INSERT INTO sessions (user_id, token_hash, expires_at)
++       VALUES ($1, $2, now() + make_interval(secs => $3))`,
++      [userId, hashToken(token), ttlSeconds]
+     )
+     return token
+   }
+ 
++  async createSession(userId: string, ttlSeconds: number): Promise<string> {
++    if (!isUuid(userId)) throw new Error("USER_NOT_FOUND")
++
++    try {
++      return await this.mintSession(this.pool, userId, ttlSeconds)
++    } catch (error) {
++      if (pgCode(error) === FOREIGN_KEY_VIOLATION) {
++        throw new Error("USER_NOT_FOUND")
++      }
++
++      throw error
++    }
++  }
++
++  async revokeSession(sessionId: string): Promise<void> {
++    if (!isUuid(sessionId)) return
++
++    await this.pool.query(
++      "UPDATE sessions SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL",
++      [sessionId]
++    )
++  }
++
++  async createMembership(input: {
++    userId: string
++    organizationId: string
++    role: Membership["role"]
++  }): Promise<Membership> {
++    if (!isUuid(input.userId)) throw new Error("USER_NOT_FOUND")
++    if (!isUuid(input.organizationId)) throw new Error("ORGANIZATION_NOT_FOUND")
++
++    try {
++      const result = await this.pool.query(
++        `INSERT INTO memberships (user_id, organization_id, role, status)
++         VALUES ($1, $2, $3, 'ACTIVE') RETURNING *`,
++        [input.userId, input.organizationId, input.role]
++      )
++      return toMembership(result.rows[0])
++    } catch (error) {
++      if (pgCode(error) === UNIQUE_VIOLATION) throw new Error("MEMBERSHIP_EXISTS")
++
++      if (pgCode(error) === FOREIGN_KEY_VIOLATION) {
++        throw new Error(
++          pgConstraint(error)?.includes("organization")
++            ? "ORGANIZATION_NOT_FOUND"
++            : "USER_NOT_FOUND"
++        )
++      }
++
++      throw error
++    }
++  }
++
+   private async replaySignup(
+     key: string,
+-    requestHash: string
++    requestHash: string,
++    ttlSeconds: number
+   ): Promise<{
+     principal: Principal
+     sessionToken: string
+@@ -320,7 +377,7 @@ export class PostgresStore implements Store {
+           user: toUser(user.rows[0]),
+           membership: toMembership(membership.rows[0]),
+         },
+-        sessionToken: await this.mintSession(client, userId),
++        sessionToken: await this.mintSession(client, userId, ttlSeconds),
+         replayed: true,
+       }
+     })
+@@ -332,6 +389,7 @@ export class PostgresStore implements Store {
+     ownerDisplayName: string
+     slug: string
+     idempotencyKey: string | null
++    sessionTtlSeconds: number
+   }): Promise<{
+     principal: Principal
+     sessionToken: string
+@@ -346,7 +404,11 @@ export class PostgresStore implements Store {
+     })
+ 
+     if (input.idempotencyKey) {
+-      const replay = await this.replaySignup(input.idempotencyKey, requestHash)
++      const replay = await this.replaySignup(
++        input.idempotencyKey,
++        requestHash,
++        input.sessionTtlSeconds
++      )
+       if (replay) return replay
+     }
+ 
+@@ -390,7 +452,11 @@ export class PostgresStore implements Store {
+             user: toUser(user.rows[0]),
+             membership: toMembership(membership.rows[0]),
+           },
+-          sessionToken: await this.mintSession(client, str(user.rows[0].id)),
++          sessionToken: await this.mintSession(
++            client,
++            str(user.rows[0].id),
++            input.sessionTtlSeconds
++          ),
+           replayed: false,
+         }
+       })
+@@ -409,7 +475,8 @@ export class PostgresStore implements Store {
+         if (constraint === SIGNUP_KEY_INDEX && input.idempotencyKey) {
+           const replay = await this.replaySignup(
+             input.idempotencyKey,
+-            requestHash
++            requestHash,
++            input.sessionTtlSeconds
+           )
+           if (replay) return replay
+         }
+diff --git a/packages/backend/src/infrastructure/store.ts b/packages/backend/src/infrastructure/store.ts
+index d75c309..8983492 100644
+--- a/packages/backend/src/infrastructure/store.ts
++++ b/packages/backend/src/infrastructure/store.ts
+@@ -27,12 +27,20 @@ export interface Store {
+   getUser(userId: string): Promise<User | null>
+   getSessionByToken(token: string): Promise<Session | null>
+   listMemberships(userId: string): Promise<Membership[]>
++  createMembership(input: {
++    userId: string
++    organizationId: string
++    role: Membership["role"]
++  }): Promise<Membership>
++  createSession(userId: string, ttlSeconds: number): Promise<string>
++  revokeSession(sessionId: string): Promise<void>
+   provisionOrganization(input: {
+     organizationName: string
+     ownerEmail: string
+     ownerDisplayName: string
+     slug: string
+     idempotencyKey: string | null
++    sessionTtlSeconds: number
+   }): Promise<{ principal: Principal; sessionToken: string; replayed: boolean }>
+   getOrganization(organizationId: string): Promise<Organization | null>
+   getCustomer(organizationId: string, customerId: string): Promise<Customer | null>
+@@ -147,14 +155,15 @@ export class MemoryStore implements Store {
+     return clone(this.activeMemberships(userId))
+   }
+ 
+-  private createSession(userId: string): string {
++  private mintSession(userId: string, ttlSeconds: number): string {
+     const token = randomBytes(32).toString("base64url")
++    const now = Date.now()
+     const session: Session = {
+       id: randomUUID(),
+       userId,
+       tokenHash: hashToken(token),
+-      createdAt: new Date().toISOString(),
+-      expiresAt: null,
++      createdAt: new Date(now).toISOString(),
++      expiresAt: new Date(now + ttlSeconds * 1000).toISOString(),
+       revokedAt: null,
+     }
+ 
+@@ -162,12 +171,58 @@ export class MemoryStore implements Store {
+     return token
+   }
+ 
++  async createSession(userId: string, ttlSeconds: number): Promise<string> {
++    if (!this.users.has(userId)) throw new Error("USER_NOT_FOUND")
++    return this.mintSession(userId, ttlSeconds)
++  }
++
++  async revokeSession(sessionId: string): Promise<void> {
++    const session = this.sessions.get(sessionId)
++    if (session && session.revokedAt === null) {
++      session.revokedAt = new Date().toISOString()
++    }
++  }
++
++  async createMembership(input: {
++    userId: string
++    organizationId: string
++    role: Membership["role"]
++  }): Promise<Membership> {
++    if (!this.users.has(input.userId)) throw new Error("USER_NOT_FOUND")
++    if (!this.organizations.has(input.organizationId)) {
++      throw new Error("ORGANIZATION_NOT_FOUND")
++    }
++
++    const exists = [...this.memberships.values()].some(
++      (membership) =>
++        membership.userId === input.userId &&
++        membership.organizationId === input.organizationId
++    )
++    if (exists) throw new Error("MEMBERSHIP_EXISTS")
++
++    const now = new Date().toISOString()
++    const membership: Membership = {
++      id: randomUUID(),
++      userId: input.userId,
++      organizationId: input.organizationId,
++      role: input.role,
++      status: "ACTIVE",
++      version: 1,
++      createdAt: now,
++      updatedAt: now,
++    }
++
++    this.memberships.set(membership.id, membership)
++    return clone(membership)
++  }
++
+   async provisionOrganization(input: {
+     organizationName: string
+     ownerEmail: string
+     ownerDisplayName: string
+     slug: string
+     idempotencyKey: string | null
++    sessionTtlSeconds: number
+   }): Promise<{
+     principal: Principal
+     sessionToken: string
+@@ -198,7 +253,7 @@ export class MemoryStore implements Store {
+ 
+         return {
+           principal: { user: clone(user), membership: clone(membership) },
+-          sessionToken: this.createSession(user.id),
++          sessionToken: this.mintSession(user.id, input.sessionTtlSeconds),
+           replayed: true,
+         }
+       }
+@@ -252,7 +307,7 @@ export class MemoryStore implements Store {
+     this.usersByEmail.set(user.email, user.id)
+     this.memberships.set(membership.id, membership)
+ 
+-    const sessionToken = this.createSession(user.id)
++    const sessionToken = this.mintSession(user.id, input.sessionTtlSeconds)
+ 
+     if (input.idempotencyKey) {
+       this.idempotency.set(input.idempotencyKey, {
+diff --git a/packages/backend/src/postgres.test.ts b/packages/backend/src/postgres.test.ts
+index 0a96bac..3d191b6 100644
+--- a/packages/backend/src/postgres.test.ts
++++ b/packages/backend/src/postgres.test.ts
+@@ -144,6 +144,21 @@ test("migration runner is idempotent", options, async () => {
+   const recorded = await requireAdminPool().query("SELECT name FROM schema_migrations ORDER BY name")
+   assert.deepEqual(
+     recorded.rows.map((row) => row.name),
+-    ["0001_core.sql", "0002_rls_and_roles.sql"]
++    ["0001_core.sql", "0002_rls_and_roles.sql", "0003_session_expiry.sql"]
++  )
++})
++
++test("sessions cannot be stored without an expiry", options, async () => {
++  const handle = await createApp(await makePostgresStore())
++  const owner = await signup(handle, "Alpha", "a@alpha.example")
++  assert.ok(owner.session.accessToken)
++
++  const user = await requireAdminPool().query("SELECT id FROM users LIMIT 1")
++  await assert.rejects(
++    requireAdminPool().query(
++      "INSERT INTO sessions (user_id, token_hash) VALUES ($1, 'x')",
++      [user.rows[0].id]
++    ),
++    /null value in column "expires_at"/
+   )
+ })
+diff --git a/packages/backend/src/server.ts b/packages/backend/src/server.ts
+index e3e196a..b849f04 100644
+--- a/packages/backend/src/server.ts
++++ b/packages/backend/src/server.ts
+@@ -4,6 +4,7 @@ import { createApp } from "./app.js"
+ import { loadConfig } from "./config.js"
+ import { MemoryStore, type Store } from "./infrastructure/store.js"
+ import { PostgresStore } from "./infrastructure/postgres-store.js"
++import { DevIdentityProvider } from "./application/identity.js"
+ import { createNodeServer } from "./node-server.js"
+ 
+ const config = loadConfig()
+@@ -27,7 +28,16 @@ if (config.databaseUrl) {
+   store = new MemoryStore()
+ }
+ 
+-const handle = await createApp(store)
++if (config.identityProvider === null) {
++  throw new Error(
++    "IDENTITY_PROVIDER is required in production, and no production identity provider is implemented yet."
++  )
++}
++
++const handle = await createApp(store, {
++  identity: new DevIdentityProvider(config.environment),
++  sessionTtlSeconds: config.sessionTtlSeconds,
++})
+ const server = createNodeServer(handle, {
+   maxRequestBytes: config.maxRequestBytes,
+ })
+-- 
+2.43.0
+
