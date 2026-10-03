@@ -1,7 +1,10 @@
 import { evaluateRouting } from "../domain/routing.js"
 import type {
-  Conversation,
+  Assignment,
+  QueueItem,
+  RoutingCandidate,
   RoutingContext,
+  RoutingDecision,
   RoutingPolicyConfig,
 } from "../domain/types.js"
 import type { Store } from "../infrastructure/store.js"
@@ -17,6 +20,13 @@ export const DEFAULT_ROUTING_POLICY: RoutingPolicyConfig = {
     urgency: 10,
   },
   defaultQueueId: null,
+}
+
+export interface RouteConversationResult {
+  decision: RoutingDecision
+  candidates: RoutingCandidate[]
+  assignment?: Assignment
+  queueItem?: QueueItem
 }
 
 export interface RouteConversationInput {
@@ -35,7 +45,7 @@ export class RoutingService {
   async routeConversation(
     organizationId: string,
     input: RouteConversationInput
-  ) {
+  ): Promise<RouteConversationResult> {
     const conversation = await this.store.getConversation(
       organizationId,
       input.conversationId
