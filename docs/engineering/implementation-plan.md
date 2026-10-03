@@ -204,22 +204,34 @@ Deferred:
 
 ## 10. Phase 7 — Workflows
 
-Implement:
+Current implementation:
 
-- versioned workflow definitions;
-- run engine;
-- step engine;
-- wait state;
-- approval;
-- retries;
-- compensation;
-- recovery.
+- versioned workflow definitions with explicit entry steps;
+- relational workflow steps and durable run/step-run state;
+- idempotent trigger dedupe;
+- run leases and PostgreSQL SKIP LOCKED claiming;
+- retry/backoff state and failure branches;
+- durable WAIT state and scheduler resume;
+- durable APPROVAL state with action hash, expiry, and authenticated resolution;
+- workflow cancellation;
+- workflow worker and scheduler integration with Phase 5 runtime;
+- graph validation for cycles, unreachable nodes, and invalid references;
+- memory/PostgreSQL parity tests.
 
 Exit criteria:
 
 - workflow execution is resumable;
 - duplicate triggers are idempotent;
-- irreversible actions require explicit policy.
+- wait and approval states survive worker loss;
+- retry state is durable and bounded;
+- irreversible side-effect steps remain absent until their authorization and idempotency contracts are implemented.
+
+Deferred:
+
+- side-effect/action steps;
+- compensation execution;
+- parallel fan-out/fan-in;
+- distributed cron.
 
 ## 11. Phase 8 — Quality
 
