@@ -40,6 +40,13 @@ import type {
   RoutingEvaluationCandidate,
   EventInbox,
   WorkerLease,
+  AiModel,
+  AiModelPolicy,
+  AiModelPolicyVersion,
+  AiAgent,
+  AiAgentPolicyVersion,
+  AiEvaluation,
+  AiExecutionContext,
 } from "../domain/types.js"
 
 import {
@@ -60,6 +67,11 @@ import type {
   FailEventInboxInput,
   ReplayEventInboxInput,
   AcquireWorkerLeaseInput,
+  CreateAiModelInput,
+  CreateAiModelPolicyVersionInput,
+  CreateAiAgentInput,
+  CreateAiAgentPolicyVersionInput,
+  CreateAiEvaluationInput,
   Store,
 } from "./store.js"
 
@@ -350,6 +362,72 @@ const toRoutingCandidate = (row: Row): RoutingCandidate => ({
   createdAt: iso(row.created_at),
 })
 
+const toAiModel = (row: Row): AiModel => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  provider: str(row.provider),
+  model: str(row.model),
+  displayName: str(row.display_name),
+  credentialRef: strOrNull(row.credential_ref),
+  baseUrl: strOrNull(row.base_url),
+  inputCostPerMillion: Number(row.input_cost_per_million),
+  outputCostPerMillion: Number(row.output_cost_per_million),
+  capabilities: (row.capabilities ?? {}) as Record<string, unknown>,
+  status: str(row.status) as AiModel['status'],
+  createdAt: iso(row.created_at),
+  updatedAt: iso(row.updated_at),
+})
+
+const toAiModelPolicy = (row: Row): AiModelPolicy => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  name: str(row.name),
+  status: str(row.status) as AiModelPolicy['status'],
+  createdAt: iso(row.created_at),
+  updatedAt: iso(row.updated_at),
+})
+
+const toAiModelPolicyVersion = (row: Row): AiModelPolicyVersion => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  policyId: str(row.policy_id),
+  version: num(row.version),
+  status: str(row.status) as AiModelPolicyVersion['status'],
+  config: row.config as AiModelPolicyVersion['config'],
+  createdAt: iso(row.created_at),
+})
+
+const toAiAgent = (row: Row): AiAgent => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  workforceMemberId: str(row.workforce_member_id),
+  name: str(row.name),
+  purpose: str(row.purpose),
+  status: str(row.status) as AiAgent['status'],
+  createdAt: iso(row.created_at),
+  updatedAt: iso(row.updated_at),
+})
+
+const toAiAgentPolicyVersion = (row: Row): AiAgentPolicyVersion => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  agentId: str(row.agent_id),
+  version: num(row.version),
+  status: str(row.status) as AiAgentPolicyVersion['status'],
+  config: row.config as AiAgentPolicyVersion['config'],
+  createdAt: iso(row.created_at),
+})
+
+const toAiEvaluation = (row: Row): AiEvaluation => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  aiRunId: str(row.ai_run_id),
+  evaluatorType: str(row.evaluator_type) as AiEvaluation['evaluatorType'],
+  score: Number(row.score),
+  dimensions: (row.dimensions ?? {}) as Record<string, unknown>,
+  notes: strOrNull(row.notes),
+  createdAt: iso(row.created_at),
+})
 const toEventInbox = (row: Row): EventInbox => ({
   id: str(row.id),
   organizationId: str(row.organization_id),
