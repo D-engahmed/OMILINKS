@@ -3,10 +3,6 @@ import assert from "node:assert/strict"
 import { ConversationPipeline, type InboundMessage } from "./application/pipeline.js"
 import { createApp } from "./app.js"
 import {
-  MemoryStore,
-  type Store,
-} from "./infrastructure/store.js"
-import {
   ScriptedGateway,
   storeTest,
   type MakeStore,
@@ -48,8 +44,8 @@ function inbound(orgId: string, messageId: string, content: string): InboundMess
   }
 }
 
-test("phase 2: answered conversations emit durable message and AI-run outbox events", async () => {
-  const { store, provisioned } = await world(async () => new MemoryStore())
+storeTest("phase 2: answered conversations emit durable message and AI-run outbox events", async (makeStore) => {
+  const { store, provisioned } = await world(makeStore)
   const gateway = new ScriptedGateway(
     () => JSON.stringify({
       can_answer: true,
