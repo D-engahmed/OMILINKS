@@ -125,6 +125,18 @@ The current production-like channel is the Web Widget. Other providers are added
 
 ## 7. Phase 4 — Workforce and Routing
 
+Current implementation:
+- workforce member operational state;
+- skills and proficiency;
+- presence with TTL;
+- capacity accounting;
+- teams and queues;
+- versioned routing policies;
+- deterministic routing evaluation;
+- routing decision/candidate snapshots;
+- transactional routing commit;
+- assignment release.
+
 Implement:
 
 - WorkforceMember;
