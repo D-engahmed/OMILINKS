@@ -422,8 +422,13 @@ storeTest("phase 4: policy publishing creates immutable versions", async (makeSt
 
   assert.equal(v1.version.version, 1)
   assert.equal(v2.version.version, 2)
-  assert.equal(v1.version.status, "RETIRED")
+  assert.equal(v1.version.status, "PUBLISHED")
   assert.equal(v2.version.status, "PUBLISHED")
+
+  const versions = await store.listRoutingPolicies(owner.organization.id)
+  const stored = versions.find((value) => value.name === "default")!
+  assert.equal(stored.versions[0]?.status, "RETIRED")
+  assert.equal(stored.versions[1]?.status, "PUBLISHED")
 
   const published = await store.getPublishedRoutingPolicy(
     owner.organization.id,
