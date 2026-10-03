@@ -18,8 +18,6 @@ import type { Store } from "../infrastructure/store.js"
 import type { IdentityProvider } from "./identity.js"
 import { AiPlatformService } from "./ai-platform.js"
 import { EnvironmentAiGatewayResolver } from "../ai/provider-resolver.js"
-import type {
- from "../domain/types.js"
 import type { AiModelGatewayResolver } from "../ai/model-router.js"
 
 export interface AuthenticatedContext {
