@@ -120,14 +120,26 @@ export class ChannelIngressService {
       )
     }
 
-    const claim = await this.store.claimInboundEvent({
+    let claim
+    try {
+      claim = await this.store.claimInboundEvent({
       organizationId: integration.organizationId,
       integrationId: integration.id,
       providerEventId,
       eventType,
       payloadHash: hashRequest(rawBody),
-      correlationId: providerEventId,
-    })
+        correlationId: providerEventId,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message === "INBOUND_EVENT_CONFLICT") {
+        throw new AppError(
+          409,
+          "INBOUND_EVENT_CONFLICT",
+          "Provider event id was already used with a different payload."
+        )
+      }
+      throw error
+    }
 
     if (!claim.claimed) {
       return {
