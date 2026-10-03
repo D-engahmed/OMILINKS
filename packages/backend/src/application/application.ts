@@ -673,6 +673,14 @@ export class Application {
     return await this.aiPlatform().getRun(ctx.organizationId, aiRunId)
   }
 
+  async evaluateAiRun(ctx: AuthenticatedContext, aiRunId: string) {
+    authorize(ctx.principal.membership, "ai.manage")
+    return await this.aiPlatform().evaluateRun(
+      ctx.organizationId,
+      aiRunId
+    )
+  }
+
   async listAiEvaluations(ctx: AuthenticatedContext, aiRunId: string) {
     authorize(ctx.principal.membership, "conversation.read")
     return await this.aiPlatform().listEvaluations(ctx.organizationId, aiRunId)
