@@ -250,7 +250,7 @@ storeTest("phase 3: failed inbound normalization can be retried with the same pr
     },
   })
 
-  assert.equal(failed.status, 500)
+  assert.equal(failed.status, 400)
   assert.equal((await store.listCustomers(owner.organization.id)).length, 0)
 
   const retried = await call(handle, "POST", path, {
