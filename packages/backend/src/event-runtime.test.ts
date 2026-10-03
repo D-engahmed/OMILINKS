@@ -61,7 +61,7 @@ function retryConsumer(counter: { value: number }): EventConsumer {
   return {
     consumerId: "test-consumer",
     workerClass: "test",
-    eventTypes: ["conversation.created"],
+    eventTypes: ["conversation.message.received"],
     concurrency: 2,
     leaseSeconds: 30,
     maxAttempts: 3,
@@ -103,7 +103,7 @@ storeTest("phase 5: outbox publishing is idempotent and fans out to one inbox ro
     leaseSeconds: 30,
     maxAttempts: 3,
   })
-  const created = claimed.find((event) => event.payload.conversation)
+  const created = claimed.find((event) => event.eventType === "conversation.message.received")
   assert.ok(created)
   assert.equal(created?.status, "PROCESSING")
   await store.completeEventInbox(owner.organization.id, created!.id, "worker-1")
@@ -117,7 +117,7 @@ storeTest("phase 5: outbox publishing is idempotent and fans out to one inbox ro
     maxAttempts: 3,
   })
   assert.equal(none.length, 0)
-  assert.equal(conversation.id.length, 36)
+  assert.equal(createdConversation.id.length, 36)
 })
 
 storeTest("phase 5: retries reach dead letter and replay resets delivery state", async (makeStore) => {
@@ -210,7 +210,17 @@ storeTest("phase 5: routing worker drains a queue-controlled conversation", asyn
     expectedVersion: null,
   })
 
+  const queue = await store.createQueue({
+    organizationId: owner.organization.id,
+    name: "General",
+    requiredSkillIds: [],
+  })
   const conversation = await createConversation(store, owner.session.accessToken)
+  await store.enqueueConversation({
+    organizationId: owner.organization.id,
+    queueId: queue.id,
+    conversationId: conversation.id,
+  })
   const runtime = new WorkerRuntime(store, createDefaultEventConsumers(store))
   const result = await runtime.runOnce()
   assert.ok(result.published >= 1)
