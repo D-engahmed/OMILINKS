@@ -47,6 +47,14 @@ import type {
   AiAgentPolicyVersion,
   AiEvaluation,
   AiExecutionContext,
+  WorkflowDefinition,
+  WorkflowVersion,
+  WorkflowStep,
+  WorkflowTrigger,
+  WorkflowRun,
+  WorkflowStepRun,
+  WorkflowWait,
+  WorkflowApproval,
 } from "../domain/types.js"
 
 import {
@@ -72,6 +80,13 @@ import type {
   CreateAiAgentInput,
   CreateAiAgentPolicyVersionInput,
   CreateAiEvaluationInput,
+  CreateWorkflowVersionInput,
+  StartWorkflowInput,
+  ClaimWorkflowRunsInput,
+  CompleteWorkflowStepInput,
+  FailWorkflowStepInput,
+  CreateWorkflowApprovalInput,
+  ResolveWorkflowApprovalInput,
   Store,
 } from "./store.js"
 
