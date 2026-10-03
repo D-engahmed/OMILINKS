@@ -332,6 +332,13 @@ export interface Store {
     reason: string
     expectedConversationVersion: number
   }): Promise<Assignment>
+  releaseAssignment(input: {
+    organizationId: string
+    assignmentId: string
+    expectedVersion: number
+    status: Extract<Assignment["status"], "RELEASED" | "COMPLETED" | "TRANSFERRED" | "CANCELED">
+  }): Promise<Assignment>
+
 }
 
 export class MemoryStore implements Store {
@@ -1485,20 +1492,14 @@ export class MemoryStore implements Store {
       input.conversationId
     )
 
-    if (!conversation) {
-      throw new Error("CONVERSATION_NOT_FOUND")
-    }
+    if (!conversation) throw new Error("CONVERSATION_NOT_FOUND")
 
     const member = this.workforce.get(input.workforceMemberId)
-
     if (!member || member.organizationId !== input.organizationId) {
       throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
     }
 
-    if (member.status !== "ACTIVE") {
-      throw new Error("WORKFORCE_MEMBER_DISABLED")
-    }
-
+    if (member.status !== "ACTIVE") throw new Error("WORKFORCE_MEMBER_DISABLED")
     if (conversation.version !== input.expectedConversationVersion) {
       throw new Error("STALE_VERSION")
     }
@@ -1509,9 +1510,17 @@ export class MemoryStore implements Store {
         assignment.conversationId === input.conversationId &&
         assignment.status === "ACTIVE"
     )
+    if (activeAssignment) throw new Error("ACTIVE_ASSIGNMENT_EXISTS")
 
-    if (activeAssignment) {
-      throw new Error("ACTIVE_ASSIGNMENT_EXISTS")
+    const capacity = this.workforceCapacity.get(member.id)
+    const activeWork = [...this.assignments.values()].filter(
+      (assignment) =>
+        assignment.organizationId === input.organizationId &&
+        assignment.workforceMemberId === member.id &&
+        assignment.status === "ACTIVE"
+    ).length
+    if (!capacity || activeWork + capacity.reservedWork >= capacity.maxConcurrentWork) {
+      throw new Error("CAPACITY_EXHAUSTED")
     }
 
     const now = new Date().toISOString()
@@ -1529,7 +1538,7 @@ export class MemoryStore implements Store {
     }
 
     conversation.status = "ASSIGNED"
-    conversation.control = "human"
+    conversation.control = member.type === "AI" ? "ai" : "human"
     conversation.controlVersion += 1
     conversation.version += 1
     conversation.updatedAt = now
@@ -1546,6 +1555,57 @@ export class MemoryStore implements Store {
     }
 
     this.assignments.set(assignment.id, assignment)
+    this.emitOutbox({
+      organizationId: input.organizationId,
+      eventType: "conversation.assignment.changed",
+      aggregateType: "conversation",
+      aggregateId: input.conversationId,
+      correlationId: assignment.id,
+      causationId: assignment.id,
+      payload: { assignment },
+    })
+    return clone(assignment)
+  }
+
+  async releaseAssignment(input: {
+    organizationId: string
+    assignmentId: string
+    expectedVersion: number
+    status: Extract<Assignment["status"], "RELEASED" | "COMPLETED" | "TRANSFERRED" | "CANCELED">
+  }): Promise<Assignment> {
+    const assignment = this.assignments.get(input.assignmentId)
+    if (!assignment || assignment.organizationId !== input.organizationId) {
+      throw new Error("ASSIGNMENT_NOT_FOUND")
+    }
+    if (assignment.status !== "ACTIVE") throw new Error("ASSIGNMENT_NOT_ACTIVE")
+    if (assignment.version !== input.expectedVersion) throw new Error("STALE_ASSIGNMENT_VERSION")
+
+    const conversation = this.conversations.get(assignment.conversationId)
+    if (!conversation || conversation.organizationId !== input.organizationId) {
+      throw new Error("CONVERSATION_NOT_FOUND")
+    }
+
+    const now = new Date().toISOString()
+    assignment.status = input.status
+    assignment.releasedAt = now
+    assignment.version += 1
+
+    conversation.control = "queue"
+    conversation.status = input.status === "COMPLETED" ? "WAITING_CUSTOMER" : "OPEN"
+    conversation.controlVersion += 1
+    conversation.version += 1
+    conversation.updatedAt = now
+
+    this.emitOutbox({
+      organizationId: input.organizationId,
+      eventType: "conversation.assignment.changed",
+      aggregateType: "conversation",
+      aggregateId: assignment.conversationId,
+      correlationId: assignment.id,
+      causationId: assignment.id,
+      payload: { assignment: clone(assignment) },
+    })
+
     return clone(assignment)
   }
 
