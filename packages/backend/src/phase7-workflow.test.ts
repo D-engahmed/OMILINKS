@@ -294,8 +294,24 @@ storeTest("phase 7: failed step retries and then fails without losing durable st
   const runtime = new WorkerRuntime(store, createDefaultEventConsumers(store))
   await runtime.runOnce()
   let run = await service.getRun(owner.organization.id, started.run.id)
+  assert.equal(run.status, "RETRYING")
+
+  const firstAttempt = await service.getStepRuns(
+    owner.organization.id,
+    started.run.id
+  )
+  assert.equal(firstAttempt[0]?.attempt, 1)
+
+  await runtime.runOnce()
+  run = await service.getRun(owner.organization.id, started.run.id)
   assert.equal(run.status, "FAILED")
   assert.equal(run.error, "INVALID_WAIT_SECONDS")
+
+  const attempts = await service.getStepRuns(
+    owner.organization.id,
+    started.run.id
+  )
+  assert.equal(attempts[0]?.attempt, 2)
 
   await runtime.stop()
 })
