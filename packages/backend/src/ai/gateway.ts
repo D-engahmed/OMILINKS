@@ -20,6 +20,8 @@ export interface ModelResult {
   inputTokens: number | null
   outputTokens: number | null
   latencyMs: number
+  modelRegistryId?: string | null
+  costUsd?: number | null
 }
 
 export interface ModelGateway {

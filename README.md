@@ -47,7 +47,7 @@ OMILINKS/
 └── turbo.json
 ```
 
-The codebase is implemented as vertical phases. Phase 0-2 establish the tenant and conversation/AI core; Phase 3 provides the Web Widget channel boundary with durable inbound-event deduplication; Phase 4 provides deterministic workforce routing, queues, capacity, presence, and assignment safety; Phase 5 provides a PostgreSQL-backed durable event and worker runtime with retries, leases, dead-letter replay, and queue routing. Later domains remain target architecture until their implementation and tests land.
+The codebase is implemented as vertical phases. Phase 0-2 establish the tenant and conversation/AI core; Phase 3 provides the Web Widget channel boundary with durable inbound-event deduplication; Phase 4 provides deterministic workforce routing, queues, capacity, presence, and assignment safety; Phase 5 provides a PostgreSQL-backed durable event and worker runtime with retries, leases, dead-letter replay, and queue routing; Phase 6 provides the AI control plane, model registry/failover, guardrails, durable AI traceability, cost attribution, and evaluation. Later domains remain target architecture until their implementation and tests land.
 
 ## Documentation
 

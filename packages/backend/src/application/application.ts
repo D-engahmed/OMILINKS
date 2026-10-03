@@ -5,6 +5,9 @@ import type {
   Principal,
   RoutingPolicyConfig,
   PresenceState,
+  AiModel,
+  AiModelPolicyConfig,
+  AiAgentPolicyConfig,
 } from "../domain/types.js"
 import { RoutingService, type RouteConversationInput } from "./routing.js"
 import { AppError } from "../shared/errors.js"
@@ -13,6 +16,9 @@ import type { HandoffStatus } from "../domain/types.js"
 import { isUuid } from "../infrastructure/common.js"
 import type { Store } from "../infrastructure/store.js"
 import type { IdentityProvider } from "./identity.js"
+import { AiPlatformService } from "./ai-platform.js"
+import { EnvironmentAiGatewayResolver } from "../ai/provider-resolver.js"
+import type { AiModelGatewayResolver } from "../ai/model-router.js"
 
 export interface AuthenticatedContext {
   principal: Principal
@@ -23,6 +29,7 @@ export interface AuthenticatedContext {
 export interface ApplicationOptions {
   identity: IdentityProvider
   sessionTtlSeconds: number
+  aiGatewayResolver?: AiModelGatewayResolver
 }
 
 function unauthenticated(): AppError {
@@ -37,6 +44,13 @@ export class Application {
 
   get sessionTtlSeconds(): number {
     return this.options.sessionTtlSeconds
+  }
+
+  private aiPlatform(): AiPlatformService {
+    return new AiPlatformService(
+      this.store,
+      this.options.aiGatewayResolver ?? new EnvironmentAiGatewayResolver()
+    )
   }
 
   async login(input: { email: string; credential: string | null }) {
@@ -537,6 +551,156 @@ export class Application {
   async listHandoffs(ctx: AuthenticatedContext, status: HandoffStatus | undefined) {
     authorize(ctx.principal.membership, "conversation.read")
     return await this.store.listHandoffs(ctx.organizationId, status)
+  }
+
+  async listAiModels(ctx: AuthenticatedContext) {
+    authorize(ctx.principal.membership, "ai.manage")
+    return await this.store.listAiModels(ctx.organizationId)
+  }
+
+  async createAiModel(
+    ctx: AuthenticatedContext,
+    input: {
+      provider: string
+      model: string
+      displayName: string
+      credentialRef: string | null
+      baseUrl: string | null
+      inputCostPerMillion: number
+      outputCostPerMillion: number
+      capabilities: Record<string, unknown>
+    }
+  ) {
+    authorize(ctx.principal.membership, "ai.manage")
+    return await this.aiPlatform().createModel({
+      organizationId: ctx.organizationId,
+      ...input,
+    })
+  }
+
+  async setAiModelStatus(
+    ctx: AuthenticatedContext,
+    input: { modelId: string; status: AiModel["status"] }
+  ) {
+    authorize(ctx.principal.membership, "ai.manage")
+    try {
+      return await this.store.setAiModelStatus({
+        organizationId: ctx.organizationId,
+        ...input,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message === "AI_MODEL_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "AI model not found.")
+      }
+      throw error
+    }
+  }
+
+  async listAiModelPolicies(ctx: AuthenticatedContext) {
+    authorize(ctx.principal.membership, "ai.manage")
+    return await this.store.listAiModelPolicies(ctx.organizationId)
+  }
+
+  async createAiModelPolicy(
+    ctx: AuthenticatedContext,
+    input: { name: string; config: AiModelPolicyConfig }
+  ) {
+    authorize(ctx.principal.membership, "ai.manage")
+    return await this.aiPlatform().publishModelPolicy({
+      organizationId: ctx.organizationId,
+      ...input,
+    })
+  }
+
+  async listAiAgents(ctx: AuthenticatedContext) {
+    authorize(ctx.principal.membership, "ai.manage")
+    return await this.store.listAiAgents(ctx.organizationId)
+  }
+
+  async createAiAgent(
+    ctx: AuthenticatedContext,
+    input: { workforceMemberId: string; name: string; purpose: string }
+  ) {
+    authorize(ctx.principal.membership, "ai.manage")
+    return await this.aiPlatform().createAgent({
+      organizationId: ctx.organizationId,
+      ...input,
+    })
+  }
+
+  async listAiAgentPolicies(
+    ctx: AuthenticatedContext,
+    agentId: string
+  ) {
+    authorize(ctx.principal.membership, "ai.manage")
+    return await this.store.listAiAgentPolicyVersions(
+      ctx.organizationId,
+      agentId
+    )
+  }
+
+  async createAiAgentPolicy(
+    ctx: AuthenticatedContext,
+    agentId: string,
+    config: AiAgentPolicyConfig
+  ) {
+    authorize(ctx.principal.membership, "ai.manage")
+    return await this.aiPlatform().publishAgentPolicy({
+      organizationId: ctx.organizationId,
+      agentId,
+      config,
+    })
+  }
+
+  async runAiAgent(
+    ctx: AuthenticatedContext,
+    input: { agentId: string; conversationId: string; inboundMessageId: string }
+  ) {
+    authorize(ctx.principal.membership, "conversation.send")
+
+    if (!isUuid(input.agentId) || !isUuid(input.conversationId) || !isUuid(input.inboundMessageId)) {
+      throw new AppError(400, "VALIDATION_ERROR", "agentId, conversationId and inboundMessageId must be valid ids.")
+    }
+
+    return await this.aiPlatform().runAgent({
+      organizationId: ctx.organizationId,
+      ...input,
+    })
+  }
+
+  async getAiRun(ctx: AuthenticatedContext, aiRunId: string) {
+    authorize(ctx.principal.membership, "conversation.read")
+    return await this.aiPlatform().getRun(ctx.organizationId, aiRunId)
+  }
+
+  async evaluateAiRun(ctx: AuthenticatedContext, aiRunId: string) {
+    authorize(ctx.principal.membership, "ai.manage")
+    return await this.aiPlatform().evaluateRun(
+      ctx.organizationId,
+      aiRunId
+    )
+  }
+
+  async listAiEvaluations(ctx: AuthenticatedContext, aiRunId: string) {
+    authorize(ctx.principal.membership, "conversation.read")
+    return await this.aiPlatform().listEvaluations(ctx.organizationId, aiRunId)
+  }
+
+  async createAiEvaluation(
+    ctx: AuthenticatedContext,
+    input: {
+      aiRunId: string
+      evaluatorType: "RULE" | "HUMAN" | "MODEL"
+      score: number
+      dimensions: Record<string, unknown>
+      notes: string | null
+    }
+  ) {
+    authorize(ctx.principal.membership, "ai.manage")
+    return await this.aiPlatform().createEvaluation({
+      organizationId: ctx.organizationId,
+      ...input,
+    })
   }
 
   async listAiRuns(ctx: AuthenticatedContext, conversationId: string) {

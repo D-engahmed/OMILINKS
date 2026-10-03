@@ -13,6 +13,12 @@ const APP_ROLE = "omnilinks_app"
 const APP_PASSWORD = "omnilinks_app_test"
 
 const TABLES = [
+  "ai_evaluations",
+  "ai_agent_policy_versions",
+  "ai_agents",
+  "ai_model_policy_versions",
+  "ai_model_policies",
+  "ai_models",
   "event_inbox",
   "worker_leases",
   "routing_candidates",

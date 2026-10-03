@@ -16,6 +16,7 @@ const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "knowledge.manage",
     "integration.read",
     "integration.manage",
+    "ai.manage",
   ],
   ADMIN: [
     "organization.manage",
@@ -31,6 +32,7 @@ const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "knowledge.manage",
     "integration.read",
     "integration.manage",
+    "ai.manage",
   ],
   SUPERVISOR: [
     "customer.read",
@@ -43,6 +45,7 @@ const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "knowledge.read",
     "knowledge.manage",
     "integration.read",
+    "ai.manage",
   ],
   AGENT: [
     "customer.read",

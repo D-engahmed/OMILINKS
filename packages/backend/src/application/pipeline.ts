@@ -9,6 +9,7 @@ import {
   wantsHuman,
 } from "../ai/prompt.js"
 import { Bm25Retriever, type Retriever, type ScoredChunk } from "../ai/retrieval.js"
+import type { GuardrailDecision } from "../ai/guardrails.js"
 import type {
   AiRun,
   AiRunInput,
@@ -36,6 +37,19 @@ export interface PipelineOptions {
   retrievalK?: number
   historyLimit?: number
   maxTokens?: number
+  inputGuardrail?: (content: string) => GuardrailDecision
+  outputGuardrail?: (answer: string) => GuardrailDecision
+  costCalculator?: (usage: {
+    inputTokens: number | null
+    outputTokens: number | null
+    provider: string
+    model: string
+  }) => number
+  promptVersion?: string
+  governance?: {
+    agentId: string
+    agentPolicyVersionId: string
+  }
 }
 
 export interface InboundResult {
@@ -57,6 +71,8 @@ interface Usage {
   inputTokens: number | null
   outputTokens: number | null
   latencyMs: number
+  modelRegistryId?: string | null
+  costUsd?: number | null
 }
 
 const round = (value: number) => Math.round(value * 10_000) / 10_000
@@ -243,13 +259,17 @@ export class ConversationPipeline {
       organizationId,
       conversationId,
       inboundMessageId,
-      promptVersion: PROMPT_VERSION,
+      promptVersion: this.options.promptVersion ?? PROMPT_VERSION,
       provider: null as string | null,
       model: null as string | null,
       inputTokens: null as number | null,
       outputTokens: null as number | null,
       latencyMs: null as number | null,
       error: null as string | null,
+      agentId: this.options.governance?.agentId ?? null,
+      agentPolicyVersionId: this.options.governance?.agentPolicyVersionId ?? null,
+      modelRegistryId: null,
+      costUsd: null,
     }
 
     const handoff = (
@@ -278,6 +298,19 @@ export class ConversationPipeline {
 
     if (wantsHuman(inbound.content)) {
       return handoff("CUSTOMER_REQUESTED_HUMAN", [], [])
+    }
+
+    if (this.options.inputGuardrail) {
+      const inputGuardrail = this.options.inputGuardrail(inbound.content)
+      if (!inputGuardrail.allowed) {
+        return handoff(
+          "POLICY_BLOCKED",
+          [],
+          [],
+          undefined,
+          "input:" + inputGuardrail.code
+        )
+      }
     }
 
     const chunks = await this.store.listActiveChunks(organizationId)
@@ -310,6 +343,16 @@ export class ConversationPipeline {
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
         latencyMs: result.latencyMs,
+        modelRegistryId: result.modelRegistryId ?? null,
+        costUsd:
+          this.options.costCalculator?.({
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            provider: result.provider,
+            model: result.model,
+          }) ??
+          result.costUsd ??
+          null,
       }
     } catch (error) {
       return handoff(
@@ -329,6 +372,19 @@ export class ConversationPipeline {
 
     if (!answer.canAnswer) {
       return handoff("MODEL_COULD_NOT_ANSWER", retrieved, titles, usage)
+    }
+
+    if (this.options.outputGuardrail) {
+      const outputGuardrail = this.options.outputGuardrail(answer.answer)
+      if (!outputGuardrail.allowed) {
+        return handoff(
+          "POLICY_BLOCKED",
+          retrieved,
+          titles,
+          usage,
+          "output:" + outputGuardrail.code
+        )
+      }
     }
 
     const cited = new Set(

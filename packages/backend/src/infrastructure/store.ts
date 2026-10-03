@@ -38,6 +38,14 @@ import type {
   RoutingEvaluationCandidate,
   EventInbox,
   WorkerLease,
+  AiModel,
+  AiModelPolicy,
+  AiModelPolicyVersion,
+  AiAgent,
+  AiAgentPolicyVersion,
+  AiAgentPolicyConfig,
+  AiEvaluation,
+  AiExecutionContext,
 } from "../domain/types.js"
 
 import { hashRequest, hashToken, normalizeEmail } from "./common.js"
@@ -135,6 +143,41 @@ export interface CommitRoutingAssignmentInput {
   reason: string
 }
 
+export interface CreateAiModelInput {
+  organizationId: string
+  provider: string
+  model: string
+  displayName: string
+  credentialRef: string | null
+  baseUrl: string | null
+  inputCostPerMillion: number
+  outputCostPerMillion: number
+  capabilities: Record<string, unknown>
+}
+export interface CreateAiModelPolicyVersionInput {
+  organizationId: string
+  name: string
+  config: import("../domain/types.js").AiModelPolicyConfig
+}
+export interface CreateAiAgentInput {
+  organizationId: string
+  workforceMemberId: string
+  name: string
+  purpose: string
+}
+export interface CreateAiAgentPolicyVersionInput {
+  organizationId: string
+  agentId: string
+  config: AiAgentPolicyConfig
+}
+export interface CreateAiEvaluationInput {
+  organizationId: string
+  aiRunId: string
+  evaluatorType: AiEvaluation["evaluatorType"]
+  score: number
+  dimensions: Record<string, unknown>
+  notes: string | null
+}
 export interface PublishOutboxBatchInput {
   organizationId: string
   publisherId: string
@@ -296,6 +339,21 @@ export interface Store {
   heartbeatWorkerLease(workerId: string, leaseSeconds: number): Promise<WorkerLease>
   releaseWorkerLease(workerId: string): Promise<void>
 
+  createAiModel(input: CreateAiModelInput): Promise<AiModel>
+  listAiModels(organizationId: string): Promise<AiModel[]>
+  setAiModelStatus(input: { organizationId: string; modelId: string; status: AiModel["status"] }): Promise<AiModel>
+  createAiModelPolicyVersion(input: CreateAiModelPolicyVersionInput): Promise<{ policy: AiModelPolicy; version: AiModelPolicyVersion }>
+  listAiModelPolicies(organizationId: string): Promise<Array<AiModelPolicy & { versions: AiModelPolicyVersion[] }>>
+  getPublishedAiModelPolicy(organizationId: string, name: string): Promise<{ policy: AiModelPolicy; version: AiModelPolicyVersion } | null>
+  createAiAgent(input: CreateAiAgentInput): Promise<AiAgent>
+  listAiAgents(organizationId: string): Promise<AiAgent[]>
+  createAiAgentPolicyVersion(input: CreateAiAgentPolicyVersionInput): Promise<AiAgentPolicyVersion>
+  listAiAgentPolicyVersions(organizationId: string, agentId: string): Promise<AiAgentPolicyVersion[]>
+  getAiExecutionContext(organizationId: string, agentId: string): Promise<AiExecutionContext | null>
+  getAiRun(organizationId: string, aiRunId: string): Promise<AiRun | null>
+  createAiEvaluation(input: CreateAiEvaluationInput): Promise<AiEvaluation>
+  listAiEvaluations(organizationId: string, aiRunId: string): Promise<AiEvaluation[]>
+
   listMessages(
     organizationId: string,
     conversationId: string,
@@ -443,6 +501,12 @@ export class MemoryStore implements Store {
   private readonly outboxEvents = new Map<string, OutboxEvent>()
   private readonly eventInbox = new Map<string, EventInbox>()
   private readonly workerLeases = new Map<string, WorkerLease>()
+  private readonly aiModels = new Map<string, AiModel>()
+  private readonly aiModelPolicies = new Map<string, AiModelPolicy>()
+  private readonly aiModelPolicyVersions = new Map<string, AiModelPolicyVersion>()
+  private readonly aiAgents = new Map<string, AiAgent>()
+  private readonly aiAgentPolicyVersions = new Map<string, AiAgentPolicyVersion>()
+  private readonly aiEvaluations = new Map<string, AiEvaluation>()
 
   private readonly idempotency = new Map<
     string,
@@ -2147,6 +2211,136 @@ export class MemoryStore implements Store {
     )
   }
 
+  async createAiModel(input: CreateAiModelInput): Promise<AiModel> {
+    const provider = input.provider.trim().toLowerCase()
+    const modelName = input.model.trim()
+    if ([...this.aiModels.values()].some((item) => item.organizationId === input.organizationId && item.provider === provider && item.model === modelName)) {
+      throw new Error('AI_MODEL_EXISTS')
+    }
+    const now = new Date().toISOString()
+    const model: AiModel = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      provider,
+      model: modelName,
+      displayName: input.displayName.trim(),
+      credentialRef: input.credentialRef?.trim() || null,
+      baseUrl: input.baseUrl?.trim() || null,
+      inputCostPerMillion: input.inputCostPerMillion,
+      outputCostPerMillion: input.outputCostPerMillion,
+      capabilities: clone(input.capabilities),
+      status: 'ACTIVE',
+      createdAt: now,
+      updatedAt: now,
+    }
+    this.aiModels.set(model.id, model)
+    return clone(model)
+  }
+
+  async listAiModels(organizationId: string): Promise<AiModel[]> {
+    return clone([...this.aiModels.values()].filter((item) => item.organizationId === organizationId).sort((a, b) => a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model)))
+  }
+
+  async setAiModelStatus(input: { organizationId: string; modelId: string; status: AiModel['status'] }): Promise<AiModel> {
+    const model = this.aiModels.get(input.modelId)
+    if (!model || model.organizationId !== input.organizationId) throw new Error('AI_MODEL_NOT_FOUND')
+    model.status = input.status
+    model.updatedAt = new Date().toISOString()
+    return clone(model)
+  }
+
+  async createAiModelPolicyVersion(input: CreateAiModelPolicyVersionInput) {
+    let policy = [...this.aiModelPolicies.values()].find((item) => item.organizationId === input.organizationId && item.name === input.name.trim())
+    const now = new Date().toISOString()
+    if (!policy) {
+      policy = { id: randomUUID(), organizationId: input.organizationId, name: input.name.trim(), status: 'ACTIVE', createdAt: now, updatedAt: now }
+      this.aiModelPolicies.set(policy.id, policy)
+    }
+    for (const modelId of input.config.modelIds) {
+      const model = this.aiModels.get(modelId)
+      if (!model || model.organizationId !== input.organizationId) throw new Error('AI_MODEL_NOT_FOUND')
+    }
+    const versions = [...this.aiModelPolicyVersions.values()].filter((item) => item.organizationId === input.organizationId && item.policyId === policy.id)
+    const version: AiModelPolicyVersion = { id: randomUUID(), organizationId: input.organizationId, policyId: policy.id, version: Math.max(0, ...versions.map((item) => item.version)) + 1, status: 'PUBLISHED', config: clone(input.config), createdAt: now }
+    for (const item of versions) if (item.status === 'PUBLISHED') item.status = 'RETIRED'
+    this.aiModelPolicyVersions.set(version.id, version)
+    policy.updatedAt = now
+    return { policy: clone(policy), version: clone(version) }
+  }
+
+  async listAiModelPolicies(organizationId: string) {
+    return clone([...this.aiModelPolicies.values()].filter((item) => item.organizationId === organizationId).map((policy) => ({ ...policy, versions: [...this.aiModelPolicyVersions.values()].filter((item) => item.policyId === policy.id).sort((a, b) => a.version - b.version) })))
+  }
+
+  async getPublishedAiModelPolicy(organizationId: string, name: string) {
+    const policy = [...this.aiModelPolicies.values()].find((item) => item.organizationId === organizationId && item.name === name && item.status === 'ACTIVE')
+    if (!policy) return null
+    const version = [...this.aiModelPolicyVersions.values()].filter((item) => item.policyId === policy.id && item.status === 'PUBLISHED').sort((a, b) => b.version - a.version)[0]
+    return version ? { policy: clone(policy), version: clone(version) } : null
+  }
+  async createAiAgent(input: CreateAiAgentInput): Promise<AiAgent> {
+    if ([...this.aiAgents.values()].some((item) => item.organizationId === input.organizationId && item.name === input.name.trim())) throw new Error('AI_AGENT_EXISTS')
+    const member = this.workforce.get(input.workforceMemberId)
+    if (!member || member.organizationId !== input.organizationId || member.type !== 'AI') throw new Error('AI_WORKFORCE_MEMBER_NOT_FOUND')
+    const now = new Date().toISOString()
+    const agent: AiAgent = { id: randomUUID(), organizationId: input.organizationId, workforceMemberId: member.id, name: input.name.trim(), purpose: input.purpose.trim(), status: 'DRAFT', createdAt: now, updatedAt: now }
+    this.aiAgents.set(agent.id, agent)
+    return clone(agent)
+  }
+
+  async listAiAgents(organizationId: string): Promise<AiAgent[]> {
+    return clone([...this.aiAgents.values()].filter((item) => item.organizationId === organizationId).sort((a, b) => a.name.localeCompare(b.name)))
+  }
+
+  async createAiAgentPolicyVersion(input: CreateAiAgentPolicyVersionInput): Promise<AiAgentPolicyVersion> {
+    const agent = this.aiAgents.get(input.agentId)
+    if (!agent || agent.organizationId !== input.organizationId) throw new Error('AI_AGENT_NOT_FOUND')
+    const modelPolicy = this.aiModelPolicies.get(input.config.modelPolicyId)
+    if (!modelPolicy || modelPolicy.organizationId !== input.organizationId || modelPolicy.status !== 'ACTIVE') throw new Error('AI_MODEL_POLICY_NOT_FOUND')
+    const versions = [...this.aiAgentPolicyVersions.values()].filter((item) => item.organizationId === input.organizationId && item.agentId === agent.id)
+    const now = new Date().toISOString()
+    const version: AiAgentPolicyVersion = { id: randomUUID(), organizationId: input.organizationId, agentId: agent.id, version: Math.max(0, ...versions.map((item) => item.version)) + 1, status: 'PUBLISHED', config: clone(input.config), createdAt: now }
+    for (const item of versions) if (item.status === 'PUBLISHED') item.status = 'RETIRED'
+    this.aiAgentPolicyVersions.set(version.id, version)
+    agent.status = 'PUBLISHED'
+    agent.updatedAt = now
+    return clone(version)
+  }
+
+  async listAiAgentPolicyVersions(organizationId: string, agentId: string): Promise<AiAgentPolicyVersion[]> {
+    return clone([...this.aiAgentPolicyVersions.values()].filter((item) => item.organizationId === organizationId && item.agentId === agentId).sort((a, b) => a.version - b.version))
+  }
+
+  async getAiExecutionContext(organizationId: string, agentId: string): Promise<AiExecutionContext | null> {
+    const agent = this.aiAgents.get(agentId)
+    if (!agent || agent.organizationId !== organizationId) return null
+    const agentPolicy = [...this.aiAgentPolicyVersions.values()].filter((item) => item.organizationId === organizationId && item.agentId === agentId && item.status === 'PUBLISHED').sort((a, b) => b.version - a.version)[0]
+    if (!agentPolicy) return null
+    const modelPolicy = this.aiModelPolicies.get(agentPolicy.config.modelPolicyId)
+    if (!modelPolicy || modelPolicy.organizationId !== organizationId || modelPolicy.status !== 'ACTIVE') return null
+    const modelPolicyVersion = [...this.aiModelPolicyVersions.values()].filter((item) => item.organizationId === organizationId && item.policyId === modelPolicy.id && item.status === 'PUBLISHED').sort((a, b) => b.version - a.version)[0]
+    if (!modelPolicyVersion) return null
+    const models = modelPolicyVersion.config.modelIds.map((id) => this.aiModels.get(id)).filter((item): item is AiModel => !!item && item.organizationId === organizationId)
+    return { agent: clone(agent), agentPolicy: clone(agentPolicy), modelPolicy: clone(modelPolicy), modelPolicyVersion: clone(modelPolicyVersion), models: clone(models) }
+  }
+
+  async getAiRun(organizationId: string, aiRunId: string): Promise<AiRun | null> {
+    const run = this.aiRuns.get(aiRunId)
+    return run && run.organizationId === organizationId ? clone(run) : null
+  }
+
+  async createAiEvaluation(input: CreateAiEvaluationInput): Promise<AiEvaluation> {
+    if (!Number.isFinite(input.score) || input.score < 0 || input.score > 1) throw new Error('INVALID_AI_EVALUATION_SCORE')
+    const run = this.aiRuns.get(input.aiRunId)
+    if (!run || run.organizationId !== input.organizationId) throw new Error('AI_RUN_NOT_FOUND')
+    const evaluation: AiEvaluation = { id: randomUUID(), organizationId: input.organizationId, aiRunId: input.aiRunId, evaluatorType: input.evaluatorType, score: input.score, dimensions: clone(input.dimensions), notes: input.notes, createdAt: new Date().toISOString() }
+    this.aiEvaluations.set(evaluation.id, evaluation)
+    return clone(evaluation)
+  }
+
+  async listAiEvaluations(organizationId: string, aiRunId: string): Promise<AiEvaluation[]> {
+    return clone([...this.aiEvaluations.values()].filter((item) => item.organizationId === organizationId && item.aiRunId === aiRunId).sort((a, b) => a.createdAt.localeCompare(b.createdAt)))
+  }
   async listMessages(
     organizationId: string,
     conversationId: string,
@@ -2177,6 +2371,10 @@ export class MemoryStore implements Store {
 
     const run: AiRun = {
       ...clone(input),
+      agentId: input.agentId ?? null,
+      agentPolicyVersionId: input.agentPolicyVersionId ?? null,
+      modelRegistryId: input.modelRegistryId ?? null,
+      costUsd: input.costUsd ?? null,
       id: randomUUID(),
       replyMessageId: links.replyMessageId,
       handoffId: links.handoffId,
