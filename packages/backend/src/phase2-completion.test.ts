@@ -63,7 +63,10 @@ storeTest("phase 2: answered conversations emit durable message and AI-run outbo
     )
   )
 
-  assert.equal(result.ai?.status, "answered")
+  if (result.ai?.status !== "answered") {
+    throw new Error("Expected an answered AI result")
+  }
+  const aiRun = result.ai.run
 
   const events = await store.listOutboxEvents(
     provisioned.principal.membership.organizationId
@@ -90,7 +93,7 @@ storeTest("phase 2: answered conversations emit durable message and AI-run outbo
   const runEvent = events.find((event) => event.eventType === "ai.run.completed")
   assert.ok(runEvent)
   assert.equal(runEvent.aggregateType, "ai_run")
-  assert.equal(runEvent.aggregateId, result.ai?.run.id)
+  assert.equal(runEvent.aggregateId, aiRun.id)
   assert.equal(runEvent.causationId, result.inbound.message.id)
 })
 
@@ -254,7 +257,10 @@ storeTest("phase 2: AI run history is exposed through the authenticated API", as
 
   assert.equal(response.status, 200)
   const body = (await response.json()) as { items: { id: string; outcome: string }[] }
+  if (result.ai?.status !== "answered") {
+    throw new Error("Expected an answered AI result")
+  }
   assert.equal(body.items.length, 1)
-  assert.equal(body.items[0]?.id, result.ai?.run.id)
+  assert.equal(body.items[0]?.id, result.ai.run.id)
   assert.equal(body.items[0]?.outcome, "ANSWERED")
 })
