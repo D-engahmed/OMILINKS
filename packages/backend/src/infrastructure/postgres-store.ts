@@ -25,6 +25,19 @@ import type {
   Session,
   User,
   WorkforceMember,
+  WorkforceSkill,
+  WorkforceMemberSkill,
+  WorkforcePresence,
+  WorkforceCapacity,
+  WorkforceTeam,
+  WorkforceQueue,
+  QueueItem,
+  RoutingPolicy,
+  RoutingPolicyConfig,
+  RoutingPolicyVersion,
+  RoutingDecision,
+  RoutingCandidate,
+  RoutingEvaluationCandidate,
 } from "../domain/types.js"
 
 import {
@@ -202,6 +215,131 @@ const toWorkforceMember = (row: Row): WorkforceMember => ({
   updatedAt: iso(row.updated_at),
 })
 
+const toWorkforceSkill = (row: Row): WorkforceSkill => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  code: str(row.code),
+  name: str(row.name),
+  status: str(row.status) as WorkforceSkill["status"],
+  createdAt: iso(row.created_at),
+})
+
+const toWorkforceMemberSkill = (row: Row): WorkforceMemberSkill => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  workforceMemberId: str(row.workforce_member_id),
+  skillId: str(row.skill_id),
+  proficiency: num(row.proficiency),
+  createdAt: iso(row.created_at),
+  updatedAt: iso(row.updated_at),
+})
+
+const toWorkforcePresence = (row: Row): WorkforcePresence => ({
+  workforceMemberId: str(row.workforce_member_id),
+  organizationId: str(row.organization_id),
+  state: str(row.state) as WorkforcePresence["state"],
+  observedAt: iso(row.observed_at),
+  expiresAt: iso(row.expires_at),
+  source: str(row.source),
+  version: num(row.version),
+})
+
+const toWorkforceCapacity = (row: Row): WorkforceCapacity => ({
+  workforceMemberId: str(row.workforce_member_id),
+  organizationId: str(row.organization_id),
+  maxConcurrentWork: num(row.max_concurrent_work),
+  reservedWork: num(row.reserved_work),
+  activeWork: num(row.active_work ?? 0),
+  effectiveCapacity: num(
+    row.effective_capacity ??
+      num(row.max_concurrent_work) - num(row.reserved_work) - num(row.active_work ?? 0)
+  ),
+  updatedAt: iso(row.updated_at),
+  version: num(row.version),
+})
+
+const toWorkforceTeam = (row: Row): WorkforceTeam => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  name: str(row.name),
+  status: str(row.status) as WorkforceTeam["status"],
+  createdAt: iso(row.created_at),
+  updatedAt: iso(row.updated_at),
+})
+
+const toWorkforceQueue = (row: Row): WorkforceQueue => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  name: str(row.name),
+  status: str(row.status) as WorkforceQueue["status"],
+  requiredSkillCodes: Array.isArray(row.required_skill_codes)
+    ? (row.required_skill_codes as string[])
+    : [],
+  createdAt: iso(row.created_at),
+  updatedAt: iso(row.updated_at),
+})
+
+const toQueueItem = (row: Row): QueueItem => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  queueId: str(row.queue_id),
+  conversationId: str(row.conversation_id),
+  status: str(row.status) as QueueItem["status"],
+  priority: str(row.priority) as QueueItem["priority"],
+  enqueuedAt: iso(row.enqueued_at),
+  lastRoutedAt: isoOrNull(row.last_routed_at),
+  attempts: num(row.attempts),
+  version: num(row.version),
+})
+
+const toRoutingPolicy = (row: Row): RoutingPolicy => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  name: str(row.name),
+  status: str(row.status) as RoutingPolicy["status"],
+  createdAt: iso(row.created_at),
+})
+
+const toRoutingPolicyVersion = (row: Row): RoutingPolicyVersion => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  policyId: str(row.policy_id),
+  version: num(row.version),
+  status: str(row.status) as RoutingPolicyVersion["status"],
+  config: row.config as RoutingPolicyConfig,
+  createdAt: iso(row.created_at),
+})
+
+const toRoutingDecision = (row: Row): RoutingDecision => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  conversationId: str(row.conversation_id),
+  policyVersionId: str(row.policy_version_id),
+  outcome: str(row.outcome) as RoutingDecision["outcome"],
+  selectedWorkforceMemberId: strOrNull(row.selected_workforce_member_id),
+  queueId: strOrNull(row.queue_id),
+  reasonCodes: Array.isArray(row.reason_codes)
+    ? (row.reason_codes as string[])
+    : [],
+  requestedSkills: Array.isArray(row.requested_skills)
+    ? (row.requested_skills as string[])
+    : [],
+  contextSnapshot: row.context_snapshot as Record<string, unknown>,
+  createdAt: iso(row.created_at),
+})
+
+const toRoutingCandidate = (row: Row): RoutingCandidate => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  routingDecisionId: str(row.routing_decision_id),
+  workforceMemberId: str(row.workforce_member_id),
+  eligible: Boolean(row.eligible),
+  rejectionCode: strOrNull(row.rejection_code),
+  score: Number(row.score),
+  snapshot: row.snapshot as Record<string, unknown>,
+  createdAt: iso(row.created_at),
+})
+
 const toAssignment = (row: Row): Assignment => ({
   id: str(row.id),
   organizationId: str(row.organization_id),
@@ -211,6 +349,7 @@ const toAssignment = (row: Row): Assignment => ({
   assignedAt: iso(row.assigned_at),
   releasedAt: isoOrNull(row.released_at),
   reason: str(row.reason),
+  routingDecisionId: strOrNull(row.routing_decision_id),
   version: num(row.version),
 })
 
