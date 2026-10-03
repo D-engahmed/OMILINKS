@@ -1427,13 +1427,14 @@ export class MemoryStore implements Store {
     displayName: string
     type: "HUMAN" | "AI"
   }): Promise<WorkforceMember> {
-    if (
-      input.userId !== null &&
-      !this.activeMemberships(input.userId).some(
-        (membership) => membership.organizationId === input.organizationId
+    if (input.userId !== null) {
+      const membership = [...this.memberships.values()].find(
+        (value) =>
+          value.userId === input.userId &&
+          value.organizationId === input.organizationId &&
+          value.status === "ACTIVE"
       )
-    ) {
-      throw new Error("USER_NOT_FOUND")
+      if (!membership) throw new Error("USER_NOT_FOUND")
     }
 
     const now = new Date().toISOString()
@@ -1447,8 +1448,28 @@ export class MemoryStore implements Store {
       createdAt: now,
       updatedAt: now,
     }
-
     this.workforce.set(member.id, member)
+
+    this.workforcePresence.set(member.id, {
+      workforceMemberId: member.id,
+      organizationId: input.organizationId,
+      state: "OFFLINE",
+      observedAt: now,
+      expiresAt: now,
+      source: "create",
+      version: 1,
+    })
+    this.workforceCapacity.set(member.id, {
+      workforceMemberId: member.id,
+      organizationId: input.organizationId,
+      maxConcurrentWork: 5,
+      reservedWork: 0,
+      activeWork: 0,
+      effectiveCapacity: 5,
+      updatedAt: now,
+      version: 1,
+    })
+
     return clone(member)
   }
 
