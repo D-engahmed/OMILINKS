@@ -38,6 +38,7 @@ export interface WorkerRuntimeOptions {
   publisherId?: string
   publishBatchSize?: number
   classConcurrency?: Record<string, number>
+  onError?: (error: unknown) => void
 }
 
 export const BACKOFF = {
@@ -91,7 +92,10 @@ interface WorkerState {
 export class WorkerRuntime {
   private readonly publisher: OutboxPublisher
   private readonly classConcurrency: Record<string, number>
+  private readonly onError: (error: unknown) => void
   private readonly states = new Map<string, WorkerState>()
+  private stopRequested = false
+  private loopPromise: Promise<void> | null = null
 
   constructor(
     private readonly store: Store,
@@ -110,6 +114,9 @@ export class WorkerRuntime {
     )
 
     this.classConcurrency = options.classConcurrency ?? {}
+    this.onError = options.onError ?? ((error) => {
+      console.error("OMNILINKS worker runtime error", error)
+    })
   }
 
   async runOnce(): Promise<{
@@ -134,25 +141,41 @@ export class WorkerRuntime {
   }
 
   async start(pollIntervalMs = 250): Promise<() => Promise<void>> {
-    let stopped = false
-
-    const loop = async (): Promise<void> => {
-      while (!stopped) {
-        await this.runOnce()
-        if (stopped) break
-        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
-      }
+    if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 25 || pollIntervalMs > 60_000) {
+      throw new Error("INVALID_POLL_INTERVAL")
     }
 
-    void loop()
+    if (this.loopPromise) {
+      throw new Error("WORKER_RUNTIME_ALREADY_STARTED")
+    }
+
+    this.stopRequested = false
+
+    this.loopPromise = (async () => {
+      while (!this.stopRequested) {
+        try {
+          await this.runOnce()
+        } catch (error) {
+          this.onError(error)
+          await new Promise((resolve) =>
+            setTimeout(resolve, Math.min(5_000, pollIntervalMs * 4))
+          )
+        }
+
+        if (this.stopRequested) break
+
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+      }
+    })()
 
     return async () => {
-      stopped = true
       await this.stop()
     }
   }
 
   async stop(): Promise<void> {
+    this.stopRequested = true
+
     for (const consumer of this.consumers) {
       const state = this.states.get(consumer.consumerId)
       if (!state?.leaseHeld) continue
