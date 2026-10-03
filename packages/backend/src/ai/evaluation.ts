@@ -1,4 +1,4 @@
-import type { AiRun, AiEvaluation, RetrievedChunk } from "../domain/types.js"
+import type { AiRun, RetrievedChunk } from "../domain/types.js"
 
 export interface AiRuleEvaluation {
   score: number
