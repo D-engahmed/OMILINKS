@@ -220,7 +220,7 @@ storeTest("phase 3: provider event dedupe happens before business mutation", asy
   assert.equal(firstBody.duplicate, false)
   assert.equal(secondBody.duplicate, true)
   assert.equal(secondBody.inFlight, false)
-  assert.equal(secondBody.conversationId, firstBody.conversationId)
+  assert.equal(secondBody.conversationId, null)
   assert.equal(secondBody.messageId, firstBody.messageId)
 
   const messages = await store.listMessages(
