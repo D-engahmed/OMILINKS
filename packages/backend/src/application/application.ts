@@ -251,6 +251,14 @@ export class Application {
 
     const allowedOrigins = [...new Set(input.allowedOrigins.map((origin) => origin.trim()).filter(Boolean))]
 
+    if (allowedOrigins.length === 0) {
+      throw new AppError(
+        400,
+        "VALIDATION_ERROR",
+        "At least one allowed origin is required for a widget integration."
+      )
+    }
+
     for (const origin of allowedOrigins) {
       try {
         const url = new URL(origin)
