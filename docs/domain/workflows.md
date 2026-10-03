@@ -1,6 +1,6 @@
 # Workflow Domain — Implementation Specification
 
-> Status: **Target implementation blueprint**
+> Status: **Implemented vertical slice; broader workflow domain remains target architecture**
 
 ## 1. Workflow Model
 
