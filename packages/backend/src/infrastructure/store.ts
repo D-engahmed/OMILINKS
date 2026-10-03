@@ -134,6 +134,11 @@ export interface CommitRoutingAssignmentInput {
 }
 
 export interface Store {
+  setWorkforceMemberStatus(input: {
+    organizationId: string
+    workforceMemberId: string
+    status: WorkforceMember["status"]
+  }): Promise<WorkforceMember>
   listWorkforceMembers(organizationId: string): Promise<WorkforceMember[]>
   getWorkforceMember(organizationId: string, workforceMemberId: string): Promise<WorkforceMember | null>
   createWorkforceSkill(input: {
@@ -968,6 +973,20 @@ export class MemoryStore implements Store {
 
     this.conversations.set(conversation.id, conversation)
     return clone(conversation)
+  }
+
+  async setWorkforceMemberStatus(input: {
+    organizationId: string
+    workforceMemberId: string
+    status: WorkforceMember["status"]
+  }): Promise<WorkforceMember> {
+    const member = this.workforce.get(input.workforceMemberId)
+    if (!member || member.organizationId !== input.organizationId) {
+      throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+    }
+    member.status = input.status
+    member.updatedAt = new Date().toISOString()
+    return clone(member)
   }
 
   async listWorkforceMembers(organizationId: string): Promise<WorkforceMember[]> {
