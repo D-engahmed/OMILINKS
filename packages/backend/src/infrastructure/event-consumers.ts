@@ -2,6 +2,7 @@ import type { EventInbox } from "../domain/types.js"
 import { RoutingService } from "../application/routing.js"
 import type { Store } from "./store.js"
 import type { EventConsumer, WorkerEventContext } from "./event-runtime.js"
+import { createWorkflowEventConsumer } from "./workflow-consumer.js"
 
 function eventConversationId(event: EventInbox): string | null {
   const raw = event.payload["conversation"] ?? event.payload["message"] ?? event.payload["queueItem"]
@@ -57,6 +58,7 @@ async function routeQueuedConversation(store: Store, context: WorkerEventContext
 
 export function createDefaultEventConsumers(store: Store): EventConsumer[] {
   return [
+    createWorkflowEventConsumer(store),
     {
       consumerId: "routing-worker",
       workerClass: "routing",
