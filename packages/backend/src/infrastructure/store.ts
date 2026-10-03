@@ -416,6 +416,7 @@ export interface Store {
   publishWorkflowVersion(organizationId: string, workflowVersionId: string): Promise<WorkflowVersion & { steps: WorkflowStep[] }>
   startWorkflow(input: StartWorkflowInput): Promise<{ trigger: WorkflowTrigger; run: WorkflowRun; created: boolean }>
   getWorkflowRun(organizationId: string, runId: string): Promise<WorkflowRun | null>
+  failWorkflowRun(input: { organizationId: string; runId: string; workerId: string; error: string }): Promise<WorkflowRun>
   listWorkflowStepRuns(organizationId: string, runId: string): Promise<WorkflowStepRun[]>
   startWorkflowStepRun(input: {
     organizationId: string
@@ -2470,6 +2471,18 @@ export class MemoryStore implements Store {
   async getWorkflowRun(organizationId: string, runId: string): Promise<WorkflowRun | null> {
     const run = this.workflowRuns.get(runId)
     return run && run.organizationId === organizationId ? clone(run) : null
+  }
+
+  async failWorkflowRun(input: { organizationId: string; runId: string; workerId: string; error: string }): Promise<WorkflowRun> {
+    const run = this.workflowRuns.get(input.runId)
+    if (!run || run.organizationId !== input.organizationId) throw new Error("WORKFLOW_RUN_NOT_FOUND")
+    if (run.leasedBy !== input.workerId) throw new Error("WORKFLOW_RUN_LEASE_MISMATCH")
+    run.status = "FAILED"
+    run.error = input.error.slice(0, 1000)
+    run.completedAt = new Date().toISOString()
+    run.leaseUntil = null
+    run.leasedBy = null
+    return clone(run)
   }
 
   async listWorkflowStepRuns(organizationId: string, runId: string): Promise<WorkflowStepRun[]> {
