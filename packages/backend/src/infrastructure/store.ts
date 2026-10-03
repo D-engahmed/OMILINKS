@@ -1377,31 +1377,80 @@ export class MemoryStore implements Store {
   async commitRoutingAssignment(input: CommitRoutingAssignmentInput): Promise<Assignment> {
     const conversation = this.conversations.get(input.conversationId)
     const member = this.workforce.get(input.workforceMemberId)
-    if (!conversation || conversation.organizationId !== input.organizationId) throw new Error("CONVERSATION_NOT_FOUND")
-    if (!member || member.organizationId !== input.organizationId) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
-    if (conversation.version !== input.expectedConversationVersion) throw new Error("STALE_VERSION")
+    const decision = this.routingDecisions.get(input.routingDecisionId)
+
+    if (!conversation || conversation.organizationId !== input.organizationId) {
+      throw new Error("CONVERSATION_NOT_FOUND")
+    }
+    if (!member || member.organizationId !== input.organizationId) {
+      throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+    }
+    if (
+      !decision ||
+      decision.organizationId !== input.organizationId ||
+      decision.conversationId !== input.conversationId ||
+      decision.selectedWorkforceMemberId !== input.workforceMemberId
+    ) {
+      throw new Error("ROUTING_DECISION_MISMATCH")
+    }
+    if (conversation.version !== input.expectedConversationVersion) {
+      throw new Error("STALE_VERSION")
+    }
     if (member.status !== "ACTIVE") throw new Error("WORKFORCE_MEMBER_DISABLED")
+
     const active = [...this.assignments.values()].some(
-      (assignment) => assignment.organizationId === input.organizationId && assignment.conversationId === input.conversationId && assignment.status === "ACTIVE"
+      (assignment) =>
+        assignment.organizationId === input.organizationId &&
+        assignment.conversationId === input.conversationId &&
+        assignment.status === "ACTIVE"
     )
     if (active) throw new Error("ACTIVE_ASSIGNMENT_EXISTS")
-    const presence = await this.getWorkforcePresence(input.organizationId, member.id)
+
+    const presence = this.workforcePresence.get(member.id)
     if (
       !presence ||
       presence.state !== "AVAILABLE" ||
       new Date(presence.expiresAt).getTime() <= Date.now() ||
-      new Date(presence.observedAt).getTime() <= Date.now() - input.presenceTtlSeconds * 1000
-    ) throw new Error("WORKER_NOT_ELIGIBLE")
-    const capacity = await this.getWorkforceCapacity(input.organizationId, member.id)
-    if (capacity.effectiveCapacity <= 0) throw new Error("CAPACITY_EXHAUSTED")
-    const memberSkills = await this.listMemberSkills(input.organizationId, member.id)
-    if (!input.requiredSkills.every((skill) => memberSkills.some((value) => value.code === skill))) {
+      new Date(presence.observedAt).getTime() <=
+        Date.now() - input.presenceTtlSeconds * 1000
+    ) {
+      throw new Error("WORKER_NOT_ELIGIBLE")
+    }
+
+    const capacity = this.workforceCapacity.get(member.id)
+    if (!capacity) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+    const activeWork = [...this.assignments.values()].filter(
+      (assignment) =>
+        assignment.organizationId === input.organizationId &&
+        assignment.workforceMemberId === member.id &&
+        assignment.status === "ACTIVE"
+    ).length
+    if (activeWork + capacity.reservedWork >= capacity.maxConcurrentWork) {
+      throw new Error("CAPACITY_EXHAUSTED")
+    }
+
+    const memberSkills = [...this.memberSkills.values()]
+      .filter(
+        (value) =>
+          value.organizationId === input.organizationId &&
+          value.workforceMemberId === member.id
+      )
+      .map((value) => this.workforceSkills.get(value.skillId)!)
+    if (
+      input.requiredSkills.some(
+        (skill) => !memberSkills.some((value) => value.code === skill)
+      )
+    ) {
       throw new Error("WORKER_SKILLS_CHANGED")
     }
-    if (input.teamId !== null) {
-      const memberInTeam = this.teamMembers.has(input.teamId + ":" + member.id)
-      if (!memberInTeam) throw new Error("WORKER_TEAM_CHANGED")
+
+    if (
+      input.teamId !== null &&
+      !this.teamMembers.has(input.teamId + ":" + member.id)
+    ) {
+      throw new Error("WORKER_TEAM_CHANGED")
     }
+
     const now = new Date().toISOString()
     const assignment: Assignment = {
       id: randomUUID(),
@@ -1416,15 +1465,23 @@ export class MemoryStore implements Store {
       version: 1,
     }
     this.assignments.set(assignment.id, assignment)
-    member.status = "ACTIVE"
-    capacity.activeWork += 1
-    capacity.effectiveCapacity = capacity.maxConcurrentWork - capacity.activeWork - capacity.reservedWork
-    this.workforceCapacity.set(member.id, capacity)
+
     conversation.status = "ASSIGNED"
     conversation.control = member.type === "AI" ? "ai" : "human"
     conversation.controlVersion += 1
     conversation.version += 1
     conversation.updatedAt = now
+
+    this.emitOutbox({
+      organizationId: input.organizationId,
+      eventType: "conversation.assignment.changed",
+      aggregateType: "conversation",
+      aggregateId: input.conversationId,
+      correlationId: input.routingDecisionId,
+      causationId: input.routingDecisionId,
+      payload: { assignment, routingDecisionId: input.routingDecisionId },
+    })
+
     return clone(assignment)
   }
 
