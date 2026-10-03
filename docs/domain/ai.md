@@ -1,6 +1,6 @@
 # AI Domain
 
-> Status: **Target production domain contract**
+> Status: **Implemented vertical slice; broader AI domain remains target architecture**
 
 The AI domain defines AI workforce configuration and policy. The execution machinery is specified in `docs/ai/agent-runtime.md`.
 
