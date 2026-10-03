@@ -13,6 +13,19 @@ const APP_ROLE = "omnilinks_app"
 const APP_PASSWORD = "omnilinks_app_test"
 
 const TABLES = [
+  "routing_candidates",
+  "routing_decisions",
+  "routing_policy_versions",
+  "routing_policies",
+  "queue_items",
+  "queue_skills",
+  "queues",
+  "team_members",
+  "teams",
+  "workforce_capacity",
+  "workforce_presence",
+  "workforce_member_skills",
+  "workforce_skills",
   "channel_inbound_events",
   "channel_integrations",
   "outbox_events",
