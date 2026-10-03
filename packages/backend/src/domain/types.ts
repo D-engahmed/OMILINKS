@@ -17,6 +17,7 @@ export type Permission =
   | "knowledge.manage"
   | "integration.read"
   | "integration.manage"
+  | "ai.manage"
 
 export type ConversationStatus =
   | "OPEN"
