@@ -1,6 +1,6 @@
 # Event Catalog
 
-> Status: **Target production event contract**
+> Status: **Implemented Phase 5 runtime contract**
 
 Events connect transactional domain changes to asynchronous workers, AI, billing, quality, analytics and external integrations.
 
@@ -203,7 +203,29 @@ Customer-created events do not grant authorization.
 
 Subscription changes can trigger entitlement refresh, but each consumer owns its own reaction.
 
-## 14. Acceptance Criteria
+## 14. Phase 5 Runtime
+
+Current execution path:
+
+```text
+business transaction
+  -> outbox_events
+  -> outbox publisher
+  -> event_inbox fan-out per consumer
+  -> leased worker
+  -> handler
+  -> PROCESSED
+  -> retry / DEAD
+  -> operator replay
+```
+
+`event_inbox` is the durable per-consumer execution state. Its `(organization_id, consumer_id, event_id)` uniqueness rule prevents duplicate work for a consumer. Processing rows carry leases so crashed workers can be reclaimed after expiry.
+
+The first real consumer is `routing-worker`. It reacts to `conversation.message.received` and `conversation.queue.entered` only when the conversation is still under queue control.
+
+Phase 5 is PostgreSQL-backed. Kafka or another external broker is deliberately deferred until throughput, fan-out, or deployment topology requires it.
+
+## 15. Acceptance Criteria
 
 - Business state and required outbox event commit atomically.
 - Duplicate deliveries cannot duplicate side effects.

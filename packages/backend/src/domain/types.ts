@@ -202,6 +202,45 @@ export interface OutboxEvent {
   createdAt: string
 }
 
+export type EventInboxStatus =
+  | "PENDING"
+  | "PROCESSING"
+  | "PROCESSED"
+  | "DEAD"
+
+export interface EventInbox {
+  id: string
+  organizationId: string
+  consumerId: string
+  workerClass: string
+  eventId: string
+  eventType: string
+  eventVersion: number
+  correlationId: string
+  causationId: string | null
+  aggregateType: string
+  aggregateId: string
+  payload: Record<string, unknown>
+  status: EventInboxStatus
+  attempts: number
+  availableAt: string
+  leaseUntil: string | null
+  leasedBy: string | null
+  lastError: string | null
+  processedAt: string | null
+  deadAt: string | null
+  createdAt: string
+}
+
+export interface WorkerLease {
+  workerId: string
+  workerClass: string
+  leaseUntil: string
+  heartbeatAt: string
+  metadata: Record<string, unknown>
+  createdAt: string
+}
+
 export interface WorkforceMember {
   id: string
   organizationId: string

@@ -13,6 +13,8 @@ const APP_ROLE = "omnilinks_app"
 const APP_PASSWORD = "omnilinks_app_test"
 
 const TABLES = [
+  "event_inbox",
+  "worker_leases",
   "routing_candidates",
   "routing_decisions",
   "routing_policy_versions",

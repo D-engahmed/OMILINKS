@@ -36,6 +36,8 @@ import type {
   RoutingDecision,
   RoutingCandidate,
   RoutingEvaluationCandidate,
+  EventInbox,
+  WorkerLease,
 } from "../domain/types.js"
 
 import { hashRequest, hashToken, normalizeEmail } from "./common.js"
@@ -133,6 +135,47 @@ export interface CommitRoutingAssignmentInput {
   reason: string
 }
 
+export interface PublishOutboxBatchInput {
+  organizationId: string
+  publisherId: string
+  subscriptions: Array<{
+    consumerId: string
+    workerClass: string
+    eventTypes: readonly string[]
+  }>
+  limit: number
+}
+
+export interface ClaimEventInboxBatchInput {
+  organizationId: string
+  consumerId: string
+  workerId: string
+  limit: number
+  leaseSeconds: number
+  maxAttempts: number
+}
+
+export interface FailEventInboxInput {
+  organizationId: string
+  inboxId: string
+  workerId: string
+  error: string
+  retryDelaySeconds: number
+  maxAttempts: number
+}
+
+export interface ReplayEventInboxInput {
+  organizationId: string
+  inboxId: string
+}
+
+export interface AcquireWorkerLeaseInput {
+  workerId: string
+  workerClass: string
+  leaseSeconds: number
+  metadata: Record<string, unknown>
+}
+
 export interface Store {
   setWorkforceMemberStatus(input: {
     organizationId: string
@@ -190,6 +233,11 @@ export interface Store {
     queueId: string
     conversationId: string
   }): Promise<QueueItem>
+  getActiveQueueItem(
+    organizationId: string,
+    conversationId: string
+  ): Promise<QueueItem | null>
+
   createOrPublishRoutingPolicy(input: {
     organizationId: string
     name: string
@@ -233,6 +281,21 @@ export interface Store {
   ): Promise<Conversation | null>
   appendMessage(input: AppendMessageInput): Promise<{ message: Message; created: boolean }>
   listOutboxEvents(organizationId: string): Promise<OutboxEvent[]>
+  listDeadEventInbox(input: {
+    organizationId: string
+    consumerId?: string
+    limit: number
+  }): Promise<EventInbox[]>
+  listOrganizationsForRuntime(): Promise<Organization[]>
+  publishOutboxBatch(input: PublishOutboxBatchInput): Promise<OutboxEvent[]>
+  claimEventInboxBatch(input: ClaimEventInboxBatchInput): Promise<EventInbox[]>
+  completeEventInbox(organizationId: string, inboxId: string, workerId: string): Promise<EventInbox>
+  failEventInbox(input: FailEventInboxInput): Promise<EventInbox>
+  replayDeadEventInbox(input: ReplayEventInboxInput): Promise<EventInbox>
+  acquireWorkerLease(input: AcquireWorkerLeaseInput): Promise<WorkerLease>
+  heartbeatWorkerLease(workerId: string, leaseSeconds: number): Promise<WorkerLease>
+  releaseWorkerLease(workerId: string): Promise<void>
+
   listMessages(
     organizationId: string,
     conversationId: string,
@@ -378,6 +441,9 @@ export class MemoryStore implements Store {
   private readonly channelInboundEvents = new Map<string, ChannelInboundEvent>()
   private readonly handoffs = new Map<string, Handoff>()
   private readonly outboxEvents = new Map<string, OutboxEvent>()
+  private readonly eventInbox = new Map<string, EventInbox>()
+  private readonly workerLeases = new Map<string, WorkerLease>()
+
   private readonly idempotency = new Map<
     string,
     { requestHash: string; userId: string }
@@ -1259,6 +1325,19 @@ export class MemoryStore implements Store {
     return clone([...this.queues.values()].filter((queue) => queue.organizationId === organizationId))
   }
 
+  async getActiveQueueItem(
+    organizationId: string,
+    conversationId: string
+  ): Promise<QueueItem | null> {
+    const item = [...this.queueItems.values()].find(
+      (candidate) =>
+        candidate.organizationId === organizationId &&
+        candidate.conversationId === conversationId &&
+        (candidate.status === "QUEUED" || candidate.status === "CLAIMED")
+    )
+    return item ? clone(item) : null
+  }
+
   async enqueueConversation(input: { organizationId: string; queueId: string; conversationId: string }): Promise<QueueItem> {
     const queue = this.queues.get(input.queueId)
     const conversation = this.conversations.get(input.conversationId)
@@ -1287,6 +1366,16 @@ export class MemoryStore implements Store {
     conversation.controlVersion += 1
     conversation.version += 1
     conversation.updatedAt = now
+
+    this.emitOutbox({
+      organizationId: input.organizationId,
+      eventType: "conversation.queue.entered",
+      aggregateType: "conversation",
+      aggregateId: conversation.id,
+      correlationId: conversation.id,
+      payload: { queueItem: clone(item) },
+    })
+
     return clone(item)
   }
 
@@ -1806,6 +1895,248 @@ export class MemoryStore implements Store {
     input: AppendMessageInput
   ): Promise<{ message: Message; created: boolean }> {
     return this.appendMessageSync(input)
+  }
+
+  async listDeadEventInbox(input: {
+    organizationId: string
+    consumerId?: string
+    limit: number
+  }): Promise<EventInbox[]> {
+    const rows = [...this.eventInbox.values()]
+      .filter(
+        (item) =>
+          item.organizationId === input.organizationId &&
+          item.status === "DEAD" &&
+          (input.consumerId === undefined || item.consumerId === input.consumerId)
+      )
+      .sort(
+        (a, b) =>
+          (b.deadAt ?? "").localeCompare(a.deadAt ?? "") ||
+          b.createdAt.localeCompare(a.createdAt)
+      )
+      .slice(0, Math.max(1, Math.min(input.limit, 100)))
+    return clone(rows)
+  }
+
+  async listOrganizationsForRuntime(): Promise<Organization[]> {
+    return clone([...this.organizations.values()].sort((a, b) => a.id.localeCompare(b.id)))
+  }
+
+  async publishOutboxBatch(input: PublishOutboxBatchInput): Promise<OutboxEvent[]> {
+    const events = [...this.outboxEvents.values()]
+      .filter(
+        (event) =>
+          event.organizationId === input.organizationId &&
+          event.status === "PENDING"
+      )
+      .sort(
+        (a, b) =>
+          a.createdAt.localeCompare(b.createdAt) ||
+          a.id.localeCompare(b.id)
+      )
+      .slice(0, input.limit)
+
+    const now = new Date().toISOString()
+    for (const event of events) {
+      event.status = "PUBLISHED"
+      event.attempts += 1
+      event.publishedAt = now
+
+      for (const subscription of input.subscriptions) {
+        if (
+          !subscription.eventTypes.includes("*") &&
+          !subscription.eventTypes.includes(event.eventType)
+        ) {
+          continue
+        }
+
+        const existing = [...this.eventInbox.values()].find(
+          (item) =>
+            item.organizationId === input.organizationId &&
+            item.consumerId === subscription.consumerId &&
+            item.eventId === event.id
+        )
+        if (existing) continue
+
+        const inbox: EventInbox = {
+          id: randomUUID(),
+          organizationId: input.organizationId,
+          consumerId: subscription.consumerId,
+          workerClass: subscription.workerClass,
+          eventId: event.id,
+          eventType: event.eventType,
+          eventVersion: event.version,
+          correlationId: event.correlationId,
+          causationId: event.causationId,
+          aggregateType: event.aggregateType,
+          aggregateId: event.aggregateId,
+          payload: clone(event.payload),
+          status: "PENDING",
+          attempts: 0,
+          availableAt: now,
+          leaseUntil: null,
+          leasedBy: null,
+          lastError: null,
+          processedAt: null,
+          deadAt: null,
+          createdAt: now,
+        }
+        this.eventInbox.set(inbox.id, inbox)
+      }
+    }
+
+    return clone(events)
+  }
+
+  async claimEventInboxBatch(input: ClaimEventInboxBatchInput): Promise<EventInbox[]> {
+    const now = Date.now()
+    const candidates = [...this.eventInbox.values()]
+      .filter(
+        (item) =>
+          item.organizationId === input.organizationId &&
+          item.consumerId === input.consumerId &&
+          (
+            item.status === "PENDING" ||
+            (
+              item.status === "PROCESSING" &&
+              item.leaseUntil !== null &&
+              new Date(item.leaseUntil).getTime() <= now
+            )
+          ) &&
+          new Date(item.availableAt).getTime() <= now
+      )
+      .sort(
+        (a, b) =>
+          a.createdAt.localeCompare(b.createdAt) ||
+          a.id.localeCompare(b.id)
+      )
+      .slice(0, input.limit)
+
+    const claimed: EventInbox[] = []
+    const leaseUntil = new Date(now + input.leaseSeconds * 1000).toISOString()
+
+    for (const item of candidates) {
+      if (item.attempts >= input.maxAttempts) {
+        item.status = "DEAD"
+        item.deadAt = new Date(now).toISOString()
+        item.leaseUntil = null
+        item.leasedBy = null
+        continue
+      }
+
+      item.status = "PROCESSING"
+      item.attempts += 1
+      item.leaseUntil = leaseUntil
+      item.leasedBy = input.workerId
+      claimed.push(clone(item))
+    }
+
+    return claimed
+  }
+
+  async completeEventInbox(
+    organizationId: string,
+    inboxId: string,
+    workerId: string
+  ): Promise<EventInbox> {
+    const item = this.eventInbox.get(inboxId)
+    if (
+      !item ||
+      item.organizationId !== organizationId
+    ) {
+      throw new Error("EVENT_INBOX_NOT_FOUND")
+    }
+    if (item.status !== "PROCESSING" || item.leasedBy !== workerId) {
+      throw new Error("EVENT_INBOX_LEASE_MISMATCH")
+    }
+
+    item.status = "PROCESSED"
+    item.leaseUntil = null
+    item.leasedBy = null
+    item.processedAt = new Date().toISOString()
+    return clone(item)
+  }
+
+  async failEventInbox(input: FailEventInboxInput): Promise<EventInbox> {
+    const item = this.eventInbox.get(input.inboxId)
+    if (
+      !item ||
+      item.organizationId !== input.organizationId
+    ) {
+      throw new Error("EVENT_INBOX_NOT_FOUND")
+    }
+    if (item.status !== "PROCESSING" || item.leasedBy !== input.workerId) {
+      throw new Error("EVENT_INBOX_LEASE_MISMATCH")
+    }
+
+    const now = Date.now()
+    item.lastError = input.error.slice(0, 1000)
+    item.leaseUntil = null
+    item.leasedBy = null
+
+    if (item.attempts >= input.maxAttempts) {
+      item.status = "DEAD"
+      item.deadAt = new Date(now).toISOString()
+    } else {
+      item.status = "PENDING"
+      item.availableAt = new Date(
+        now + Math.max(0, input.retryDelaySeconds) * 1000
+      ).toISOString()
+    }
+
+    return clone(item)
+  }
+
+  async replayDeadEventInbox(input: ReplayEventInboxInput): Promise<EventInbox> {
+    const item = this.eventInbox.get(input.inboxId)
+    if (!item || item.organizationId !== input.organizationId) {
+      throw new Error("EVENT_INBOX_NOT_FOUND")
+    }
+    if (item.status !== "DEAD") throw new Error("EVENT_INBOX_NOT_DEAD")
+
+    item.status = "PENDING"
+    item.attempts = 0
+    item.availableAt = new Date().toISOString()
+    item.leaseUntil = null
+    item.leasedBy = null
+    item.lastError = null
+    item.deadAt = null
+    item.processedAt = null
+    return clone(item)
+  }
+
+  async acquireWorkerLease(input: AcquireWorkerLeaseInput): Promise<WorkerLease> {
+    const existing = this.workerLeases.get(input.workerId)
+    const now = Date.now()
+    if (existing && new Date(existing.leaseUntil).getTime() > now) {
+      throw new Error("WORKER_LEASE_HELD")
+    }
+    const lease: WorkerLease = {
+      workerId: input.workerId,
+      workerClass: input.workerClass,
+      leaseUntil: new Date(now + input.leaseSeconds * 1000).toISOString(),
+      heartbeatAt: new Date(now).toISOString(),
+      metadata: clone(input.metadata),
+      createdAt: existing?.createdAt ?? new Date(now).toISOString(),
+    }
+    this.workerLeases.set(input.workerId, lease)
+    return clone(lease)
+  }
+
+  async heartbeatWorkerLease(workerId: string, leaseSeconds: number): Promise<WorkerLease> {
+    const existing = this.workerLeases.get(workerId)
+    if (!existing) throw new Error("WORKER_LEASE_NOT_FOUND")
+    if (new Date(existing.leaseUntil).getTime() <= Date.now()) {
+      throw new Error("WORKER_LEASE_EXPIRED")
+    }
+    const now = Date.now()
+    existing.heartbeatAt = new Date(now).toISOString()
+    existing.leaseUntil = new Date(now + leaseSeconds * 1000).toISOString()
+    return clone(existing)
+  }
+
+  async releaseWorkerLease(workerId: string): Promise<void> {
+    this.workerLeases.delete(workerId)
   }
 
   async listOutboxEvents(organizationId: string): Promise<OutboxEvent[]> {

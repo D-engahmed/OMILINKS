@@ -38,6 +38,8 @@ import type {
   RoutingDecision,
   RoutingCandidate,
   RoutingEvaluationCandidate,
+  EventInbox,
+  WorkerLease,
 } from "../domain/types.js"
 
 import {
@@ -53,6 +55,11 @@ import type {
   CreateRoutingDecisionInput,
   EscalationResult,
   RoutingCandidateQuery,
+  PublishOutboxBatchInput,
+  ClaimEventInboxBatchInput,
+  FailEventInboxInput,
+  ReplayEventInboxInput,
+  AcquireWorkerLeaseInput,
   Store,
 } from "./store.js"
 
@@ -340,6 +347,39 @@ const toRoutingCandidate = (row: Row): RoutingCandidate => ({
   rejectionCode: strOrNull(row.rejection_code),
   score: Number(row.score),
   snapshot: row.snapshot as Record<string, unknown>,
+  createdAt: iso(row.created_at),
+})
+
+const toEventInbox = (row: Row): EventInbox => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  consumerId: str(row.consumer_id),
+  workerClass: str(row.worker_class),
+  eventId: str(row.event_id),
+  eventType: str(row.event_type),
+  eventVersion: num(row.event_version),
+  correlationId: str(row.correlation_id),
+  causationId: strOrNull(row.causation_id),
+  aggregateType: str(row.aggregate_type),
+  aggregateId: str(row.aggregate_id),
+  payload: row.payload as Record<string, unknown>,
+  status: str(row.status) as EventInbox["status"],
+  attempts: num(row.attempts),
+  availableAt: iso(row.available_at),
+  leaseUntil: isoOrNull(row.lease_until),
+  leasedBy: strOrNull(row.leased_by),
+  lastError: strOrNull(row.last_error),
+  processedAt: isoOrNull(row.processed_at),
+  deadAt: isoOrNull(row.dead_at),
+  createdAt: iso(row.created_at),
+})
+
+const toWorkerLease = (row: Row): WorkerLease => ({
+  workerId: str(row.worker_id),
+  workerClass: str(row.worker_class),
+  leaseUntil: iso(row.lease_until),
+  heartbeatAt: iso(row.heartbeat_at),
+  metadata: row.metadata as Record<string, unknown>,
   createdAt: iso(row.created_at),
 })
 
@@ -1310,6 +1350,337 @@ export class PostgresStore implements Store {
     })
   }
 
+  async listDeadEventInbox(input: {
+    organizationId: string
+    consumerId?: string
+    limit: number
+  }): Promise<EventInbox[]> {
+    if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) {
+      throw new Error("INVALID_BATCH_SIZE")
+    }
+
+    return this.tenantTx(input.organizationId, async (client) => {
+      const result = await client.query(
+        input.consumerId
+          ? `SELECT * FROM event_inbox
+              WHERE organization_id = $1
+                AND consumer_id = $2
+                AND status = 'DEAD'
+              ORDER BY dead_at DESC NULLS LAST, created_at DESC, id DESC
+              LIMIT $3`
+          : `SELECT * FROM event_inbox
+              WHERE organization_id = $1
+                AND status = 'DEAD'
+              ORDER BY dead_at DESC NULLS LAST, created_at DESC, id DESC
+              LIMIT $2`,
+        input.consumerId
+          ? [input.organizationId, input.consumerId, input.limit]
+          : [input.organizationId, input.limit]
+      )
+      return result.rows.map(toEventInbox)
+    })
+  }
+
+  async listOrganizationsForRuntime(): Promise<Organization[]> {
+    const result = await this.pool.query(
+      `SELECT * FROM organizations ORDER BY id ASC`
+    )
+    return result.rows.map(toOrganization)
+  }
+
+  async publishOutboxBatch(input: PublishOutboxBatchInput): Promise<OutboxEvent[]> {
+    if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 500) {
+      throw new Error("INVALID_BATCH_SIZE")
+    }
+
+    return this.tenantTx(input.organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM outbox_events
+          WHERE organization_id = $1 AND status = 'PENDING'
+          ORDER BY created_at ASC, id ASC
+          LIMIT $2
+          FOR UPDATE SKIP LOCKED`,
+        [input.organizationId, input.limit]
+      )
+
+      const now = new Date().toISOString()
+      const published: OutboxEvent[] = []
+
+      for (const row of result.rows) {
+        const event = toOutboxEvent(row)
+
+        await client.query(
+          `UPDATE outbox_events
+              SET status = 'PUBLISHED',
+                  attempts = attempts + 1,
+                  published_at = $3
+            WHERE id = $1 AND organization_id = $2`,
+          [event.id, input.organizationId, now]
+        )
+
+        for (const subscription of input.subscriptions) {
+          if (
+            !subscription.eventTypes.includes("*") &&
+            !subscription.eventTypes.includes(event.eventType)
+          ) {
+            continue
+          }
+
+          await client.query(
+            `INSERT INTO event_inbox
+              (organization_id, consumer_id, worker_class, event_id,
+               event_type, event_version, correlation_id, causation_id,
+               aggregate_type, aggregate_id, payload)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
+             ON CONFLICT (organization_id, consumer_id, event_id) DO NOTHING`,
+            [
+              input.organizationId,
+              subscription.consumerId,
+              subscription.workerClass,
+              event.id,
+              event.eventType,
+              event.version,
+              event.correlationId,
+              event.causationId,
+              event.aggregateType,
+              event.aggregateId,
+              JSON.stringify(event.payload),
+            ]
+          )
+        }
+
+        published.push({
+          ...event,
+          status: "PUBLISHED",
+          attempts: event.attempts + 1,
+          publishedAt: now,
+        })
+      }
+
+      return published
+    })
+  }
+
+  async claimEventInboxBatch(
+    input: ClaimEventInboxBatchInput
+  ): Promise<EventInbox[]> {
+    if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) {
+      throw new Error("INVALID_BATCH_SIZE")
+    }
+    if (!Number.isInteger(input.leaseSeconds) || input.leaseSeconds < 5 || input.leaseSeconds > 3600) {
+      throw new Error("INVALID_LEASE")
+    }
+
+    return this.tenantTx(input.organizationId, async (client) => {
+      const candidates = await client.query(
+        `SELECT * FROM event_inbox
+          WHERE organization_id = $1
+            AND consumer_id = $2
+            AND available_at <= now()
+            AND (
+              status = 'PENDING'
+              OR (status = 'PROCESSING' AND lease_until <= now())
+            )
+          ORDER BY created_at ASC, id ASC
+          LIMIT $3
+          FOR UPDATE SKIP LOCKED`,
+        [input.organizationId, input.consumerId, input.limit]
+      )
+
+      const claimed: EventInbox[] = []
+      for (const row of candidates.rows) {
+        const current = toEventInbox(row)
+
+        if (current.attempts >= input.maxAttempts) {
+          const dead = await client.query(
+            `UPDATE event_inbox
+                SET status = 'DEAD', dead_at = now(),
+                    lease_until = NULL, leased_by = NULL
+              WHERE id = $1 AND organization_id = $2
+              RETURNING *`,
+            [current.id, input.organizationId]
+          )
+          if (dead.rows[0]) void toEventInbox(dead.rows[0])
+          continue
+        }
+
+        const result = await client.query(
+          `UPDATE event_inbox
+              SET status = 'PROCESSING',
+                  attempts = attempts + 1,
+                  lease_until = now() + ($3::int * interval '1 second'),
+                  leased_by = $4,
+                  last_error = NULL
+            WHERE id = $1 AND organization_id = $2
+            RETURNING *`,
+          [
+            current.id,
+            input.organizationId,
+            input.leaseSeconds,
+            input.workerId,
+          ]
+        )
+        if (result.rows[0]) claimed.push(toEventInbox(result.rows[0]))
+      }
+
+      return claimed
+    })
+  }
+
+  async completeEventInbox(
+    organizationId: string,
+    inboxId: string,
+    workerId: string
+  ): Promise<EventInbox> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `UPDATE event_inbox
+            SET status = 'PROCESSED',
+                processed_at = now(),
+                lease_until = NULL,
+                leased_by = NULL
+          WHERE id = $1
+            AND organization_id = $2
+            AND status = 'PROCESSING'
+            AND leased_by = $3
+          RETURNING *`,
+        [inboxId, organizationId, workerId]
+      )
+      if (!result.rows[0]) throw new Error("EVENT_INBOX_LEASE_MISMATCH")
+      return toEventInbox(result.rows[0])
+    })
+  }
+
+  async failEventInbox(input: FailEventInboxInput): Promise<EventInbox> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const current = await client.query(
+        `SELECT * FROM event_inbox
+          WHERE id = $1 AND organization_id = $2
+          FOR UPDATE`,
+        [input.inboxId, input.organizationId]
+      )
+      if (!current.rows[0]) throw new Error("EVENT_INBOX_NOT_FOUND")
+      if (
+        current.rows[0].status !== "PROCESSING" ||
+        strOrNull(current.rows[0].leased_by) !== input.workerId
+      ) {
+        throw new Error("EVENT_INBOX_LEASE_MISMATCH")
+      }
+
+      const attempt = num(current.rows[0].attempts)
+      const terminal = attempt >= input.maxAttempts
+
+      const result = terminal
+        ? await client.query(
+            `UPDATE event_inbox
+                SET status = 'DEAD', dead_at = now(),
+                    lease_until = NULL, leased_by = NULL,
+                    last_error = $3
+              WHERE id = $1 AND organization_id = $2
+              RETURNING *`,
+            [
+              input.inboxId,
+              input.organizationId,
+              input.error.slice(0, 1000),
+            ]
+          )
+        : await client.query(
+            `UPDATE event_inbox
+                SET status = 'PENDING',
+                    available_at = now() + ($4::int * interval '1 second'),
+                    lease_until = NULL, leased_by = NULL,
+                    last_error = $3
+              WHERE id = $1 AND organization_id = $2
+              RETURNING *`,
+            [
+              input.inboxId,
+              input.organizationId,
+              input.error.slice(0, 1000),
+              Math.max(0, input.retryDelaySeconds),
+            ]
+          )
+      return toEventInbox(result.rows[0])
+    })
+  }
+
+  async replayDeadEventInbox(input: ReplayEventInboxInput): Promise<EventInbox> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const result = await client.query(
+        `UPDATE event_inbox
+            SET status = 'PENDING',
+                attempts = 0,
+                available_at = now(),
+                lease_until = NULL,
+                leased_by = NULL,
+                last_error = NULL,
+                dead_at = NULL,
+                processed_at = NULL
+          WHERE id = $1 AND organization_id = $2 AND status = 'DEAD'
+          RETURNING *`,
+        [input.inboxId, input.organizationId]
+      )
+      if (!result.rows[0]) throw new Error("EVENT_INBOX_NOT_DEAD")
+      return toEventInbox(result.rows[0])
+    })
+  }
+
+  async acquireWorkerLease(input: AcquireWorkerLeaseInput): Promise<WorkerLease> {
+    return this.tx(async (client) => {
+      const result = await client.query(
+        `INSERT INTO worker_leases
+          (worker_id, worker_class, lease_until, heartbeat_at, metadata)
+         VALUES ($1,$2,now() + ($3::int * interval '1 second'),now(),$4::jsonb)
+         ON CONFLICT (worker_id)
+         DO UPDATE SET
+           worker_class = EXCLUDED.worker_class,
+           lease_until = EXCLUDED.lease_until,
+           heartbeat_at = EXCLUDED.heartbeat_at,
+           metadata = EXCLUDED.metadata
+         WHERE worker_leases.lease_until <= now()
+         RETURNING *`,
+        [
+          input.workerId,
+          input.workerClass,
+          input.leaseSeconds,
+          JSON.stringify(input.metadata),
+        ]
+      )
+
+      if (!result.rows[0]) {
+        throw new Error("WORKER_LEASE_HELD")
+      }
+
+      return toWorkerLease(result.rows[0])
+    })
+  }
+
+  async heartbeatWorkerLease(
+    workerId: string,
+    leaseSeconds: number
+  ): Promise<WorkerLease> {
+    return this.tx(async (client) => {
+      const result = await client.query(
+        `UPDATE worker_leases
+            SET heartbeat_at = now(),
+                lease_until = now() + ($2::int * interval '1 second')
+          WHERE worker_id = $1 AND lease_until > now()
+          RETURNING *`,
+        [workerId, leaseSeconds]
+      )
+      if (!result.rows[0]) throw new Error("WORKER_LEASE_EXPIRED")
+      return toWorkerLease(result.rows[0])
+    })
+  }
+
+  async releaseWorkerLease(workerId: string): Promise<void> {
+    await this.tx(async (client) => {
+      await client.query(
+        `DELETE FROM worker_leases WHERE worker_id = $1`,
+        [workerId]
+      )
+    })
+  }
+
   async listOutboxEvents(organizationId: string): Promise<OutboxEvent[]> {
     return this.tenantTx(organizationId, async (client) => {
       const result = await client.query(
@@ -2036,6 +2407,25 @@ export class PostgresStore implements Store {
         [organizationId]
       )
       return result.rows.map(toWorkforceQueue)
+    })
+  }
+
+  async getActiveQueueItem(
+    organizationId: string,
+    conversationId: string
+  ): Promise<QueueItem | null> {
+    if (!isUuid(conversationId)) return null
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM queue_items
+          WHERE organization_id = $1
+            AND conversation_id = $2
+            AND status IN ('QUEUED','CLAIMED')
+          ORDER BY enqueued_at DESC, id DESC
+          LIMIT 1`,
+        [organizationId, conversationId]
+      )
+      return result.rows[0] ? toQueueItem(result.rows[0]) : null
     })
   }
 

@@ -730,6 +730,24 @@ async function route(
     )
   }
 
+  if (method === "GET" && url.pathname === "/api/v1/events/dead") {
+    const limit = Number(url.searchParams.get("limit") ?? "50")
+    const consumerId = url.searchParams.get("consumerId") ?? undefined
+    return json(
+      { items: await appApplication.listDeadEventInbox(context, { consumerId, limit }) }
+    )
+  }
+
+  const replayDeadEventMatch = url.pathname.match(
+    /^\/api\/v1\/events\/dead\/([^/]+)\/replay$/
+  )
+
+  if (replayDeadEventMatch && method === "POST") {
+    return json(
+      await appApplication.replayDeadEvent(context, replayDeadEventMatch[1]!)
+    )
+  }
+
   if (method === "GET" && url.pathname === "/api/v1/routing/policies") {
     return json({ items: await appApplication.listRoutingPolicies(context) })
   }

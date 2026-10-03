@@ -78,6 +78,8 @@ test("application role is subject to RLS (test is not vacuous)", options, async 
   const names = tables.rows.map((row) => row.relname as string).sort()
   assert.ok(names.includes("ai_runs") && names.includes("handoffs"))
   assert.ok(names.includes("knowledge_chunks") && names.includes("customers"))
+  assert.ok(names.includes("event_inbox"))
+  assert.equal(names.includes("worker_leases"), false)
   for (const row of tables.rows) {
     assert.equal(row.relrowsecurity, true, row.relname)
     assert.equal(row.relforcerowsecurity, true, row.relname)
@@ -158,6 +160,7 @@ test("migration runner is idempotent", options, async () => {
       "0004_ai_core.sql",
       "0005_channels.sql",
       "0006_workforce_routing.sql",
+      "0007_event_runtime.sql",
     ]
   )
 })
