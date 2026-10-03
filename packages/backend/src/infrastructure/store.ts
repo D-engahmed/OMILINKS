@@ -1680,6 +1680,21 @@ export class MemoryStore implements Store {
     assignment.releasedAt = now
     assignment.version += 1
 
+    if (input.status !== "COMPLETED") {
+      for (const item of this.queueItems.values()) {
+        if (
+          item.organizationId === input.organizationId &&
+          item.conversationId === assignment.conversationId &&
+          item.status === "CLAIMED"
+        ) {
+          item.status = "QUEUED"
+          item.enqueuedAt = now
+          item.lastRoutedAt = null
+          item.version += 1
+        }
+      }
+    }
+
     conversation.control = "queue"
     conversation.status = input.status === "COMPLETED" ? "WAITING_CUSTOMER" : "OPEN"
     conversation.controlVersion += 1
