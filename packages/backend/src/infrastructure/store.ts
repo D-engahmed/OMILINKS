@@ -2504,6 +2504,7 @@ export class MemoryStore implements Store {
     if (active) {
       if (active.status === "RETRYING") {
         active.status = "RUNNING"
+        active.attempt += 1
         active.startedAt = new Date().toISOString()
       }
       return clone(active)
