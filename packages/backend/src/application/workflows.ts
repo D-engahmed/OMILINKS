@@ -119,7 +119,7 @@ export class WorkflowService {
     try {
       return await this.store.resolveWorkflowApproval(input)
     } catch (error) {
-      return this.translate(error)
+      throw this.translate(error)
     }
   }
 
@@ -127,7 +127,7 @@ export class WorkflowService {
     try {
       return await this.store.cancelWorkflowRun(organizationId, runId)
     } catch (error) {
-      return this.translate(error)
+      throw this.translate(error)
     }
   }
 
