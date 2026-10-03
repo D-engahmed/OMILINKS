@@ -191,6 +191,7 @@ async function route(
     const action = widgetMatch[2] ?? "config"
 
     if (method === "OPTIONS") {
+      await channelIngress.getPublicConfig(publicKey)
       return new Response(null, { status: 204 })
     }
 
