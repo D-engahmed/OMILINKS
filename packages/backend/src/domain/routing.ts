@@ -67,7 +67,10 @@ export function evaluateRouting(
       }
     }
 
-    if (!policy.allowedWorkerTypes.includes(worker.type)) {
+    if (
+      !policy.allowedWorkerTypes.includes(worker.type) ||
+      !context.requestedWorkerTypes.includes(worker.type)
+    ) {
       return {
         workforceMemberId: worker.id,
         eligible: false,
