@@ -550,6 +550,13 @@ export class PostgresStore implements Store {
 
       const event = toChannelInboundEvent(row)
 
+      if (
+        event.payloadHash !== input.payloadHash ||
+        event.eventType !== input.eventType
+      ) {
+        throw new Error("INBOUND_EVENT_CONFLICT")
+      }
+
       if (event.status === "PROCESSED") {
         return { event, claimed: false, inFlight: false }
       }
