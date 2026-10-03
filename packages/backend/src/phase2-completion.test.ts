@@ -40,6 +40,7 @@ function inbound(orgId: string, messageId: string, content: string): InboundMess
     externalCustomerId: "visitor-1",
     customerDisplayName: "Visitor",
     providerMessageId: messageId,
+    clientMessageId: null,
     content,
   }
 }
