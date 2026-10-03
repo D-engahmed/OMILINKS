@@ -1539,28 +1539,35 @@ export class PostgresStore implements Store {
       const attempt = num(current.rows[0].attempts)
       const terminal = attempt >= input.maxAttempts
 
-      const result = await client.query(
-        terminal
-          ? `UPDATE event_inbox
-              SET status = 'DEAD', dead_at = now(),
-                  lease_until = NULL, leased_by = NULL,
-                  last_error = $3
-            WHERE id = $1 AND organization_id = $2
-            RETURNING *`
-          : `UPDATE event_inbox
-              SET status = 'PENDING',
-                  available_at = now() + ($4::int * interval '1 second'),
-                  lease_until = NULL, leased_by = NULL,
-                  last_error = $3
-            WHERE id = $1 AND organization_id = $2
-            RETURNING *`,
-        [
-          input.inboxId,
-          input.organizationId,
-          input.error.slice(0, 1000),
-          Math.max(0, input.retryDelaySeconds),
-        ]
-      )
+      const result = terminal
+        ? await client.query(
+            `UPDATE event_inbox
+                SET status = 'DEAD', dead_at = now(),
+                    lease_until = NULL, leased_by = NULL,
+                    last_error = $3
+              WHERE id = $1 AND organization_id = $2
+              RETURNING *`,
+            [
+              input.inboxId,
+              input.organizationId,
+              input.error.slice(0, 1000),
+            ]
+          )
+        : await client.query(
+            `UPDATE event_inbox
+                SET status = 'PENDING',
+                    available_at = now() + ($4::int * interval '1 second'),
+                    lease_until = NULL, leased_by = NULL,
+                    last_error = $3
+              WHERE id = $1 AND organization_id = $2
+              RETURNING *`,
+            [
+              input.inboxId,
+              input.organizationId,
+              input.error.slice(0, 1000),
+              Math.max(0, input.retryDelaySeconds),
+            ]
+          )
       return toEventInbox(result.rows[0])
     })
   }
