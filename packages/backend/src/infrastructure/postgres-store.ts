@@ -1350,6 +1350,37 @@ export class PostgresStore implements Store {
     })
   }
 
+  async listDeadEventInbox(input: {
+    organizationId: string
+    consumerId?: string
+    limit: number
+  }): Promise<EventInbox[]> {
+    if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) {
+      throw new Error("INVALID_BATCH_SIZE")
+    }
+
+    return this.tenantTx(input.organizationId, async (client) => {
+      const result = await client.query(
+        input.consumerId
+          ? `SELECT * FROM event_inbox
+              WHERE organization_id = $1
+                AND consumer_id = $2
+                AND status = 'DEAD'
+              ORDER BY dead_at DESC NULLS LAST, created_at DESC, id DESC
+              LIMIT $3`
+          : `SELECT * FROM event_inbox
+              WHERE organization_id = $1
+                AND status = 'DEAD'
+              ORDER BY dead_at DESC NULLS LAST, created_at DESC, id DESC
+              LIMIT $2`,
+        input.consumerId
+          ? [input.organizationId, input.consumerId, input.limit]
+          : [input.organizationId, input.limit]
+      )
+      return result.rows.map(toEventInbox)
+    })
+  }
+
   async listOrganizationsForRuntime(): Promise<Organization[]> {
     const result = await this.pool.query(
       `SELECT * FROM organizations ORDER BY id ASC`
