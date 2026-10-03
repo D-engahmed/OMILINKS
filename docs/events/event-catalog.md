@@ -57,6 +57,7 @@ Every event includes:
 | conversation.message.received | conversations/integrations | routing, AI, workflow |
 | conversation.message.sent | conversations | delivery, billing |
 | conversation.assignment.changed | workforce/routing | SLA, analytics |
+| conversation.queue.entered | workforce/routing | queue workers, analytics |
 | ai.run.requested | AI/conversation | AI runtime |
 | ai.run.completed | AI runtime | quality, usage |
 | tool.invocation.completed | tools | audit, analytics |
