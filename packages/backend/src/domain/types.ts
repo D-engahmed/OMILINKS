@@ -467,6 +467,7 @@ export type HandoffReason =
   | "UNGROUNDED_ANSWER"
   | "MODEL_OUTPUT_INVALID"
   | "PROVIDER_ERROR"
+  | "POLICY_BLOCKED"
 
 export interface RetrievedChunk {
   chunkId: string
