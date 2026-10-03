@@ -6,6 +6,8 @@ import type {
   ChannelProvider,
   HandoffStatus,
   PresenceState,
+  AiModelPolicyConfig,
+  AiAgentPolicyConfig,
 } from "./domain/types.js"
 import { DevIdentityProvider, type IdentityProvider } from "./application/identity.js"
 import type { Store } from "./infrastructure/store.js"
