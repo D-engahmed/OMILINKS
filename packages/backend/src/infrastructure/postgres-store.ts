@@ -2182,6 +2182,199 @@ export class PostgresStore implements Store {
     })
   }
 
+  async claimWorkflowRuns(input: ClaimWorkflowRunsInput): Promise<WorkflowRun[]> {
+    if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 50) throw new Error("INVALID_BATCH_SIZE")
+    return this.tenantTx(input.organizationId, async (client) => {
+      const selected = await client.query(
+        `SELECT * FROM workflow_runs
+          WHERE organization_id = $1
+            AND available_at <= now()
+            AND (
+              status IN ('PENDING','RETRYING')
+              OR (status = 'RUNNING' AND lease_until <= now())
+            )
+          ORDER BY created_at ASC, id ASC
+          LIMIT $2
+          FOR UPDATE SKIP LOCKED`,
+        [input.organizationId, input.limit]
+      )
+      const runs: WorkflowRun[] = []
+      for (const row of selected.rows) {
+        const result = await client.query(
+          `UPDATE workflow_runs
+             SET status='RUNNING',
+                 attempt=attempt+1,
+                 lease_until=now()+($3::int * interval '1 second'),
+                 leased_by=$4,
+                 started_at=COALESCE(started_at, now())
+           WHERE id=$1 AND organization_id=$2
+           RETURNING *`,
+          [str(row.id), input.organizationId, input.leaseSeconds, input.workerId]
+        )
+        if (result.rows[0]) runs.push(toWorkflowRun(result.rows[0]))
+      }
+      return runs
+    })
+  }
+
+  async completeWorkflowStep(input: CompleteWorkflowStepInput): Promise<WorkflowRun> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const locked = await client.query(
+        `SELECT r.*, sr.step_key, sr.step_id
+           FROM workflow_runs r
+           JOIN workflow_step_runs sr
+             ON sr.workflow_run_id=r.id AND sr.organization_id=r.organization_id
+          WHERE r.id=$1 AND r.organization_id=$2
+            AND sr.id=$3 AND sr.status='RUNNING'
+            AND r.status='RUNNING' AND r.leased_by=$4
+          FOR UPDATE`,
+        [input.runId,input.organizationId,input.stepRunId,input.workerId]
+      )
+      if (!locked.rows[0]) throw new Error("WORKFLOW_STEP_LEASE_MISMATCH")
+      const row = locked.rows[0]
+      const step = await client.query(`SELECT * FROM workflow_steps WHERE id=$1 AND organization_id=$2`, [row.step_id,input.organizationId])
+      if (!step.rows[0]) throw new Error("WORKFLOW_STEP_NOT_FOUND")
+      const stepRow = toWorkflowStep(step.rows[0])
+
+      await client.query(
+        `UPDATE workflow_step_runs
+            SET status='SUCCEEDED', output=$3::jsonb, completed_at=now()
+          WHERE id=$1 AND organization_id=$2`,
+        [input.stepRunId,input.organizationId,JSON.stringify(input.output)]
+      )
+
+      const nextStatus = stepRow.nextStepKey ? "PENDING" : "SUCCEEDED"
+      const runResult = await client.query(
+        `UPDATE workflow_runs
+            SET context=context || $3::jsonb,
+                current_step_key=$4,
+                status=$5,
+                available_at=CASE WHEN $5='PENDING' THEN now() ELSE available_at END,
+                lease_until=NULL, leased_by=NULL,
+                completed_at=CASE WHEN $5='SUCCEEDED' THEN now() ELSE NULL END,
+                error=NULL
+          WHERE id=$1 AND organization_id=$2
+          RETURNING *`,
+        [input.runId,input.organizationId,JSON.stringify(input.output),stepRow.nextStepKey,nextStatus]
+      )
+      return toWorkflowRun(runResult.rows[0])
+    })
+  }
+
+  async failWorkflowStep(input: FailWorkflowStepInput): Promise<WorkflowRun> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const locked = await client.query(
+        `SELECT r.*, sr.step_id, sr.attempt
+           FROM workflow_runs r
+           JOIN workflow_step_runs sr ON sr.workflow_run_id=r.id AND sr.organization_id=r.organization_id
+          WHERE r.id=$1 AND r.organization_id=$2 AND sr.id=$3
+            AND sr.status='RUNNING' AND r.status='RUNNING' AND r.leased_by=$4
+          FOR UPDATE`,
+        [input.runId,input.organizationId,input.stepRunId,input.workerId]
+      )
+      if (!locked.rows[0]) throw new Error("WORKFLOW_STEP_LEASE_MISMATCH")
+      const row=locked.rows[0]
+      const step = await client.query(`SELECT * FROM workflow_steps WHERE id=$1 AND organization_id=$2`,[row.step_id,input.organizationId])
+      if(!step.rows[0]) throw new Error("WORKFLOW_STEP_NOT_FOUND")
+      const definition=toWorkflowStep(step.rows[0])
+      const attempt=num(row.attempt)
+      const retry=attempt < definition.retryMaxAttempts
+      await client.query(
+        retry
+          ? `UPDATE workflow_step_runs SET status='RETRYING', error=$3 WHERE id=$1 AND organization_id=$2`
+          : `UPDATE workflow_step_runs SET status='FAILED', error=$3, completed_at=now() WHERE id=$1 AND organization_id=$2`,
+        [input.stepRunId,input.organizationId,input.error.slice(0,1000)]
+      )
+      const nextStep = !retry ? definition.onFailureStepKey : null
+      const nextStatus = retry ? "RETRYING" : (nextStep ? "PENDING" : "FAILED")
+      const result = await client.query(
+        `UPDATE workflow_runs SET status=$3, current_step_key=$4,
+            available_at=CASE WHEN $3 IN ('PENDING','RETRYING') THEN now()+($5::int * interval '1 second') ELSE available_at END,
+            lease_until=NULL, leased_by=NULL, error=CASE WHEN $3='FAILED' THEN $6 ELSE NULL END,
+            completed_at=CASE WHEN $3='FAILED' THEN now() ELSE NULL END
+          WHERE id=$1 AND organization_id=$2 RETURNING *`,
+        [input.runId,input.organizationId,nextStatus,nextStep,Math.max(0,input.retryDelaySeconds),input.error.slice(0,1000)]
+      )
+      return toWorkflowRun(result.rows[0])
+    })
+  }
+
+  async putWorkflowStepWaiting(input: { organizationId: string; runId: string; stepRunId: string; workerId: string }): Promise<WorkflowRun> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const result = await client.query(
+        `UPDATE workflow_step_runs sr
+            SET status='WAITING'
+          WHERE sr.id=$1 AND sr.organization_id=$2 AND sr.workflow_run_id=$3
+            AND sr.status='RUNNING'
+            AND EXISTS (
+              SELECT 1 FROM workflow_runs r
+               WHERE r.id=sr.workflow_run_id AND r.organization_id=sr.organization_id
+                 AND r.status='RUNNING' AND r.leased_by=$4
+            )`,
+        [input.stepRunId,input.organizationId,input.runId,input.workerId]
+      )
+      if(!result.rowCount) throw new Error("WORKFLOW_STEP_LEASE_MISMATCH")
+      const run=await client.query(
+        `UPDATE workflow_runs SET status='WAITING', lease_until=NULL, leased_by=NULL
+          WHERE id=$1 AND organization_id=$2 RETURNING *`,
+        [input.runId,input.organizationId]
+      )
+      return toWorkflowRun(run.rows[0])
+    })
+  }
+
+  async createWorkflowWait(input: { organizationId: string; runId: string; stepRunId: string; wakeAt: string; waitReason: string; resumeToken: string | null }): Promise<WorkflowWait> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const result=await client.query(
+        `INSERT INTO workflow_waits
+          (organization_id,workflow_run_id,workflow_step_run_id,wake_at,wait_reason,resume_token)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (organization_id,workflow_step_run_id) DO UPDATE
+           SET wake_at=EXCLUDED.wake_at
+         RETURNING *`,
+        [input.organizationId,input.runId,input.stepRunId,input.wakeAt,input.waitReason,input.resumeToken]
+      )
+      return toWorkflowWait(result.rows[0])
+    })
+  }
+
+  async resumeWorkflowWait(organizationId: string, waitId: string): Promise<WorkflowRun> {
+    return this.tenantTx(organizationId, async (client) => {
+      const wait=await client.query(`SELECT * FROM workflow_waits WHERE id=$1 AND organization_id=$2 AND resumed_at IS NULL AND wake_at <= now() FOR UPDATE`,[waitId,organizationId])
+      if(!wait.rows[0]) throw new Error("WORKFLOW_WAIT_NOT_DUE")
+      await client.query(`UPDATE workflow_waits SET resumed_at=now() WHERE id=$1 AND organization_id=$2`,[waitId,organizationId])
+      const info=await client.query(
+        `SELECT sr.*, s.next_step_key
+           FROM workflow_step_runs sr
+           JOIN workflow_steps s ON s.id=sr.step_id AND s.organization_id=sr.organization_id
+          WHERE sr.id=$1 AND sr.organization_id=$2 FOR UPDATE`,
+        [str(wait.rows[0].workflow_step_run_id),organizationId]
+      )
+      if(!info.rows[0]) throw new Error("WORKFLOW_STEP_NOT_FOUND")
+      const next=strOrNull(info.rows[0].next_step_key)
+      await client.query(`UPDATE workflow_step_runs SET status='SUCCEEDED', completed_at=now() WHERE id=$1 AND organization_id=$2`,[str(wait.rows[0].workflow_step_run_id),organizationId])
+      const run=await client.query(`UPDATE workflow_runs SET current_step_key=$3,status=$4,available_at=now(),lease_until=NULL,leased_by=NULL,completed_at=CASE WHEN $4='SUCCEEDED' THEN now() ELSE NULL END WHERE id=$1 AND organization_id=$2 RETURNING *`,[str(wait.rows[0].workflow_run_id),organizationId,next,next?"PENDING":"SUCCEEDED"])
+      return toWorkflowRun(run.rows[0])
+    })
+  }
+
+  async resumeDueWorkflowWaits(organizationId: string, limit: number): Promise<WorkflowRun[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const waits=await client.query(`SELECT * FROM workflow_waits WHERE organization_id=$1 AND resumed_at IS NULL AND wake_at <= now() ORDER BY wake_at ASC,id ASC LIMIT $2 FOR UPDATE SKIP LOCKED`,[organizationId,limit])
+      const runs:WorkflowRun[]=[]
+      for(const wait of waits.rows) {
+        await client.query(`UPDATE workflow_waits SET resumed_at=now() WHERE id=$1 AND organization_id=$2`,[str(wait.id),organizationId])
+        const info=await client.query(`SELECT sr.*,s.next_step_key FROM workflow_step_runs sr JOIN workflow_steps s ON s.id=sr.step_id AND s.organization_id=sr.organization_id WHERE sr.id=$1 AND sr.organization_id=$2`,[str(wait.workflow_step_run_id),organizationId])
+        if(!info.rows[0]) continue
+        await client.query(`UPDATE workflow_step_runs SET status='SUCCEEDED',completed_at=now() WHERE id=$1 AND organization_id=$2`,[str(wait.workflow_step_run_id),organizationId])
+        const next=strOrNull(info.rows[0].next_step_key)
+        const run=await client.query(`UPDATE workflow_runs SET current_step_key=$3,status=$4,available_at=now(),completed_at=CASE WHEN $4='SUCCEEDED' THEN now() ELSE NULL END WHERE id=$1 AND organization_id=$2 RETURNING *`,[str(wait.workflow_run_id),organizationId,next,next?"PENDING":"SUCCEEDED"])
+        if(run.rows[0]) runs.push(toWorkflowRun(run.rows[0]))
+      }
+      return runs
+    })
+  }
+
   async createAiModel(input: CreateAiModelInput): Promise<AiModel> {
     try {
       return await this.tenantTx(input.organizationId, async (client) => {
