@@ -1012,7 +1012,10 @@ export class MemoryStore implements Store {
     this.messages.set(message.id, message)
     this.emitOutbox({
       organizationId: message.organizationId,
-      eventType: "conversation.message.created",
+      eventType:
+        message.direction === "INBOUND"
+          ? "conversation.message.received"
+          : "conversation.message.sent",
       aggregateType: "conversation",
       aggregateId: message.conversationId,
       correlationId: message.id,
