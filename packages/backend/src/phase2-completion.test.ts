@@ -2,9 +2,17 @@ import assert from "node:assert/strict"
 
 import { ConversationPipeline, type InboundMessage } from "./application/pipeline.js"
 import { createApp } from "./app.js"
-import { storeTest } from "./test-support.js"
+import {
+  MemoryStore,
+  type Store,
+} from "./infrastructure/store.js"
+import {
+  ScriptedGateway,
+  storeTest,
+  type MakeStore,
+} from "./test-support.js"
 
-async function world(makeStore: () => Promise<import("./infrastructure/store.js").Store>) {
+async function world(makeStore: MakeStore) {
   const store = await makeStore()
   const provisioned = await store.provisionOrganization({
     organizationName: "Alpha",
@@ -41,8 +49,8 @@ function inbound(orgId: string, messageId: string, content: string): InboundMess
 }
 
 test("phase 2: answered conversations emit durable message and AI-run outbox events", async () => {
-  const { store, provisioned } = await world(async () => new (await import("./infrastructure/store.js")).MemoryStore())
-  const gateway = new (await import("./test-support.js")).ScriptedGateway(
+  const { store, provisioned } = await world(async () => new MemoryStore())
+  const gateway = new ScriptedGateway(
     () => JSON.stringify({
       can_answer: true,
       answer: "You can return items within 14 days.",
@@ -92,7 +100,7 @@ test("phase 2: answered conversations emit durable message and AI-run outbox eve
 
 storeTest("phase 2: duplicate inbound events do not create duplicate outbox entries", async (makeStore) => {
   const { store, provisioned } = await world(makeStore)
-  const gateway = new (await import("./test-support.js")).ScriptedGateway(
+  const gateway = new ScriptedGateway(
     () =>
       JSON.stringify({
         can_answer: true,
@@ -124,7 +132,7 @@ storeTest("phase 2: duplicate inbound events do not create duplicate outbox entr
 
 storeTest("phase 2: handoff produces control, handoff, message and AI trace events", async (makeStore) => {
   const { store, provisioned } = await world(makeStore)
-  const gateway = new (await import("./test-support.js")).ScriptedGateway(
+  const gateway = new ScriptedGateway(
     () => JSON.stringify({ can_answer: true, answer: "unused", sources: [1] })
   )
   const pipeline = new ConversationPipeline(store, { gateway })
@@ -185,7 +193,7 @@ storeTest("phase 2: outbox is tenant isolated", async (makeStore) => {
   })
 
   const pipeline = new ConversationPipeline(store, {
-    gateway: new (await import("./test-support.js")).ScriptedGateway(() =>
+    gateway: new ScriptedGateway(() =>
       JSON.stringify({
         can_answer: true,
         answer: "14 days.",
@@ -215,7 +223,7 @@ storeTest("phase 2: outbox is tenant isolated", async (makeStore) => {
 
 storeTest("phase 2: AI run history is exposed through the authenticated API", async (makeStore) => {
   const { store, provisioned } = await world(makeStore)
-  const gateway = new (await import("./test-support.js")).ScriptedGateway(
+  const gateway = new ScriptedGateway(
     () =>
       JSON.stringify({
         can_answer: true,
