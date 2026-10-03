@@ -94,41 +94,56 @@ Exit criteria:
 - human takeover prevents stale AI send;
 - message and outbox commit atomically.
 
-## 6. Phase 3 — Workforce and Routing
+## 6. Phase 3 — Channels + Webhooks
+
+Implement one real channel end-to-end and establish the provider adapter contract.
+
+Current implementation:
+- ChannelIntegration tenant configuration;
+- publishable widget key;
+- allowed-origin validation;
+- public widget configuration;
+- public widget message ingress;
+- provider-event dedupe ledger;
+- retryable ingress lease;
+- canonical inbound message persistence;
+- integration test contract.
+
+Exit criteria:
+
+~~~text
+provider request
+ -> verify
+ -> provider-event dedupe
+ -> normalize
+ -> canonical message
+ -> transactional outbox
+ -> 202 accepted
+~~~
+
+The current production-like channel is the Web Widget. Other providers are added only after satisfying the same adapter contract.
+
+## 7. Phase 4 — Workforce and Routing
 
 Implement:
 
 - WorkforceMember;
 - skills;
+- teams;
 - queues;
 - presence;
 - capacity;
 - RoutingPolicy/version;
 - RoutingDecision;
-- assignment transaction.
+- assignment transaction;
+- escalation policies.
 
 Exit criteria:
 
 - deterministic routing;
 - no candidate -> queue;
-- assignment race protection.
-
-## 7. Phase 4 — Channels
-
-Implement provider adapters one at a time.
-
-Recommended sequence:
-
-~~~text
-web/widget
- -> WhatsApp
- -> Telegram
- -> SMS
- -> Facebook
- -> Instagram
-~~~
-
-Each adapter must pass the shared integration contract before activation.
+- assignment race protection;
+- human takeover is authoritative.
 
 ## 8. Phase 5 — Event and Worker Runtime
 
@@ -140,13 +155,15 @@ Implement:
 - retry queue;
 - dead letters;
 - worker leases;
-- correlation propagation.
+- correlation propagation;
+- per-class concurrency pools.
 
 Exit criteria:
 
 - duplicate event safe;
 - worker crash recoverable;
-- dead letter/replay works.
+- dead letter/replay works;
+- webhook processing is decoupled from expensive work.
 
 ## 9. Phase 6 — AI Platform
 
@@ -161,13 +178,21 @@ Implement:
 - tool runtime;
 - AI run state;
 - cost metering;
-- evaluation harness.
+- evaluation harness;
+- embeddings/vector retrieval when evidence justifies the change.
+
+Exit criteria:
+
+- provider failure has deterministic fallback;
+- model output cannot bypass authorization;
+- AI execution is durable and observable;
+- retrieval quality is measured before being trusted.
 
 ## 10. Phase 7 — Workflows
 
 Implement:
 
-- versioned workflow definition;
+- versioned workflow definitions;
 - run engine;
 - step engine;
 - wait state;
@@ -175,6 +200,12 @@ Implement:
 - retries;
 - compensation;
 - recovery.
+
+Exit criteria:
+
+- workflow execution is resumable;
+- duplicate triggers are idempotent;
+- irreversible actions require explicit policy.
 
 ## 11. Phase 8 — Quality
 
@@ -185,7 +216,14 @@ Implement:
 - evaluation;
 - evidence;
 - calibration;
-- remediation.
+- remediation;
+- AI quality monitoring.
+
+Exit criteria:
+
+- every quality score links to conversation evidence;
+- sampling is reproducible;
+- human and AI evaluation are distinguishable.
 
 ## 12. Phase 9 — Billing
 
@@ -193,11 +231,17 @@ Implement:
 
 - plans;
 - entitlements;
-- subscription;
+- subscriptions;
 - Paymob adapter;
 - usage meter;
 - reconciliation;
 - invoice/payment history.
+
+Exit criteria:
+
+- provider callbacks are reconciled server-side;
+- entitlements are derived from authoritative subscription state;
+- duplicate callbacks cannot duplicate billing effects.
 
 ## 13. Phase 10 — Production Hardening
 
@@ -211,6 +255,15 @@ Complete:
 - incident runbooks;
 - release gates;
 - data retention/purge.
+
+Exit criteria:
+
+- implementation evidence;
+- operational metrics;
+- failure recovery;
+- security evidence;
+- migration safety;
+- support runbook.
 
 ## 14. Vertical Slice Rule
 
