@@ -2140,6 +2140,34 @@ export class PostgresStore implements Store {
     })
   }
 
+  async failWorkflowRun(input: {
+    organizationId: string
+    runId: string
+    workerId: string
+    error: string
+  }): Promise<WorkflowRun> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const result = await client.query(
+        `UPDATE workflow_runs
+            SET status='FAILED',
+                error=$3,
+                completed_at=now(),
+                lease_until=NULL,
+                leased_by=NULL
+          WHERE id=$1 AND organization_id=$2 AND leased_by=$4
+          RETURNING *`,
+        [
+          input.runId,
+          input.organizationId,
+          input.error.slice(0, 1000),
+          input.workerId,
+        ]
+      )
+      if (!result.rows[0]) throw new Error("WORKFLOW_RUN_LEASE_MISMATCH")
+      return toWorkflowRun(result.rows[0])
+    })
+  }
+
   async listWorkflowStepRuns(organizationId: string, runId: string): Promise<WorkflowStepRun[]> {
     return this.tenantTx(organizationId, async (client) => {
       const result = await client.query(`SELECT * FROM workflow_step_runs WHERE workflow_run_id = $1 AND organization_id = $2 ORDER BY created_at ASC, attempt ASC`, [runId, organizationId])
