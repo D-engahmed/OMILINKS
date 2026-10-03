@@ -131,7 +131,6 @@ CREATE TABLE queue_items (
   last_routed_at timestamptz,
   attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   version integer NOT NULL DEFAULT 1 CHECK (version > 0),
-  UNIQUE(organization_id, conversation_id),
   UNIQUE(id, organization_id),
   CONSTRAINT queue_item_queue_owner_fk
     FOREIGN KEY (queue_id, organization_id)
@@ -140,6 +139,10 @@ CREATE TABLE queue_items (
     FOREIGN KEY (conversation_id, organization_id)
     REFERENCES conversations(id, organization_id) ON DELETE RESTRICT
 );
+
+CREATE UNIQUE INDEX active_queue_item_per_conversation_idx
+  ON queue_items (organization_id, conversation_id)
+  WHERE status IN ('QUEUED','CLAIMED');
 
 CREATE INDEX queue_items_ready_idx
   ON queue_items (organization_id, queue_id, status, priority, enqueued_at, id);
