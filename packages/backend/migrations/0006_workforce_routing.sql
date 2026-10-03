@@ -260,7 +260,8 @@ CREATE INDEX routing_candidates_decision_idx
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   workforce_member_skills,
-  team_members;
+  team_members
+TO omnilinks_app;
 
 GRANT SELECT, INSERT, UPDATE ON
   workforce_skills,
