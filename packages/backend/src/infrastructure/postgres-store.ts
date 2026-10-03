@@ -2725,6 +2725,18 @@ export class PostgresStore implements Store {
         [input.assignmentId, input.organizationId, input.status]
       )
 
+      if (input.status !== "COMPLETED") {
+        await client.query(
+          `UPDATE queue_items
+              SET status = 'QUEUED', enqueued_at = now(),
+                  last_routed_at = NULL, version = version + 1
+            WHERE organization_id = $1
+              AND conversation_id = $2
+              AND status = 'CLAIMED'`,
+          [input.organizationId, row.conversation_id]
+        )
+      }
+
       await client.query(
         `UPDATE conversations
             SET status = CASE WHEN $3 = 'COMPLETED' THEN 'WAITING_CUSTOMER' ELSE 'OPEN' END,
