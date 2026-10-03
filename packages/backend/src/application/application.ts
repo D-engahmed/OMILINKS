@@ -21,7 +21,6 @@ import { EnvironmentAiGatewayResolver } from "../ai/provider-resolver.js"
 import type { AiModelGatewayResolver } from "../ai/model-router.js"
 import { WorkflowService } from "./workflows.js"
 import type { CreateWorkflowVersionInput } from "../infrastructure/store.js"
-import type { WorkflowApproval } from "../domain/types.js"
 
 export interface AuthenticatedContext {
   principal: Principal
