@@ -2201,7 +2201,7 @@ export class PostgresStore implements Store {
       if (existing.rows[0]) {
         if (existing.rows[0].status === "RETRYING") {
           const reclaimed = await client.query(
-            \`UPDATE workflow_step_runs SET status='RUNNING', started_at=now() WHERE id=$1 AND organization_id=$2 RETURNING *\`,
+            `UPDATE workflow_step_runs SET status='RUNNING', started_at=now() WHERE id=$1 AND organization_id=$2 RETURNING *`,
             [str(existing.rows[0].id), input.organizationId]
           )
           return toWorkflowStepRun(reclaimed.rows[0])
