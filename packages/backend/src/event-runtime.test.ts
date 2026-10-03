@@ -1,6 +1,4 @@
 import assert from "node:assert/strict"
-import test from "node:test"
-
 import { createApp } from "./app.js"
 import { WorkerRuntime } from "./infrastructure/event-runtime.js"
 import { createDefaultEventConsumers } from "./infrastructure/event-consumers.js"
