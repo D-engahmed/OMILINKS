@@ -186,6 +186,11 @@ export class WorkerRuntime {
         state.leaseHeld = false
       }
     }
+
+    if (this.loopPromise) {
+      await this.loopPromise
+      this.loopPromise = null
+    }
   }
 
   private async runConsumerAcrossOrganizations(
