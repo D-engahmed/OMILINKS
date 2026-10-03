@@ -1348,6 +1348,16 @@ export class MemoryStore implements Store {
     conversation.controlVersion += 1
     conversation.version += 1
     conversation.updatedAt = now
+
+    this.emitOutbox({
+      organizationId: input.organizationId,
+      eventType: "conversation.queue.entered",
+      aggregateType: "conversation",
+      aggregateId: conversation.id,
+      correlationId: conversation.id,
+      payload: { queueItem: clone(item) },
+    })
+
     return clone(item)
   }
 
