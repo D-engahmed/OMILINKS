@@ -411,6 +411,10 @@ const toAiRun = (row: Row): AiRun => ({
   outcome: str(row.outcome) as AiRun["outcome"],
   reason: strOrNull(row.reason) as HandoffReason | null,
   error: strOrNull(row.error),
+  agentId: strOrNull(row.agent_id),
+  agentPolicyVersionId: strOrNull(row.agent_policy_version_id),
+  modelRegistryId: strOrNull(row.model_registry_id),
+  costUsd: row.cost_usd === null ? null : Number(row.cost_usd),
   replyMessageId: strOrNull(row.reply_message_id),
   handoffId: strOrNull(row.handoff_id),
   createdAt: iso(row.created_at),
@@ -522,6 +526,10 @@ async function insertRun(
         input.error,
         links.replyMessageId,
         links.handoffId,
+        input.agentId ?? null,
+        input.agentPolicyVersionId ?? null,
+        input.modelRegistryId ?? null,
+        input.costUsd ?? null,
       ]
     )
     const run = toAiRun(result.rows[0])
