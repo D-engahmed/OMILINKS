@@ -204,30 +204,77 @@ storeTest("phase 3: provider event dedupe happens before business mutation", asy
   assert.equal(first.status, 202)
   assert.equal(second.status, 202)
 
+  const firstBody = (await first.json()) as {
+    duplicate: boolean
+    inFlight: boolean
+    conversationId: string | null
+    messageId: string | null
+  }
   const secondBody = (await second.json()) as {
     duplicate: boolean
     inFlight: boolean
+    conversationId: string | null
     messageId: string | null
   }
 
+  assert.equal(firstBody.duplicate, false)
   assert.equal(secondBody.duplicate, true)
   assert.equal(secondBody.inFlight, false)
+  assert.equal(secondBody.conversationId, firstBody.conversationId)
+  assert.equal(secondBody.messageId, firstBody.messageId)
 
+  const messages = await store.listMessages(
+    owner.organization.id,
+    firstBody.conversationId!,
+    100
+  )
+  assert.equal(messages.length, 1)
   assert.equal((await store.listCustomers(owner.organization.id)).length, 1)
   assert.equal((await store.listConversations(owner.organization.id)).length, 1)
+})
+
+storeTest("phase 3: failed inbound normalization can be retried with the same provider event id", async (makeStore) => {
+  const store = await makeStore()
+  const handle = await createApp(store)
+  const owner = await signup(handle, "Alpha", "owner@alpha.example")
+  const integration = await createWidget(handle, owner.session.accessToken)
+
+  const path = "/public/v1/widget/" + integration.publicKey + "/messages"
+
+  const failed = await call(handle, "POST", path, {
+    origin: "https://shop.example",
+    widgetMessageId: "retryable-event",
+    body: {
+      visitorId: "visitor-1",
+      content: "",
+    },
+  })
+
+  assert.equal(failed.status, 500)
+  assert.equal((await store.listCustomers(owner.organization.id)).length, 0)
+
+  const retried = await call(handle, "POST", path, {
+    origin: "https://shop.example",
+    widgetMessageId: "retryable-event",
+    body: {
+      visitorId: "visitor-1",
+      content: "hello after retry",
+    },
+  })
+
+  assert.equal(retried.status, 202)
+  const body = (await retried.json()) as {
+    duplicate: boolean
+    messageId: string | null
+  }
+  assert.equal(body.duplicate, false)
+  assert.ok(body.messageId)
+  assert.equal((await store.listCustomers(owner.organization.id)).length, 1)
+
+  const events = await store.listOutboxEvents(owner.organization.id)
   assert.equal(
-    (await store.listMessages(
-      owner.organization.id,
-      secondBody.messageId
-        ? (await store.getConversation(
-            owner.organization.id,
-            secondBody.messageId
-          ))
-            ?.id ?? ""
-        : "",
-      100
-    )).length >= 0,
-    true
+    events.filter((event) => event.eventType === "conversation.message.received").length,
+    1
   )
 })
 
