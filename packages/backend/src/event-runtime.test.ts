@@ -209,6 +209,35 @@ storeTest("phase 5: retries reach dead letter and replay resets delivery state",
   )
 })
 
+storeTest("phase 5: worker leases prevent active ownership from being stolen", async (makeStore) => {
+  const store = await makeStore()
+  const owner = await signup(store, "Lease", "lease@runtime.example")
+  const lease = await store.acquireWorkerLease({
+    workerId: "shared-worker",
+    workerClass: "routing",
+    leaseSeconds: 60,
+    metadata: { organizationId: owner.organization.id },
+  })
+  assert.equal(lease.workerId, "shared-worker")
+  await assert.rejects(
+    store.acquireWorkerLease({
+      workerId: "shared-worker",
+      workerClass: "routing",
+      leaseSeconds: 60,
+      metadata: { attempt: 2 },
+    }),
+    /WORKER_LEASE_HELD/
+  )
+  await store.releaseWorkerLease("shared-worker")
+  const reacquired = await store.acquireWorkerLease({
+    workerId: "shared-worker",
+    workerClass: "routing",
+    leaseSeconds: 60,
+    metadata: { attempt: 3 },
+  })
+  assert.equal(reacquired.workerId, "shared-worker")
+  assert.deepEqual(reacquired.metadata, { attempt: 3 })
+})
 storeTest("phase 5: generic worker runtime retries a failed handler and then succeeds", async (makeStore) => {
   const store = await makeStore()
   const owner = await signup(store, "Runtime", "runtime@runtime.example")
