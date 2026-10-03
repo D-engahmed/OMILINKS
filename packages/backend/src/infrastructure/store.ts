@@ -2371,6 +2371,10 @@ export class MemoryStore implements Store {
 
     const run: AiRun = {
       ...clone(input),
+      agentId: input.agentId ?? null,
+      agentPolicyVersionId: input.agentPolicyVersionId ?? null,
+      modelRegistryId: input.modelRegistryId ?? null,
+      costUsd: input.costUsd ?? null,
       id: randomUUID(),
       replyMessageId: links.replyMessageId,
       handoffId: links.handoffId,
