@@ -502,8 +502,9 @@ async function insertRun(
       `INSERT INTO ai_runs
          (organization_id, conversation_id, inbound_message_id, provider, model,
           prompt_version, retrieved, input_tokens, output_tokens, latency_ms,
-          outcome, reason, error, reply_message_id, handoff_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15)
+          outcome, reason, error, reply_message_id, handoff_id,
+          agent_id, agent_policy_version_id, model_registry_id, cost_usd)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        RETURNING *`,
       [
         input.organizationId,
