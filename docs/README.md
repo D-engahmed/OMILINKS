@@ -168,7 +168,8 @@ Implementation is incremental and phase-gated.
 Current verified runtime slices are:
 - tenancy/identity/customer/conversation/workforce foundation;
 - Phase 2 conversation core and initial governed AI pipeline;
-- Phase 3 Web Widget channel ingress and provider-event ledger.
+- Phase 3 Web Widget channel ingress and provider-event ledger;
+- Phase 4 workforce state, deterministic routing, queues, policy versions, and assignment commit safety.
 
 The rest of the domain architecture remains target until implementation and automated evidence exist.
 

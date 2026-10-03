@@ -213,6 +213,174 @@ export interface WorkforceMember {
   updatedAt: string
 }
 
+export type PresenceState = "OFFLINE" | "AVAILABLE" | "BUSY" | "AWAY" | "UNKNOWN"
+export type WorkforceSkillStatus = "ACTIVE" | "DISABLED"
+export type QueueStatus = "ACTIVE" | "PAUSED" | "DISABLED"
+export type QueueItemStatus = "QUEUED" | "CLAIMED" | "CANCELED" | "EXPIRED"
+export type RoutingOutcome = "ASSIGNED" | "QUEUED" | "NO_MATCH"
+
+export interface WorkforceSkill {
+  id: string
+  organizationId: string
+  code: string
+  name: string
+  status: WorkforceSkillStatus
+  createdAt: string
+}
+
+export interface WorkforceMemberSkill {
+  id: string
+  organizationId: string
+  workforceMemberId: string
+  skillId: string
+  proficiency: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkforcePresence {
+  workforceMemberId: string
+  organizationId: string
+  state: PresenceState
+  observedAt: string
+  expiresAt: string
+  source: string
+  version: number
+}
+
+export interface WorkforceCapacity {
+  workforceMemberId: string
+  organizationId: string
+  maxConcurrentWork: number
+  reservedWork: number
+  activeWork: number
+  effectiveCapacity: number
+  updatedAt: string
+  version: number
+}
+
+export interface WorkforceTeam {
+  id: string
+  organizationId: string
+  name: string
+  status: "ACTIVE" | "DISABLED"
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkforceQueue {
+  id: string
+  organizationId: string
+  name: string
+  status: QueueStatus
+  requiredSkillCodes: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface QueueItem {
+  id: string
+  organizationId: string
+  queueId: string
+  conversationId: string
+  status: QueueItemStatus
+  priority: Conversation["priority"]
+  enqueuedAt: string
+  lastRoutedAt: string | null
+  attempts: number
+  version: number
+}
+
+export interface RoutingPolicy {
+  id: string
+  organizationId: string
+  name: string
+  status: "ACTIVE" | "DISABLED"
+  createdAt: string
+}
+
+export interface RoutingPolicyVersion {
+  id: string
+  organizationId: string
+  policyId: string
+  version: number
+  status: "DRAFT" | "PUBLISHED" | "RETIRED"
+  config: RoutingPolicyConfig
+  createdAt: string
+}
+
+export interface RoutingPolicyConfig {
+  allowedWorkerTypes: Array<"HUMAN" | "AI">
+  presenceTtlSeconds: number
+  weights: {
+    skill: number
+    proficiency: number
+    load: number
+    urgency: number
+  }
+  defaultQueueId: string | null
+}
+
+export interface RoutingCandidate {
+  id: string
+  organizationId: string
+  routingDecisionId: string
+  workforceMemberId: string
+  eligible: boolean
+  rejectionCode: string | null
+  score: number
+  snapshot: Record<string, unknown>
+  createdAt: string
+}
+
+export interface RoutingDecision {
+  id: string
+  organizationId: string
+  conversationId: string
+  policyVersionId: string
+  outcome: RoutingOutcome
+  selectedWorkforceMemberId: string | null
+  queueId: string | null
+  reasonCodes: string[]
+  requestedSkills: string[]
+  contextSnapshot: Record<string, unknown>
+  createdAt: string
+}
+
+export interface RoutingEvaluationCandidate {
+  workforceMember: WorkforceMember
+  skills: Array<{ code: string; proficiency: number }>
+  presence: WorkforcePresence | null
+  capacity: WorkforceCapacity
+  authorized: boolean
+  teamIds: string[]
+}
+
+export interface RoutingContext {
+  organizationId: string
+  conversationId: string
+  channel: string
+  priority: Conversation["priority"]
+  requiredSkills: string[]
+  teamId: string | null
+  requestedWorkerTypes: Array<"HUMAN" | "AI">
+  now: string
+}
+
+export interface RoutingEvaluation {
+  outcome: RoutingOutcome
+  selectedMemberId: string | null
+  queueId: string | null
+  reasonCodes: string[]
+  candidates: Array<{
+    workforceMemberId: string
+    eligible: boolean
+    rejectionCode: string | null
+    score: number
+    snapshot: Record<string, unknown>
+  }>
+}
+
 export interface Assignment {
   id: string
   organizationId: string
@@ -222,6 +390,7 @@ export interface Assignment {
   assignedAt: string
   releasedAt: string | null
   reason: string
+  routingDecisionId: string | null
   version: number
 }
 

@@ -25,6 +25,19 @@ import type {
   Session,
   User,
   WorkforceMember,
+  WorkforceSkill,
+  WorkforceMemberSkill,
+  WorkforcePresence,
+  WorkforceCapacity,
+  WorkforceTeam,
+  WorkforceQueue,
+  QueueItem,
+  RoutingPolicy,
+  RoutingPolicyConfig,
+  RoutingPolicyVersion,
+  RoutingDecision,
+  RoutingCandidate,
+  RoutingEvaluationCandidate,
 } from "../domain/types.js"
 
 import {
@@ -36,7 +49,10 @@ import {
 import type {
   AiReplyResult,
   AppendMessageInput,
+  CommitRoutingAssignmentInput,
+  CreateRoutingDecisionInput,
   EscalationResult,
+  RoutingCandidateQuery,
   Store,
 } from "./store.js"
 
@@ -202,6 +218,131 @@ const toWorkforceMember = (row: Row): WorkforceMember => ({
   updatedAt: iso(row.updated_at),
 })
 
+const toWorkforceSkill = (row: Row): WorkforceSkill => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  code: str(row.code),
+  name: str(row.name),
+  status: str(row.status) as WorkforceSkill["status"],
+  createdAt: iso(row.created_at),
+})
+
+const toWorkforceMemberSkill = (row: Row): WorkforceMemberSkill => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  workforceMemberId: str(row.workforce_member_id),
+  skillId: str(row.skill_id),
+  proficiency: num(row.proficiency),
+  createdAt: iso(row.created_at),
+  updatedAt: iso(row.updated_at),
+})
+
+const toWorkforcePresence = (row: Row): WorkforcePresence => ({
+  workforceMemberId: str(row.workforce_member_id),
+  organizationId: str(row.organization_id),
+  state: str(row.state) as WorkforcePresence["state"],
+  observedAt: iso(row.observed_at),
+  expiresAt: iso(row.expires_at),
+  source: str(row.source),
+  version: num(row.version),
+})
+
+const toWorkforceCapacity = (row: Row): WorkforceCapacity => ({
+  workforceMemberId: str(row.workforce_member_id),
+  organizationId: str(row.organization_id),
+  maxConcurrentWork: num(row.max_concurrent_work),
+  reservedWork: num(row.reserved_work),
+  activeWork: num(row.active_work ?? 0),
+  effectiveCapacity: num(
+    row.effective_capacity ??
+      num(row.max_concurrent_work) - num(row.reserved_work) - num(row.active_work ?? 0)
+  ),
+  updatedAt: iso(row.updated_at),
+  version: num(row.version),
+})
+
+const toWorkforceTeam = (row: Row): WorkforceTeam => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  name: str(row.name),
+  status: str(row.status) as WorkforceTeam["status"],
+  createdAt: iso(row.created_at),
+  updatedAt: iso(row.updated_at),
+})
+
+const toWorkforceQueue = (row: Row): WorkforceQueue => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  name: str(row.name),
+  status: str(row.status) as WorkforceQueue["status"],
+  requiredSkillCodes: Array.isArray(row.required_skill_codes)
+    ? (row.required_skill_codes as string[])
+    : [],
+  createdAt: iso(row.created_at),
+  updatedAt: iso(row.updated_at),
+})
+
+const toQueueItem = (row: Row): QueueItem => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  queueId: str(row.queue_id),
+  conversationId: str(row.conversation_id),
+  status: str(row.status) as QueueItem["status"],
+  priority: str(row.priority) as QueueItem["priority"],
+  enqueuedAt: iso(row.enqueued_at),
+  lastRoutedAt: isoOrNull(row.last_routed_at),
+  attempts: num(row.attempts),
+  version: num(row.version),
+})
+
+const toRoutingPolicy = (row: Row): RoutingPolicy => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  name: str(row.name),
+  status: str(row.status) as RoutingPolicy["status"],
+  createdAt: iso(row.created_at),
+})
+
+const toRoutingPolicyVersion = (row: Row): RoutingPolicyVersion => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  policyId: str(row.policy_id),
+  version: num(row.version),
+  status: str(row.status) as RoutingPolicyVersion["status"],
+  config: row.config as RoutingPolicyConfig,
+  createdAt: iso(row.created_at),
+})
+
+const toRoutingDecision = (row: Row): RoutingDecision => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  conversationId: str(row.conversation_id),
+  policyVersionId: str(row.policy_version_id),
+  outcome: str(row.outcome) as RoutingDecision["outcome"],
+  selectedWorkforceMemberId: strOrNull(row.selected_workforce_member_id),
+  queueId: strOrNull(row.queue_id),
+  reasonCodes: Array.isArray(row.reason_codes)
+    ? (row.reason_codes as string[])
+    : [],
+  requestedSkills: Array.isArray(row.requested_skills)
+    ? (row.requested_skills as string[])
+    : [],
+  contextSnapshot: row.context_snapshot as Record<string, unknown>,
+  createdAt: iso(row.created_at),
+})
+
+const toRoutingCandidate = (row: Row): RoutingCandidate => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  routingDecisionId: str(row.routing_decision_id),
+  workforceMemberId: str(row.workforce_member_id),
+  eligible: Boolean(row.eligible),
+  rejectionCode: strOrNull(row.rejection_code),
+  score: Number(row.score),
+  snapshot: row.snapshot as Record<string, unknown>,
+  createdAt: iso(row.created_at),
+})
+
 const toAssignment = (row: Row): Assignment => ({
   id: str(row.id),
   organizationId: str(row.organization_id),
@@ -211,6 +352,7 @@ const toAssignment = (row: Row): Assignment => ({
   assignedAt: iso(row.assigned_at),
   releasedAt: isoOrNull(row.released_at),
   reason: str(row.reason),
+  routingDecisionId: strOrNull(row.routing_decision_id),
   version: num(row.version),
 })
 
@@ -1478,6 +1620,911 @@ export class PostgresStore implements Store {
     })
   }
 
+  async setWorkforceMemberStatus(input: {
+    organizationId: string
+    workforceMemberId: string
+    status: WorkforceMember["status"]
+  }): Promise<WorkforceMember> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const result = await client.query(
+        `UPDATE workforce_members
+            SET status = $3, updated_at = now()
+          WHERE id = $1 AND organization_id = $2
+          RETURNING *`,
+        [input.workforceMemberId, input.organizationId, input.status]
+      )
+      if (!result.rows[0]) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+      return toWorkforceMember(result.rows[0])
+    })
+  }
+
+  async listWorkforceMembers(organizationId: string): Promise<WorkforceMember[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM workforce_members
+          WHERE organization_id = $1
+          ORDER BY created_at ASC, id ASC`,
+        [organizationId]
+      )
+      return result.rows.map(toWorkforceMember)
+    })
+  }
+
+  async getWorkforceMember(
+    organizationId: string,
+    workforceMemberId: string
+  ): Promise<WorkforceMember | null> {
+    if (!isUuid(workforceMemberId)) return null
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM workforce_members
+          WHERE id = $1 AND organization_id = $2`,
+        [workforceMemberId, organizationId]
+      )
+      return result.rows[0] ? toWorkforceMember(result.rows[0]) : null
+    })
+  }
+
+  async createWorkforceSkill(input: {
+    organizationId: string
+    code: string
+    name: string
+  }): Promise<WorkforceSkill> {
+    try {
+      return await this.tenantTx(input.organizationId, async (client) => {
+        const result = await client.query(
+          `INSERT INTO workforce_skills (organization_id, code, name)
+           VALUES ($1,$2,$3) RETURNING *`,
+          [input.organizationId, input.code.trim().toLowerCase(), input.name.trim()]
+        )
+        return toWorkforceSkill(result.rows[0])
+      })
+    } catch (error) {
+      if (
+        pgCode(error) === UNIQUE_VIOLATION &&
+        pgConstraint(error) === "workforce_skills_organization_id_code_key"
+      ) {
+        throw new Error("WORKFORCE_SKILL_EXISTS")
+      }
+      throw error
+    }
+  }
+
+  async listWorkforceSkills(organizationId: string): Promise<WorkforceSkill[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM workforce_skills
+          WHERE organization_id = $1
+          ORDER BY code ASC, id ASC`,
+        [organizationId]
+      )
+      return result.rows.map(toWorkforceSkill)
+    })
+  }
+
+  async setMemberSkills(input: {
+    organizationId: string
+    workforceMemberId: string
+    skills: Array<{ skillId: string; proficiency: number }>
+  }): Promise<WorkforceMemberSkill[]> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const member = await client.query(
+        `SELECT 1 FROM workforce_members
+          WHERE id = $1 AND organization_id = $2`,
+        [input.workforceMemberId, input.organizationId]
+      )
+      if (!member.rows[0]) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+
+      await client.query(
+        `DELETE FROM workforce_member_skills
+          WHERE organization_id = $1 AND workforce_member_id = $2`,
+        [input.organizationId, input.workforceMemberId]
+      )
+
+      for (const skill of input.skills) {
+        const result = await client.query(
+          `SELECT 1 FROM workforce_skills
+            WHERE id = $1 AND organization_id = $2 AND status = 'ACTIVE'`,
+          [skill.skillId, input.organizationId]
+        )
+        if (!result.rows[0]) throw new Error("WORKFORCE_SKILL_NOT_FOUND")
+
+        await client.query(
+          `INSERT INTO workforce_member_skills
+             (organization_id, workforce_member_id, skill_id, proficiency)
+           VALUES ($1,$2,$3,$4)`,
+          [
+            input.organizationId,
+            input.workforceMemberId,
+            skill.skillId,
+            skill.proficiency,
+          ]
+        )
+      }
+
+      const result = await client.query(
+        `SELECT * FROM workforce_member_skills
+          WHERE organization_id = $1 AND workforce_member_id = $2
+          ORDER BY skill_id ASC`,
+        [input.organizationId, input.workforceMemberId]
+      )
+      return result.rows.map(toWorkforceMemberSkill)
+    })
+  }
+
+  async listMemberSkills(
+    organizationId: string,
+    workforceMemberId: string
+  ): Promise<Array<WorkforceMemberSkill & { code: string }>> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT m.*, s.code
+           FROM workforce_member_skills m
+           JOIN workforce_skills s
+             ON s.id = m.skill_id AND s.organization_id = m.organization_id
+          WHERE m.organization_id = $1 AND m.workforce_member_id = $2
+          ORDER BY s.code ASC`,
+        [organizationId, workforceMemberId]
+      )
+      return result.rows.map((row) => ({
+        ...toWorkforceMemberSkill(row),
+        code: str(row.code),
+      }))
+    })
+  }
+
+  async setWorkforcePresence(input: {
+    organizationId: string
+    workforceMemberId: string
+    state: WorkforcePresence["state"]
+    source: string
+    ttlSeconds: number
+    expectedVersion: number | null
+  }): Promise<WorkforcePresence> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const member = await client.query(
+        `SELECT 1 FROM workforce_members
+          WHERE id = $1 AND organization_id = $2`,
+        [input.workforceMemberId, input.organizationId]
+      )
+      if (!member.rows[0]) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+
+      const existing = await client.query(
+        `SELECT * FROM workforce_presence
+          WHERE workforce_member_id = $1 AND organization_id = $2
+          FOR UPDATE`,
+        [input.workforceMemberId, input.organizationId]
+      )
+      const current = existing.rows[0]
+      if (
+        current &&
+        input.expectedVersion !== null &&
+        num(current.version) !== input.expectedVersion
+      ) {
+        throw new Error("STALE_PRESENCE_VERSION")
+      }
+
+      const result = await client.query(
+        current
+          ? `UPDATE workforce_presence
+              SET state = $3,
+                  observed_at = now(),
+                  expires_at = now() + ($4::int * interval '1 second'),
+                  source = $5,
+                  version = version + 1
+            WHERE workforce_member_id = $1 AND organization_id = $2
+            RETURNING *`
+          : `INSERT INTO workforce_presence
+              (workforce_member_id, organization_id, state, observed_at, expires_at, source)
+             VALUES ($1,$2,$3,now(),now() + ($4::int * interval '1 second'),$5)
+             RETURNING *`,
+        [
+          input.workforceMemberId,
+          input.organizationId,
+          input.state,
+          input.ttlSeconds,
+          input.source.trim(),
+        ]
+      )
+      return toWorkforcePresence(result.rows[0])
+    })
+  }
+
+  async getWorkforcePresence(
+    organizationId: string,
+    workforceMemberId: string
+  ): Promise<WorkforcePresence | null> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM workforce_presence
+          WHERE workforce_member_id = $1 AND organization_id = $2`,
+        [workforceMemberId, organizationId]
+      )
+      return result.rows[0] ? toWorkforcePresence(result.rows[0]) : null
+    })
+  }
+
+  async setWorkforceCapacity(input: {
+    organizationId: string
+    workforceMemberId: string
+    maxConcurrentWork: number
+    expectedVersion: number | null
+  }): Promise<WorkforceCapacity> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const current = await client.query(
+        `SELECT * FROM workforce_capacity
+          WHERE workforce_member_id = $1 AND organization_id = $2
+          FOR UPDATE`,
+        [input.workforceMemberId, input.organizationId]
+      )
+      if (!current.rows[0]) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+      if (
+        input.expectedVersion !== null &&
+        num(current.rows[0].version) !== input.expectedVersion
+      ) {
+        throw new Error("STALE_CAPACITY_VERSION")
+      }
+      if (!Number.isInteger(input.maxConcurrentWork) || input.maxConcurrentWork < 1 || input.maxConcurrentWork > 1000) {
+        throw new Error("INVALID_CAPACITY")
+      }
+
+      const result = await client.query(
+        `UPDATE workforce_capacity
+            SET max_concurrent_work = $3, updated_at = now(), version = version + 1
+          WHERE workforce_member_id = $1 AND organization_id = $2
+          RETURNING *`,
+        [input.workforceMemberId, input.organizationId, input.maxConcurrentWork]
+      )
+
+      const row = result.rows[0]
+      const active = await client.query(
+        `SELECT count(*)::int AS active_work
+           FROM assignments
+          WHERE organization_id = $1
+            AND workforce_member_id = $2
+            AND status = 'ACTIVE'`,
+        [input.organizationId, input.workforceMemberId]
+      )
+      return toWorkforceCapacity({
+        ...row,
+        active_work: num(active.rows[0].active_work),
+      })
+    })
+  }
+
+  async getWorkforceCapacity(
+    organizationId: string,
+    workforceMemberId: string
+  ): Promise<WorkforceCapacity> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT c.*,
+                (
+                  SELECT count(*)::int FROM assignments a
+                   WHERE a.organization_id = c.organization_id
+                     AND a.workforce_member_id = c.workforce_member_id
+                     AND a.status = 'ACTIVE'
+                ) AS active_work
+           FROM workforce_capacity c
+          WHERE c.workforce_member_id = $1 AND c.organization_id = $2`,
+        [workforceMemberId, organizationId]
+      )
+      if (!result.rows[0]) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+      return toWorkforceCapacity(result.rows[0])
+    })
+  }
+
+  async createWorkforceTeam(input: {
+    organizationId: string
+    name: string
+  }): Promise<WorkforceTeam> {
+    try {
+      return await this.tenantTx(input.organizationId, async (client) => {
+        const result = await client.query(
+          `INSERT INTO teams (organization_id, name)
+           VALUES ($1,$2) RETURNING *`,
+          [input.organizationId, input.name.trim()]
+        )
+        return toWorkforceTeam(result.rows[0])
+      })
+    } catch (error) {
+      if (pgCode(error) === UNIQUE_VIOLATION) throw new Error("WORKFORCE_TEAM_EXISTS")
+      throw error
+    }
+  }
+
+  async listWorkforceTeams(organizationId: string): Promise<WorkforceTeam[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM teams WHERE organization_id = $1 ORDER BY name ASC, id ASC`,
+        [organizationId]
+      )
+      return result.rows.map(toWorkforceTeam)
+    })
+  }
+
+  async setTeamMembers(input: {
+    organizationId: string
+    teamId: string
+    workforceMemberIds: string[]
+  }): Promise<void> {
+    await this.tenantTx(input.organizationId, async (client) => {
+      const team = await client.query(
+        `SELECT 1 FROM teams WHERE id = $1 AND organization_id = $2`,
+        [input.teamId, input.organizationId]
+      )
+      if (!team.rows[0]) throw new Error("WORKFORCE_TEAM_NOT_FOUND")
+
+      await client.query(
+        `DELETE FROM team_members WHERE team_id = $1 AND organization_id = $2`,
+        [input.teamId, input.organizationId]
+      )
+
+      for (const memberId of input.workforceMemberIds) {
+        const member = await client.query(
+          `SELECT 1 FROM workforce_members WHERE id = $1 AND organization_id = $2`,
+          [memberId, input.organizationId]
+        )
+        if (!member.rows[0]) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+        await client.query(
+          `INSERT INTO team_members (organization_id, team_id, workforce_member_id)
+           VALUES ($1,$2,$3)`,
+          [input.organizationId, input.teamId, memberId]
+        )
+      }
+    })
+  }
+
+  async createQueue(input: {
+    organizationId: string
+    name: string
+    requiredSkillIds: string[]
+  }): Promise<WorkforceQueue> {
+    try {
+      return await this.tenantTx(input.organizationId, async (client) => {
+        const queue = await client.query(
+          `INSERT INTO queues (organization_id, name)
+           VALUES ($1,$2) RETURNING *`,
+          [input.organizationId, input.name.trim()]
+        )
+        for (const skillId of input.requiredSkillIds) {
+          const skill = await client.query(
+            `SELECT 1 FROM workforce_skills
+              WHERE id = $1 AND organization_id = $2 AND status = 'ACTIVE'`,
+            [skillId, input.organizationId]
+          )
+          if (!skill.rows[0]) throw new Error("WORKFORCE_SKILL_NOT_FOUND")
+          await client.query(
+            `INSERT INTO queue_skills (organization_id, queue_id, skill_id)
+             VALUES ($1,$2,$3)`,
+            [input.organizationId, queue.rows[0].id, skillId]
+          )
+        }
+        const result = await client.query(
+          `SELECT q.*,
+             COALESCE(array_agg(s.code ORDER BY s.code) FILTER (WHERE s.code IS NOT NULL), ARRAY[]::text[]) AS required_skill_codes
+            FROM queues q
+            LEFT JOIN queue_skills qs
+              ON qs.queue_id = q.id AND qs.organization_id = q.organization_id
+            LEFT JOIN workforce_skills s
+              ON s.id = qs.skill_id AND s.organization_id = qs.organization_id
+           WHERE q.id = $1 AND q.organization_id = $2
+           GROUP BY q.id`,
+          [queue.rows[0].id, input.organizationId]
+        )
+        return toWorkforceQueue(result.rows[0])
+      })
+    } catch (error) {
+      if (pgCode(error) === UNIQUE_VIOLATION) throw new Error("QUEUE_EXISTS")
+      throw error
+    }
+  }
+
+  async listQueues(organizationId: string): Promise<WorkforceQueue[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT q.*,
+          COALESCE(array_agg(s.code ORDER BY s.code) FILTER (WHERE s.code IS NOT NULL), ARRAY[]::text[]) AS required_skill_codes
+         FROM queues q
+         LEFT JOIN queue_skills qs
+           ON qs.queue_id = q.id AND qs.organization_id = q.organization_id
+         LEFT JOIN workforce_skills s
+           ON s.id = qs.skill_id AND s.organization_id = qs.organization_id
+        WHERE q.organization_id = $1
+        GROUP BY q.id
+        ORDER BY q.name ASC, q.id ASC`,
+        [organizationId]
+      )
+      return result.rows.map(toWorkforceQueue)
+    })
+  }
+
+  async enqueueConversation(input: {
+    organizationId: string
+    queueId: string
+    conversationId: string
+  }): Promise<QueueItem> {
+    if (!isUuid(input.conversationId)) throw new Error("CONVERSATION_NOT_FOUND")
+    return this.tenantTx(input.organizationId, async (client) => {
+      const conversation = await client.query(
+        `SELECT * FROM conversations
+          WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+        [input.conversationId, input.organizationId]
+      )
+      if (!conversation.rows[0]) throw new Error("CONVERSATION_NOT_FOUND")
+
+      const queue = await client.query(
+        `SELECT * FROM queues
+          WHERE id = $1 AND organization_id = $2 AND status = 'ACTIVE'`,
+        [input.queueId, input.organizationId]
+      )
+      if (!queue.rows[0]) throw new Error("QUEUE_NOT_FOUND")
+
+      const existing = await client.query(
+        `SELECT * FROM queue_items
+          WHERE organization_id = $1 AND conversation_id = $2
+            AND status IN ('QUEUED','CLAIMED')
+          FOR UPDATE`,
+        [input.organizationId, input.conversationId]
+      )
+      if (existing.rows[0]) return toQueueItem(existing.rows[0])
+
+      if (["RESOLVED","SPAM"].includes(str(conversation.rows[0].status))) {
+        throw new Error("CONVERSATION_NOT_ROUTABLE")
+      }
+
+      const item = await client.query(
+        `INSERT INTO queue_items
+          (organization_id, queue_id, conversation_id, status, priority)
+         VALUES ($1,$2,$3,'QUEUED',$4)
+         RETURNING *`,
+        [
+          input.organizationId,
+          input.queueId,
+          input.conversationId,
+          conversation.rows[0].priority,
+        ]
+      )
+
+      await client.query(
+        `UPDATE conversations
+            SET status = 'OPEN', control = 'queue',
+                control_version = control_version + 1,
+                version = version + 1, updated_at = now()
+          WHERE id = $1 AND organization_id = $2`,
+        [input.conversationId, input.organizationId]
+      )
+
+      await insertOutboxEvent(client, {
+        organizationId: input.organizationId,
+        eventType: "conversation.queue.entered",
+        aggregateType: "conversation",
+        aggregateId: input.conversationId,
+        correlationId: input.conversationId,
+        payload: { queueItem: toQueueItem(item.rows[0]) },
+      })
+
+      return toQueueItem(item.rows[0])
+    })
+  }
+
+  async createOrPublishRoutingPolicy(input: {
+    organizationId: string
+    name: string
+    config: RoutingPolicyConfig
+  }): Promise<{ policy: RoutingPolicy; version: RoutingPolicyVersion }> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const existing = await client.query(
+        `SELECT * FROM routing_policies
+          WHERE organization_id = $1 AND name = $2
+          FOR UPDATE`,
+        [input.organizationId, input.name.trim()]
+      )
+      let policy: RoutingPolicy
+      if (existing.rows[0]) {
+        policy = toRoutingPolicy(existing.rows[0])
+      } else {
+        const created = await client.query(
+          `INSERT INTO routing_policies (organization_id, name)
+           VALUES ($1,$2) RETURNING *`,
+          [input.organizationId, input.name.trim()]
+        )
+        policy = toRoutingPolicy(created.rows[0])
+      }
+
+      const latest = await client.query(
+        `SELECT COALESCE(max(version),0)::int AS max_version
+           FROM routing_policy_versions
+          WHERE organization_id = $1 AND policy_id = $2`,
+        [input.organizationId, policy.id]
+      )
+      await client.query(
+        `UPDATE routing_policy_versions
+            SET status = 'RETIRED'
+          WHERE organization_id = $1 AND policy_id = $2 AND status = 'PUBLISHED'`,
+        [input.organizationId, policy.id]
+      )
+      const result = await client.query(
+        `INSERT INTO routing_policy_versions
+           (organization_id, policy_id, version, status, config)
+         VALUES ($1,$2,$3,'PUBLISHED',$4::jsonb)
+         RETURNING *`,
+        [
+          input.organizationId,
+          policy.id,
+          num(latest.rows[0].max_version) + 1,
+          JSON.stringify(input.config),
+        ]
+      )
+      return {
+        policy,
+        version: toRoutingPolicyVersion(result.rows[0]),
+      }
+    })
+  }
+
+  async listRoutingPolicies(
+    organizationId: string
+  ): Promise<Array<RoutingPolicy & { versions: RoutingPolicyVersion[] }>> {
+    return this.tenantTx(organizationId, async (client) => {
+      const policies = await client.query(
+        `SELECT * FROM routing_policies WHERE organization_id = $1 ORDER BY name ASC, id ASC`,
+        [organizationId]
+      )
+      const versions = await client.query(
+        `SELECT * FROM routing_policy_versions
+          WHERE organization_id = $1 ORDER BY policy_id ASC, version ASC`,
+        [organizationId]
+      )
+      return policies.rows.map((row) => ({
+        ...toRoutingPolicy(row),
+        versions: versions.rows
+          .filter((v) => str(v.policy_id) === str(row.id))
+          .map(toRoutingPolicyVersion),
+      }))
+    })
+  }
+
+  async getPublishedRoutingPolicy(
+    organizationId: string,
+    name: string
+  ): Promise<{ policy: RoutingPolicy; version: RoutingPolicyVersion } | null> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT p.*, v.id AS version_id, v.policy_id AS version_policy_id,
+                v.version AS version_number, v.status AS version_status,
+                v.config, v.created_at AS version_created_at
+           FROM routing_policies p
+           JOIN routing_policy_versions v
+             ON v.policy_id = p.id AND v.organization_id = p.organization_id
+            AND v.status = 'PUBLISHED'
+          WHERE p.organization_id = $1 AND p.name = $2 AND p.status = 'ACTIVE'
+          ORDER BY v.version DESC LIMIT 1`,
+        [organizationId, name]
+      )
+      if (!result.rows[0]) return null
+      const row = result.rows[0]
+      return {
+        policy: toRoutingPolicy(row),
+        version: {
+          id: str(row.version_id),
+          organizationId,
+          policyId: str(row.version_policy_id),
+          version: num(row.version_number),
+          status: "PUBLISHED",
+          config: row.config as RoutingPolicyConfig,
+          createdAt: iso(row.version_created_at),
+        },
+      }
+    })
+  }
+
+  async getRoutingCandidates(
+    query: RoutingCandidateQuery
+  ): Promise<RoutingEvaluationCandidate[]> {
+    return this.tenantTx(query.organizationId, async (client) => {
+      const members = await client.query(
+        `SELECT * FROM workforce_members
+          WHERE organization_id = $1`,
+        [query.organizationId]
+      )
+      const skillRows = await client.query(
+        `SELECT m.workforce_member_id, s.code, m.proficiency
+           FROM workforce_member_skills m
+           JOIN workforce_skills s
+             ON s.id = m.skill_id AND s.organization_id = m.organization_id
+          WHERE m.organization_id = $1 AND s.status = 'ACTIVE'`,
+        [query.organizationId]
+      )
+      const presenceRows = await client.query(
+        `SELECT * FROM workforce_presence WHERE organization_id = $1`,
+        [query.organizationId]
+      )
+      const capacityRows = await client.query(
+        `SELECT c.*,
+          (
+            SELECT count(*)::int FROM assignments a
+             WHERE a.organization_id = c.organization_id
+               AND a.workforce_member_id = c.workforce_member_id
+               AND a.status = 'ACTIVE'
+          ) AS active_work
+         FROM workforce_capacity c
+        WHERE c.organization_id = $1`,
+        [query.organizationId]
+      )
+      const teamRows = await client.query(
+        `SELECT workforce_member_id, team_id
+           FROM team_members WHERE organization_id = $1`,
+        [query.organizationId]
+      )
+      const memberships = await client.query(
+        `SELECT user_id FROM memberships
+          WHERE organization_id = $1 AND status = 'ACTIVE'`,
+        [query.organizationId]
+      )
+      const authorizedUsers = new Set(memberships.rows.map((row) => str(row.user_id)))
+      const skillsByMember = new Map<string, Array<{ code: string; proficiency: number }>>()
+      for (const row of skillRows.rows) {
+        const list = skillsByMember.get(str(row.workforce_member_id)) ?? []
+        list.push({ code: str(row.code), proficiency: num(row.proficiency) })
+        skillsByMember.set(str(row.workforce_member_id), list)
+      }
+      const presenceByMember = new Map<string, WorkforcePresence>()
+      for (const row of presenceRows.rows) {
+        presenceByMember.set(str(row.workforce_member_id), toWorkforcePresence(row))
+      }
+      const capacityByMember = new Map<string, WorkforceCapacity>()
+      for (const row of capacityRows.rows) {
+        capacityByMember.set(str(row.workforce_member_id), toWorkforceCapacity(row))
+      }
+      const teamIdsByMember = new Map<string, string[]>()
+      for (const row of teamRows.rows) {
+        const list = teamIdsByMember.get(str(row.workforce_member_id)) ?? []
+        list.push(str(row.team_id))
+        teamIdsByMember.set(str(row.workforce_member_id), list)
+      }
+
+      return members.rows.map((row) => {
+        const member = toWorkforceMember(row)
+        const capacity = capacityByMember.get(member.id) ?? {
+          workforceMemberId: member.id,
+          organizationId: query.organizationId,
+          maxConcurrentWork: 5,
+          reservedWork: 0,
+          activeWork: 0,
+          effectiveCapacity: 5,
+          updatedAt: new Date().toISOString(),
+          version: 1,
+        }
+        return {
+          workforceMember: member,
+          skills: skillsByMember.get(member.id) ?? [],
+          presence: presenceByMember.get(member.id) ?? null,
+          capacity,
+          authorized: member.type === "AI" ? true : member.userId !== null && authorizedUsers.has(member.userId),
+          teamIds: teamIdsByMember.get(member.id) ?? [],
+        }
+      })
+    })
+  }
+
+  async createRoutingDecision(input: CreateRoutingDecisionInput) {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const decisionResult = await client.query(
+        `INSERT INTO routing_decisions
+           (organization_id, conversation_id, policy_version_id, outcome,
+            selected_workforce_member_id, queue_id, reason_codes, requested_skills,
+            context_snapshot)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb)
+         RETURNING *`,
+        [
+          input.organizationId,
+          input.conversationId,
+          input.policyVersionId,
+          input.outcome,
+          input.selectedWorkforceMemberId,
+          input.queueId,
+          JSON.stringify(input.reasonCodes),
+          JSON.stringify(input.requestedSkills),
+          JSON.stringify(input.contextSnapshot),
+        ]
+      )
+      const candidates: RoutingCandidate[] = []
+      for (const candidate of input.candidates) {
+        const result = await client.query(
+          `INSERT INTO routing_candidates
+             (organization_id, routing_decision_id, workforce_member_id, eligible,
+              rejection_code, score, snapshot)
+           VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
+           RETURNING *`,
+          [
+            input.organizationId,
+            decisionResult.rows[0].id,
+            candidate.workforceMemberId,
+            candidate.eligible,
+            candidate.rejectionCode,
+            candidate.score,
+            JSON.stringify(candidate.snapshot),
+          ]
+        )
+        candidates.push(toRoutingCandidate(result.rows[0]))
+      }
+      return {
+        decision: toRoutingDecision(decisionResult.rows[0]),
+        candidates,
+      }
+    })
+  }
+
+  async commitRoutingAssignment(
+    input: CommitRoutingAssignmentInput
+  ): Promise<Assignment> {
+    if (!isUuid(input.conversationId) || !isUuid(input.workforceMemberId)) {
+      throw new Error("NOT_FOUND")
+    }
+
+    try {
+      return await this.tenantTx(input.organizationId, async (client) => {
+        const conversation = await client.query(
+          `SELECT * FROM conversations
+            WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+          [input.conversationId, input.organizationId]
+        )
+        if (!conversation.rows[0]) throw new Error("CONVERSATION_NOT_FOUND")
+        if (num(conversation.rows[0].version) !== input.expectedConversationVersion) {
+          throw new Error("STALE_VERSION")
+        }
+        if (["RESOLVED","SPAM"].includes(str(conversation.rows[0].status))) {
+          throw new Error("CONVERSATION_NOT_ROUTABLE")
+        }
+
+        const decision = await client.query(
+          `SELECT * FROM routing_decisions
+            WHERE id = $1 AND organization_id = $2
+            FOR UPDATE`,
+          [input.routingDecisionId, input.organizationId]
+        )
+        if (!decision.rows[0]) throw new Error("ROUTING_DECISION_NOT_FOUND")
+        if (str(decision.rows[0].conversation_id) !== input.conversationId) {
+          throw new Error("ROUTING_DECISION_MISMATCH")
+        }
+        if (strOrNull(decision.rows[0].selected_workforce_member_id) !== input.workforceMemberId) {
+          throw new Error("ROUTING_DECISION_MISMATCH")
+        }
+
+        const member = await client.query(
+          `SELECT * FROM workforce_members
+            WHERE id = $1 AND organization_id = $2
+            FOR UPDATE`,
+          [input.workforceMemberId, input.organizationId]
+        )
+        if (!member.rows[0]) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+        if (member.rows[0].status !== "ACTIVE") throw new Error("WORKFORCE_MEMBER_DISABLED")
+
+        const active = await client.query(
+          `SELECT 1 FROM assignments
+            WHERE organization_id = $1 AND conversation_id = $2
+              AND status = 'ACTIVE'`,
+          [input.organizationId, input.conversationId]
+        )
+        if (active.rows[0]) throw new Error("ACTIVE_ASSIGNMENT_EXISTS")
+
+        const presence = await client.query(
+          `SELECT * FROM workforce_presence
+            WHERE workforce_member_id = $1 AND organization_id = $2
+            FOR UPDATE`,
+          [input.workforceMemberId, input.organizationId]
+        )
+        const p = presence.rows[0]
+        if (
+          !p ||
+          p.state !== "AVAILABLE" ||
+          new Date(p.expires_at).getTime() <= Date.now() ||
+          new Date(p.observed_at).getTime() <= Date.now() - input.presenceTtlSeconds * 1000
+        ) {
+          throw new Error("WORKER_NOT_ELIGIBLE")
+        }
+
+        const capacity = await client.query(
+          `SELECT c.*,
+              (SELECT count(*)::int FROM assignments a
+                WHERE a.organization_id = c.organization_id
+                  AND a.workforce_member_id = c.workforce_member_id
+                  AND a.status = 'ACTIVE') AS active_work
+             FROM workforce_capacity c
+            WHERE c.workforce_member_id = $1 AND c.organization_id = $2
+            FOR UPDATE`,
+          [input.workforceMemberId, input.organizationId]
+        )
+        if (!capacity.rows[0]) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+        const currentCapacity = toWorkforceCapacity(capacity.rows[0])
+        if (currentCapacity.effectiveCapacity <= 0) throw new Error("CAPACITY_EXHAUSTED")
+
+        if (input.requiredSkills.length > 0) {
+          const skills = await client.query(
+            `SELECT count(*)::int AS matched
+               FROM workforce_member_skills m
+               JOIN workforce_skills s
+                 ON s.id = m.skill_id AND s.organization_id = m.organization_id
+              WHERE m.organization_id = $1
+                AND m.workforce_member_id = $2
+                AND s.status = 'ACTIVE'
+                AND s.code = ANY($3::text[])`,
+            [input.organizationId, input.workforceMemberId, input.requiredSkills]
+          )
+          if (num(skills.rows[0].matched) !== input.requiredSkills.length) {
+            throw new Error("WORKER_SKILLS_CHANGED")
+          }
+        }
+
+        if (input.teamId !== null) {
+          const team = await client.query(
+            `SELECT 1 FROM team_members
+              WHERE organization_id = $1 AND team_id = $2 AND workforce_member_id = $3`,
+            [input.organizationId, input.teamId, input.workforceMemberId]
+          )
+          if (!team.rows[0]) throw new Error("WORKER_TEAM_CHANGED")
+        }
+
+        const assignmentResult = await client.query(
+          `INSERT INTO assignments
+             (organization_id, conversation_id, workforce_member_id, status,
+              reason, routing_decision_id)
+           VALUES ($1,$2,$3,'ACTIVE',$4,$5)
+           RETURNING *`,
+          [
+            input.organizationId,
+            input.conversationId,
+            input.workforceMemberId,
+            input.reason.trim() || "routed",
+            input.routingDecisionId,
+          ]
+        )
+
+        await client.query(
+          `UPDATE conversations
+             SET status = 'ASSIGNED',
+                 control = CASE WHEN $3 = 'AI' THEN 'ai' ELSE 'human' END,
+                 control_version = control_version + 1,
+                 version = version + 1,
+                 updated_at = now()
+            WHERE id = $1 AND organization_id = $2`,
+          [input.conversationId, input.organizationId, str(member.rows[0].type)]
+        )
+
+        await client.query(
+          `UPDATE queue_items
+              SET status = 'CLAIMED', last_routed_at = now(),
+                  attempts = attempts + 1, version = version + 1
+            WHERE organization_id = $1 AND conversation_id = $2
+              AND status IN ('QUEUED','CLAIMED')`,
+          [input.organizationId, input.conversationId]
+        )
+
+        const assignment = toAssignment(assignmentResult.rows[0])
+        await insertOutboxEvent(client, {
+          organizationId: input.organizationId,
+          eventType: "conversation.assignment.changed",
+          aggregateType: "conversation",
+          aggregateId: input.conversationId,
+          correlationId: input.routingDecisionId,
+          causationId: input.routingDecisionId,
+          payload: { assignment, routingDecisionId: input.routingDecisionId },
+        })
+
+        return assignment
+      })
+    } catch (error) {
+      if (
+        pgCode(error) === UNIQUE_VIOLATION &&
+        pgConstraint(error) === "active_assignment_per_conversation_idx"
+      ) {
+        throw new Error("ACTIVE_ASSIGNMENT_EXISTS")
+      }
+      throw error
+    }
+  }
+
   async createWorkforceMember(input: {
     organizationId: string
     userId: string | null
@@ -1511,6 +2558,20 @@ export class PostgresStore implements Store {
         ]
       )
 
+      await client.query(
+        `INSERT INTO workforce_presence
+           (workforce_member_id, organization_id, state, observed_at, expires_at, source)
+         VALUES ($1,$2,'OFFLINE',now(),now(),'create')`,
+        [result.rows[0].id, input.organizationId]
+      )
+
+      await client.query(
+        `INSERT INTO workforce_capacity
+           (workforce_member_id, organization_id, max_concurrent_work, reserved_work)
+         VALUES ($1,$2,5,0)`,
+        [result.rows[0].id, input.organizationId]
+      )
+
       return toWorkforceMember(result.rows[0])
     })
   }
@@ -1531,29 +2592,23 @@ export class PostgresStore implements Store {
             WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
           [input.conversationId, input.organizationId]
         )
-
         if (!conversation.rows[0]) throw new Error("CONVERSATION_NOT_FOUND")
+
+        if (num(conversation.rows[0].version) !== input.expectedConversationVersion) {
+          throw new Error("STALE_VERSION")
+        }
 
         const member = isUuid(input.workforceMemberId)
           ? await client.query(
               `SELECT * FROM workforce_members
-                WHERE id = $1 AND organization_id = $2`,
+                WHERE id = $1 AND organization_id = $2
+                FOR UPDATE`,
               [input.workforceMemberId, input.organizationId]
             )
           : { rows: [] as Row[] }
 
         if (!member.rows[0]) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
-
-        if (member.rows[0].status !== "ACTIVE") {
-          throw new Error("WORKFORCE_MEMBER_DISABLED")
-        }
-
-        if (
-          num(conversation.rows[0].version) !==
-          input.expectedConversationVersion
-        ) {
-          throw new Error("STALE_VERSION")
-        }
+        if (member.rows[0].status !== "ACTIVE") throw new Error("WORKFORCE_MEMBER_DISABLED")
 
         const active = await client.query(
           `SELECT 1 FROM assignments
@@ -1561,14 +2616,29 @@ export class PostgresStore implements Store {
               AND status = 'ACTIVE'`,
           [input.organizationId, input.conversationId]
         )
-
         if (active.rows[0]) throw new Error("ACTIVE_ASSIGNMENT_EXISTS")
+
+        const capacity = await client.query(
+          `SELECT c.*,
+              (SELECT count(*)::int FROM assignments a
+                WHERE a.organization_id = c.organization_id
+                  AND a.workforce_member_id = c.workforce_member_id
+                  AND a.status = 'ACTIVE') AS active_work
+             FROM workforce_capacity c
+            WHERE c.workforce_member_id = $1 AND c.organization_id = $2
+            FOR UPDATE`,
+          [input.workforceMemberId, input.organizationId]
+        )
+        if (!capacity.rows[0]) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+        if (toWorkforceCapacity(capacity.rows[0]).effectiveCapacity <= 0) {
+          throw new Error("CAPACITY_EXHAUSTED")
+        }
 
         const assignment = await client.query(
           `INSERT INTO assignments
              (organization_id, conversation_id, workforce_member_id, status,
-              reason)
-           VALUES ($1, $2, $3, 'ACTIVE', $4) RETURNING *`,
+              reason, routing_decision_id)
+           VALUES ($1, $2, $3, 'ACTIVE', $4, NULL) RETURNING *`,
           [
             input.organizationId,
             input.conversationId,
@@ -1579,11 +2649,12 @@ export class PostgresStore implements Store {
 
         await client.query(
           `UPDATE conversations
-              SET status = 'ASSIGNED', control = 'human',
+              SET status = 'ASSIGNED',
+                  control = CASE WHEN $3 = 'AI' THEN 'ai' ELSE 'human' END,
                   control_version = control_version + 1,
                   version = version + 1, updated_at = now()
             WHERE id = $1 AND organization_id = $2`,
-          [input.conversationId, input.organizationId]
+          [input.conversationId, input.organizationId, str(member.rows[0].type)]
         )
 
         await client.query(
@@ -1593,7 +2664,18 @@ export class PostgresStore implements Store {
           [input.organizationId, input.conversationId]
         )
 
-        return toAssignment(assignment.rows[0])
+        const value = toAssignment(assignment.rows[0])
+        await insertOutboxEvent(client, {
+          organizationId: input.organizationId,
+          eventType: "conversation.assignment.changed",
+          aggregateType: "conversation",
+          aggregateId: input.conversationId,
+          correlationId: value.id,
+          causationId: value.id,
+          payload: { assignment: value },
+        })
+
+        return value
       })
     } catch (error) {
       if (
@@ -1602,8 +2684,83 @@ export class PostgresStore implements Store {
       ) {
         throw new Error("ACTIVE_ASSIGNMENT_EXISTS")
       }
-
       throw error
     }
   }
+  async releaseAssignment(input: {
+    organizationId: string
+    assignmentId: string
+    expectedVersion: number
+    status: Extract<Assignment["status"], "RELEASED" | "COMPLETED" | "TRANSFERRED" | "CANCELED">
+  }): Promise<Assignment> {
+    if (!isUuid(input.assignmentId)) throw new Error("ASSIGNMENT_NOT_FOUND")
+
+    return this.tenantTx(input.organizationId, async (client) => {
+      const assignmentResult = await client.query(
+        `SELECT * FROM assignments
+          WHERE id = $1 AND organization_id = $2
+          FOR UPDATE`,
+        [input.assignmentId, input.organizationId]
+      )
+      const row = assignmentResult.rows[0]
+      if (!row) throw new Error("ASSIGNMENT_NOT_FOUND")
+      if (str(row.status) !== "ACTIVE") throw new Error("ASSIGNMENT_NOT_ACTIVE")
+      if (num(row.version) !== input.expectedVersion) {
+        throw new Error("STALE_ASSIGNMENT_VERSION")
+      }
+
+      const conversationResult = await client.query(
+        `SELECT * FROM conversations
+          WHERE id = $1 AND organization_id = $2
+          FOR UPDATE`,
+        [row.conversation_id, input.organizationId]
+      )
+      if (!conversationResult.rows[0]) throw new Error("CONVERSATION_NOT_FOUND")
+
+      const updated = await client.query(
+        `UPDATE assignments
+            SET status = $3, released_at = now(), version = version + 1
+          WHERE id = $1 AND organization_id = $2
+          RETURNING *`,
+        [input.assignmentId, input.organizationId, input.status]
+      )
+
+      if (input.status !== "COMPLETED") {
+        await client.query(
+          `UPDATE queue_items
+              SET status = 'QUEUED', enqueued_at = now(),
+                  last_routed_at = NULL, version = version + 1
+            WHERE organization_id = $1
+              AND conversation_id = $2
+              AND status = 'CLAIMED'`,
+          [input.organizationId, row.conversation_id]
+        )
+      }
+
+      await client.query(
+        `UPDATE conversations
+            SET status = CASE WHEN $3 = 'COMPLETED' THEN 'WAITING_CUSTOMER' ELSE 'OPEN' END,
+                control = 'queue',
+                control_version = control_version + 1,
+                version = version + 1,
+                updated_at = now()
+          WHERE id = $1 AND organization_id = $2`,
+        [row.conversation_id, input.organizationId, input.status]
+      )
+
+      const assignment = toAssignment(updated.rows[0])
+      await insertOutboxEvent(client, {
+        organizationId: input.organizationId,
+        eventType: "conversation.assignment.changed",
+        aggregateType: "conversation",
+        aggregateId: assignment.conversationId,
+        correlationId: assignment.id,
+        causationId: assignment.id,
+        payload: { assignment },
+      })
+
+      return assignment
+    })
+  }
+
 }

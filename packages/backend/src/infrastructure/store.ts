@@ -23,6 +23,19 @@ import type {
   Session,
   User,
   WorkforceMember,
+  WorkforceSkill,
+  WorkforceMemberSkill,
+  WorkforcePresence,
+  WorkforceCapacity,
+  WorkforceTeam,
+  WorkforceQueue,
+  QueueItem,
+  RoutingPolicy,
+  RoutingPolicyConfig,
+  RoutingPolicyVersion,
+  RoutingDecision,
+  RoutingCandidate,
+  RoutingEvaluationCandidate,
 } from "../domain/types.js"
 
 import { hashRequest, hashToken, normalizeEmail } from "./common.js"
@@ -84,7 +97,112 @@ export const ACTIVE_CONVERSATION_STATUSES = [
   "REOPENED",
 ] as const
 
-export interface Store { 
+export interface CreateRoutingDecisionInput {
+  organizationId: string
+  conversationId: string
+  policyVersionId: string
+  outcome: RoutingDecision["outcome"]
+  selectedWorkforceMemberId: string | null
+  queueId: string | null
+  reasonCodes: string[]
+  requestedSkills: string[]
+  contextSnapshot: Record<string, unknown>
+  candidates: Array<{
+    workforceMemberId: string
+    eligible: boolean
+    rejectionCode: string | null
+    score: number
+    snapshot: Record<string, unknown>
+  }>
+}
+
+export interface RoutingCandidateQuery {
+  organizationId: string
+  teamId: string | null
+}
+
+export interface CommitRoutingAssignmentInput {
+  organizationId: string
+  conversationId: string
+  workforceMemberId: string
+  routingDecisionId: string
+  expectedConversationVersion: number
+  requiredSkills: string[]
+  teamId: string | null
+  presenceTtlSeconds: number
+  reason: string
+}
+
+export interface Store {
+  setWorkforceMemberStatus(input: {
+    organizationId: string
+    workforceMemberId: string
+    status: WorkforceMember["status"]
+  }): Promise<WorkforceMember>
+  listWorkforceMembers(organizationId: string): Promise<WorkforceMember[]>
+  getWorkforceMember(organizationId: string, workforceMemberId: string): Promise<WorkforceMember | null>
+  createWorkforceSkill(input: {
+    organizationId: string
+    code: string
+    name: string
+  }): Promise<WorkforceSkill>
+  listWorkforceSkills(organizationId: string): Promise<WorkforceSkill[]>
+  setMemberSkills(input: {
+    organizationId: string
+    workforceMemberId: string
+    skills: Array<{ skillId: string; proficiency: number }>
+  }): Promise<WorkforceMemberSkill[]>
+  listMemberSkills(organizationId: string, workforceMemberId: string): Promise<Array<WorkforceMemberSkill & { code: string }>>
+  setWorkforcePresence(input: {
+    organizationId: string
+    workforceMemberId: string
+    state: WorkforcePresence["state"]
+    source: string
+    ttlSeconds: number
+    expectedVersion: number | null
+  }): Promise<WorkforcePresence>
+  getWorkforcePresence(organizationId: string, workforceMemberId: string): Promise<WorkforcePresence | null>
+  setWorkforceCapacity(input: {
+    organizationId: string
+    workforceMemberId: string
+    maxConcurrentWork: number
+    expectedVersion: number | null
+  }): Promise<WorkforceCapacity>
+  getWorkforceCapacity(organizationId: string, workforceMemberId: string): Promise<WorkforceCapacity>
+  createWorkforceTeam(input: {
+    organizationId: string
+    name: string
+  }): Promise<WorkforceTeam>
+  listWorkforceTeams(organizationId: string): Promise<WorkforceTeam[]>
+  setTeamMembers(input: {
+    organizationId: string
+    teamId: string
+    workforceMemberIds: string[]
+  }): Promise<void>
+  createQueue(input: {
+    organizationId: string
+    name: string
+    requiredSkillIds: string[]
+  }): Promise<WorkforceQueue>
+  listQueues(organizationId: string): Promise<WorkforceQueue[]>
+  enqueueConversation(input: {
+    organizationId: string
+    queueId: string
+    conversationId: string
+  }): Promise<QueueItem>
+  createOrPublishRoutingPolicy(input: {
+    organizationId: string
+    name: string
+    config: RoutingPolicyConfig
+  }): Promise<{ policy: RoutingPolicy; version: RoutingPolicyVersion }>
+  listRoutingPolicies(organizationId: string): Promise<Array<RoutingPolicy & { versions: RoutingPolicyVersion[] }>>
+  getPublishedRoutingPolicy(organizationId: string, name: string): Promise<{ policy: RoutingPolicy; version: RoutingPolicyVersion } | null>
+  getRoutingCandidates(
+    query: RoutingCandidateQuery
+  ): Promise<RoutingEvaluationCandidate[]>
+  createRoutingDecision(input: CreateRoutingDecisionInput): Promise<{ decision: RoutingDecision; candidates: RoutingCandidate[] }>
+  commitRoutingAssignment(input: CommitRoutingAssignmentInput): Promise<Assignment>
+ 
   createChannelIntegration(
     input: CreateChannelIntegrationInput
   ): Promise<ChannelIntegration>
@@ -219,6 +337,13 @@ export interface Store {
     reason: string
     expectedConversationVersion: number
   }): Promise<Assignment>
+  releaseAssignment(input: {
+    organizationId: string
+    assignmentId: string
+    expectedVersion: number
+    status: Extract<Assignment["status"], "RELEASED" | "COMPLETED" | "TRANSFERRED" | "CANCELED">
+  }): Promise<Assignment>
+
 }
 
 export class MemoryStore implements Store {
@@ -232,6 +357,18 @@ export class MemoryStore implements Store {
   private readonly conversations = new Map<string, Conversation>()
   private readonly messages = new Map<string, Message>()
   private readonly workforce = new Map<string, WorkforceMember>()
+  private readonly workforceSkills = new Map<string, WorkforceSkill>()
+  private readonly memberSkills = new Map<string, WorkforceMemberSkill>()
+  private readonly workforcePresence = new Map<string, WorkforcePresence>()
+  private readonly workforceCapacity = new Map<string, WorkforceCapacity>()
+  private readonly teams = new Map<string, WorkforceTeam>()
+  private readonly teamMembers = new Map<string, string>()
+  private readonly queues = new Map<string, WorkforceQueue>()
+  private readonly queueItems = new Map<string, QueueItem>()
+  private readonly routingPolicies = new Map<string, RoutingPolicy>()
+  private readonly routingPolicyVersions = new Map<string, RoutingPolicyVersion>()
+  private readonly routingDecisions = new Map<string, RoutingDecision>()
+  private readonly routingCandidates = new Map<string, RoutingCandidate>()
   private readonly assignments = new Map<string, Assignment>()
   private readonly knowledgeDocuments = new Map<string, KnowledgeDocument>()
   private readonly knowledgeChunks = new Map<string, KnowledgeChunk>()
@@ -838,19 +975,549 @@ export class MemoryStore implements Store {
     return clone(conversation)
   }
 
+  async setWorkforceMemberStatus(input: {
+    organizationId: string
+    workforceMemberId: string
+    status: WorkforceMember["status"]
+  }): Promise<WorkforceMember> {
+    const member = this.workforce.get(input.workforceMemberId)
+    if (!member || member.organizationId !== input.organizationId) {
+      throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+    }
+    member.status = input.status
+    member.updatedAt = new Date().toISOString()
+    return clone(member)
+  }
+
+  async listWorkforceMembers(organizationId: string): Promise<WorkforceMember[]> {
+    return clone(
+      [...this.workforce.values()].filter((member) => member.organizationId === organizationId)
+    )
+  }
+
+  async getWorkforceMember(
+    organizationId: string,
+    workforceMemberId: string
+  ): Promise<WorkforceMember | null> {
+    const member = this.workforce.get(workforceMemberId)
+    return member && member.organizationId === organizationId ? clone(member) : null
+  }
+
+  async createWorkforceSkill(input: {
+    organizationId: string
+    code: string
+    name: string
+  }): Promise<WorkforceSkill> {
+    const code = input.code.trim().toLowerCase()
+    if ([...this.workforceSkills.values()].some(
+      (skill) => skill.organizationId === input.organizationId && skill.code === code
+    )) {
+      throw new Error("WORKFORCE_SKILL_EXISTS")
+    }
+    const skill: WorkforceSkill = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      code,
+      name: input.name.trim(),
+      status: "ACTIVE",
+      createdAt: new Date().toISOString(),
+    }
+    this.workforceSkills.set(skill.id, skill)
+    return clone(skill)
+  }
+
+  async listWorkforceSkills(organizationId: string): Promise<WorkforceSkill[]> {
+    return clone(
+      [...this.workforceSkills.values()]
+        .filter((skill) => skill.organizationId === organizationId)
+        .sort((a, b) => a.code.localeCompare(b.code))
+    )
+  }
+
+  async setMemberSkills(input: {
+    organizationId: string
+    workforceMemberId: string
+    skills: Array<{ skillId: string; proficiency: number }>
+  }): Promise<WorkforceMemberSkill[]> {
+    const member = this.workforce.get(input.workforceMemberId)
+    if (!member || member.organizationId !== input.organizationId) {
+      throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+    }
+
+    const seen = new Set<string>()
+    const result: WorkforceMemberSkill[] = []
+    for (const item of input.skills) {
+      if (!Number.isInteger(item.proficiency) || item.proficiency < 0 || item.proficiency > 100) {
+        throw new Error("INVALID_PROFICIENCY")
+      }
+      const skill = this.workforceSkills.get(item.skillId)
+      if (!skill || skill.organizationId !== input.organizationId || skill.status !== "ACTIVE") {
+        throw new Error("WORKFORCE_SKILL_NOT_FOUND")
+      }
+      seen.add(skill.id)
+      const key = input.workforceMemberId + ":" + skill.id
+      const existing = this.memberSkills.get(key)
+      const now = new Date().toISOString()
+      const value: WorkforceMemberSkill = existing
+        ? { ...existing, proficiency: item.proficiency, updatedAt: now }
+        : {
+            id: randomUUID(),
+            organizationId: input.organizationId,
+            workforceMemberId: input.workforceMemberId,
+            skillId: skill.id,
+            proficiency: item.proficiency,
+            createdAt: now,
+            updatedAt: now,
+          }
+      this.memberSkills.set(key, value)
+    }
+
+    for (const [key, value] of this.memberSkills.entries()) {
+      if (
+        value.organizationId === input.organizationId &&
+        value.workforceMemberId === input.workforceMemberId &&
+        !seen.has(value.skillId)
+      ) {
+        this.memberSkills.delete(key)
+      }
+    }
+
+    for (const value of this.memberSkills.values()) {
+      if (value.organizationId === input.organizationId && value.workforceMemberId === input.workforceMemberId) {
+        result.push(clone(value))
+      }
+    }
+    return result
+  }
+
+  async listMemberSkills(
+    organizationId: string,
+    workforceMemberId: string
+  ): Promise<Array<WorkforceMemberSkill & { code: string }>> {
+    return clone(
+      [...this.memberSkills.values()]
+        .filter(
+          (skill) =>
+            skill.organizationId === organizationId &&
+            skill.workforceMemberId === workforceMemberId
+        )
+        .map((skill) => ({ ...skill, code: this.workforceSkills.get(skill.skillId)!.code }))
+    )
+  }
+
+  async setWorkforcePresence(input: {
+    organizationId: string
+    workforceMemberId: string
+    state: WorkforcePresence["state"]
+    source: string
+    ttlSeconds: number
+    expectedVersion: number | null
+  }): Promise<WorkforcePresence> {
+    const member = this.workforce.get(input.workforceMemberId)
+    if (!member || member.organizationId !== input.organizationId) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+    const current = this.workforcePresence.get(input.workforceMemberId)
+    if (current && input.expectedVersion !== null && current.version !== input.expectedVersion) {
+      throw new Error("STALE_PRESENCE_VERSION")
+    }
+    const now = new Date()
+    const value: WorkforcePresence = {
+      workforceMemberId: input.workforceMemberId,
+      organizationId: input.organizationId,
+      state: input.state,
+      observedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + input.ttlSeconds * 1000).toISOString(),
+      source: input.source.trim(),
+      version: (current?.version ?? 0) + 1,
+    }
+    this.workforcePresence.set(input.workforceMemberId, value)
+    return clone(value)
+  }
+
+  async getWorkforcePresence(organizationId: string, workforceMemberId: string): Promise<WorkforcePresence | null> {
+    const value = this.workforcePresence.get(workforceMemberId)
+    return value && value.organizationId === organizationId ? clone(value) : null
+  }
+
+  async setWorkforceCapacity(input: {
+    organizationId: string
+    workforceMemberId: string
+    maxConcurrentWork: number
+    expectedVersion: number | null
+  }): Promise<WorkforceCapacity> {
+    const member = this.workforce.get(input.workforceMemberId)
+    if (!member || member.organizationId !== input.organizationId) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+    const current = this.workforceCapacity.get(input.workforceMemberId)
+    if (current && input.expectedVersion !== null && current.version !== input.expectedVersion) {
+      throw new Error("STALE_CAPACITY_VERSION")
+    }
+    if (!Number.isInteger(input.maxConcurrentWork) || input.maxConcurrentWork < 1 || input.maxConcurrentWork > 1000) {
+      throw new Error("INVALID_CAPACITY")
+    }
+    const activeWork = [...this.assignments.values()].filter(
+      (assignment) =>
+        assignment.organizationId === input.organizationId &&
+        assignment.workforceMemberId === input.workforceMemberId &&
+        assignment.status === "ACTIVE"
+    ).length
+    const value: WorkforceCapacity = {
+      workforceMemberId: input.workforceMemberId,
+      organizationId: input.organizationId,
+      maxConcurrentWork: input.maxConcurrentWork,
+      reservedWork: Math.max(current?.reservedWork ?? 0, activeWork),
+      activeWork,
+      effectiveCapacity: input.maxConcurrentWork - activeWork - Math.max(current?.reservedWork ?? 0, 0),
+      updatedAt: new Date().toISOString(),
+      version: (current?.version ?? 0) + 1,
+    }
+    this.workforceCapacity.set(input.workforceMemberId, value)
+    return clone(value)
+  }
+
+  async getWorkforceCapacity(organizationId: string, workforceMemberId: string): Promise<WorkforceCapacity> {
+    const member = this.workforce.get(workforceMemberId)
+    if (!member || member.organizationId !== organizationId) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+    const current = this.workforceCapacity.get(workforceMemberId)
+    const activeWork = [...this.assignments.values()].filter(
+      (assignment) =>
+        assignment.organizationId === organizationId &&
+        assignment.workforceMemberId === workforceMemberId &&
+        assignment.status === "ACTIVE"
+    ).length
+    const value = current ?? {
+      workforceMemberId,
+      organizationId,
+      maxConcurrentWork: 5,
+      reservedWork: 0,
+      activeWork,
+      effectiveCapacity: 5 - activeWork,
+      updatedAt: new Date().toISOString(),
+      version: 1,
+    }
+    value.activeWork = activeWork
+    value.effectiveCapacity = value.maxConcurrentWork - activeWork - value.reservedWork
+    this.workforceCapacity.set(workforceMemberId, value)
+    return clone(value)
+  }
+
+  async createWorkforceTeam(input: { organizationId: string; name: string }): Promise<WorkforceTeam> {
+    if ([...this.teams.values()].some((team) => team.organizationId === input.organizationId && team.name.toLowerCase() === input.name.trim().toLowerCase())) {
+      throw new Error("WORKFORCE_TEAM_EXISTS")
+    }
+    const now = new Date().toISOString()
+    const team: WorkforceTeam = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      name: input.name.trim(),
+      status: "ACTIVE",
+      createdAt: now,
+      updatedAt: now,
+    }
+    this.teams.set(team.id, team)
+    return clone(team)
+  }
+
+  async listWorkforceTeams(organizationId: string): Promise<WorkforceTeam[]> {
+    return clone([...this.teams.values()].filter((team) => team.organizationId === organizationId))
+  }
+
+  async setTeamMembers(input: { organizationId: string; teamId: string; workforceMemberIds: string[] }): Promise<void> {
+    const team = this.teams.get(input.teamId)
+    if (!team || team.organizationId !== input.organizationId) throw new Error("WORKFORCE_TEAM_NOT_FOUND")
+    for (const memberId of input.workforceMemberIds) {
+      const member = this.workforce.get(memberId)
+      if (!member || member.organizationId !== input.organizationId) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+    }
+    for (const [key] of this.teamMembers.entries()) {
+      if (key.startsWith(input.teamId + ":")) this.teamMembers.delete(key)
+    }
+    for (const memberId of input.workforceMemberIds) this.teamMembers.set(input.teamId + ":" + memberId, memberId)
+  }
+
+  async createQueue(input: { organizationId: string; name: string; requiredSkillIds: string[] }): Promise<WorkforceQueue> {
+    if ([...this.queues.values()].some((queue) => queue.organizationId === input.organizationId && queue.name.toLowerCase() === input.name.trim().toLowerCase())) {
+      throw new Error("QUEUE_EXISTS")
+    }
+    for (const skillId of input.requiredSkillIds) {
+      const skill = this.workforceSkills.get(skillId)
+      if (!skill || skill.organizationId !== input.organizationId) throw new Error("WORKFORCE_SKILL_NOT_FOUND")
+    }
+    const now = new Date().toISOString()
+    const queue: WorkforceQueue = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      name: input.name.trim(),
+      status: "ACTIVE",
+      requiredSkillCodes: input.requiredSkillIds.map((id) => this.workforceSkills.get(id)!.code),
+      createdAt: now,
+      updatedAt: now,
+    }
+    this.queues.set(queue.id, queue)
+    return clone(queue)
+  }
+
+  async listQueues(organizationId: string): Promise<WorkforceQueue[]> {
+    return clone([...this.queues.values()].filter((queue) => queue.organizationId === organizationId))
+  }
+
+  async enqueueConversation(input: { organizationId: string; queueId: string; conversationId: string }): Promise<QueueItem> {
+    const queue = this.queues.get(input.queueId)
+    const conversation = this.conversations.get(input.conversationId)
+    if (!queue || queue.organizationId !== input.organizationId) throw new Error("QUEUE_NOT_FOUND")
+    if (!conversation || conversation.organizationId !== input.organizationId) throw new Error("CONVERSATION_NOT_FOUND")
+    const existing = [...this.queueItems.values()].find(
+      (item) => item.organizationId === input.organizationId && item.conversationId === input.conversationId && ["QUEUED","CLAIMED"].includes(item.status)
+    )
+    if (existing) return clone(existing)
+    const now = new Date().toISOString()
+    const item: QueueItem = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      queueId: input.queueId,
+      conversationId: input.conversationId,
+      status: "QUEUED",
+      priority: conversation.priority,
+      enqueuedAt: now,
+      lastRoutedAt: null,
+      attempts: 0,
+      version: 1,
+    }
+    this.queueItems.set(item.id, item)
+    conversation.control = "queue"
+    conversation.status = "OPEN"
+    conversation.controlVersion += 1
+    conversation.version += 1
+    conversation.updatedAt = now
+    return clone(item)
+  }
+
+  async createOrPublishRoutingPolicy(input: { organizationId: string; name: string; config: RoutingPolicyConfig }) {
+    const existing = [...this.routingPolicies.values()].find(
+      (policy) => policy.organizationId === input.organizationId && policy.name === input.name.trim()
+    )
+    const now = new Date().toISOString()
+    const policy = existing ?? {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      name: input.name.trim(),
+      status: "ACTIVE" as const,
+      createdAt: now,
+    }
+    if (!existing) this.routingPolicies.set(policy.id, policy)
+    const versions = [...this.routingPolicyVersions.values()].filter((v) => v.policyId === policy.id)
+    const versionNumber = Math.max(0, ...versions.map((v) => v.version)) + 1
+    const version: RoutingPolicyVersion = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      policyId: policy.id,
+      version: versionNumber,
+      status: "PUBLISHED",
+      config: clone(input.config),
+      createdAt: now,
+    }
+    for (const v of versions) v.status = v.status === "PUBLISHED" ? "RETIRED" : v.status
+    this.routingPolicyVersions.set(version.id, version)
+    return { policy: clone(policy), version: clone(version) }
+  }
+
+  async listRoutingPolicies(organizationId: string) {
+    const policies = [...this.routingPolicies.values()].filter((p) => p.organizationId === organizationId)
+    return clone(policies.map((policy) => ({
+      ...policy,
+      versions: [...this.routingPolicyVersions.values()].filter((v) => v.policyId === policy.id).sort((a,b)=>a.version-b.version),
+    })))
+  }
+
+  async getPublishedRoutingPolicy(organizationId: string, name: string) {
+    const policy = [...this.routingPolicies.values()].find((p) => p.organizationId === organizationId && p.name === name)
+    if (!policy) return null
+    const version = [...this.routingPolicyVersions.values()].find((v) => v.policyId === policy.id && v.status === "PUBLISHED")
+    return version ? { policy: clone(policy), version: clone(version) } : null
+  }
+
+  async getRoutingCandidates(query: RoutingCandidateQuery): Promise<RoutingEvaluationCandidate[]> {
+    const result: RoutingEvaluationCandidate[] = []
+    for (const member of this.workforce.values()) {
+      if (member.organizationId !== query.organizationId) continue
+      const skills = [...this.memberSkills.values()]
+        .filter((value) => value.organizationId === query.organizationId && value.workforceMemberId === member.id)
+        .map((value) => ({ code: this.workforceSkills.get(value.skillId)!.code, proficiency: value.proficiency }))
+      const presence = await this.getWorkforcePresence(query.organizationId, member.id)
+      const capacity = await this.getWorkforceCapacity(query.organizationId, member.id)
+      const teamIds = [...this.teamMembers.entries()]
+        .filter(([key]) => key.endsWith(":" + member.id))
+        .map(([key]) => key.slice(0, key.indexOf(":")))
+      result.push({
+        workforceMember: clone(member),
+        skills,
+        presence,
+        capacity,
+        authorized: member.type === "AI" || member.userId === null
+          ? member.type === "AI"
+          : true,
+        teamIds,
+      })
+    }
+    return result
+  }
+
+  async createRoutingDecision(input: CreateRoutingDecisionInput) {
+    const decision: RoutingDecision = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      conversationId: input.conversationId,
+      policyVersionId: input.policyVersionId,
+      outcome: input.outcome,
+      selectedWorkforceMemberId: input.selectedWorkforceMemberId,
+      queueId: input.queueId,
+      reasonCodes: [...input.reasonCodes],
+      requestedSkills: [...input.requestedSkills],
+      contextSnapshot: clone(input.contextSnapshot),
+      createdAt: new Date().toISOString(),
+    }
+    this.routingDecisions.set(decision.id, decision)
+    const candidates = input.candidates.map((item) => {
+      const candidate: RoutingCandidate = {
+        id: randomUUID(),
+        organizationId: input.organizationId,
+        routingDecisionId: decision.id,
+        workforceMemberId: item.workforceMemberId,
+        eligible: item.eligible,
+        rejectionCode: item.rejectionCode,
+        score: item.score,
+        snapshot: clone(item.snapshot),
+        createdAt: decision.createdAt,
+      }
+      this.routingCandidates.set(candidate.id, candidate)
+      return candidate
+    })
+    return { decision: clone(decision), candidates: clone(candidates) }
+  }
+
+  async commitRoutingAssignment(input: CommitRoutingAssignmentInput): Promise<Assignment> {
+    const conversation = this.conversations.get(input.conversationId)
+    const member = this.workforce.get(input.workforceMemberId)
+    const decision = this.routingDecisions.get(input.routingDecisionId)
+
+    if (!conversation || conversation.organizationId !== input.organizationId) {
+      throw new Error("CONVERSATION_NOT_FOUND")
+    }
+    if (!member || member.organizationId !== input.organizationId) {
+      throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+    }
+    if (
+      !decision ||
+      decision.organizationId !== input.organizationId ||
+      decision.conversationId !== input.conversationId ||
+      decision.selectedWorkforceMemberId !== input.workforceMemberId
+    ) {
+      throw new Error("ROUTING_DECISION_MISMATCH")
+    }
+    if (conversation.version !== input.expectedConversationVersion) {
+      throw new Error("STALE_VERSION")
+    }
+    if (member.status !== "ACTIVE") throw new Error("WORKFORCE_MEMBER_DISABLED")
+
+    const active = [...this.assignments.values()].some(
+      (assignment) =>
+        assignment.organizationId === input.organizationId &&
+        assignment.conversationId === input.conversationId &&
+        assignment.status === "ACTIVE"
+    )
+    if (active) throw new Error("ACTIVE_ASSIGNMENT_EXISTS")
+
+    const presence = this.workforcePresence.get(member.id)
+    if (
+      !presence ||
+      presence.state !== "AVAILABLE" ||
+      new Date(presence.expiresAt).getTime() <= Date.now() ||
+      new Date(presence.observedAt).getTime() <=
+        Date.now() - input.presenceTtlSeconds * 1000
+    ) {
+      throw new Error("WORKER_NOT_ELIGIBLE")
+    }
+
+    const capacity = this.workforceCapacity.get(member.id)
+    if (!capacity) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+    const activeWork = [...this.assignments.values()].filter(
+      (assignment) =>
+        assignment.organizationId === input.organizationId &&
+        assignment.workforceMemberId === member.id &&
+        assignment.status === "ACTIVE"
+    ).length
+    if (activeWork + capacity.reservedWork >= capacity.maxConcurrentWork) {
+      throw new Error("CAPACITY_EXHAUSTED")
+    }
+
+    const memberSkills = [...this.memberSkills.values()]
+      .filter(
+        (value) =>
+          value.organizationId === input.organizationId &&
+          value.workforceMemberId === member.id
+      )
+      .map((value) => this.workforceSkills.get(value.skillId)!)
+    if (
+      input.requiredSkills.some(
+        (skill) => !memberSkills.some((value) => value.code === skill)
+      )
+    ) {
+      throw new Error("WORKER_SKILLS_CHANGED")
+    }
+
+    if (
+      input.teamId !== null &&
+      !this.teamMembers.has(input.teamId + ":" + member.id)
+    ) {
+      throw new Error("WORKER_TEAM_CHANGED")
+    }
+
+    const now = new Date().toISOString()
+    const assignment: Assignment = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      conversationId: input.conversationId,
+      workforceMemberId: input.workforceMemberId,
+      status: "ACTIVE",
+      assignedAt: now,
+      releasedAt: null,
+      reason: input.reason,
+      routingDecisionId: input.routingDecisionId,
+      version: 1,
+    }
+    this.assignments.set(assignment.id, assignment)
+
+    conversation.status = "ASSIGNED"
+    conversation.control = member.type === "AI" ? "ai" : "human"
+    conversation.controlVersion += 1
+    conversation.version += 1
+    conversation.updatedAt = now
+
+    this.emitOutbox({
+      organizationId: input.organizationId,
+      eventType: "conversation.assignment.changed",
+      aggregateType: "conversation",
+      aggregateId: input.conversationId,
+      correlationId: input.routingDecisionId,
+      causationId: input.routingDecisionId,
+      payload: { assignment, routingDecisionId: input.routingDecisionId },
+    })
+
+    return clone(assignment)
+  }
+
   async createWorkforceMember(input: {
     organizationId: string
     userId: string | null
     displayName: string
     type: "HUMAN" | "AI"
   }): Promise<WorkforceMember> {
-    if (
-      input.userId !== null &&
-      !this.activeMemberships(input.userId).some(
-        (membership) => membership.organizationId === input.organizationId
+    if (input.userId !== null) {
+      const membership = [...this.memberships.values()].find(
+        (value) =>
+          value.userId === input.userId &&
+          value.organizationId === input.organizationId &&
+          value.status === "ACTIVE"
       )
-    ) {
-      throw new Error("USER_NOT_FOUND")
+      if (!membership) throw new Error("USER_NOT_FOUND")
     }
 
     const now = new Date().toISOString()
@@ -864,8 +1531,28 @@ export class MemoryStore implements Store {
       createdAt: now,
       updatedAt: now,
     }
-
     this.workforce.set(member.id, member)
+
+    this.workforcePresence.set(member.id, {
+      workforceMemberId: member.id,
+      organizationId: input.organizationId,
+      state: "OFFLINE",
+      observedAt: now,
+      expiresAt: now,
+      source: "create",
+      version: 1,
+    })
+    this.workforceCapacity.set(member.id, {
+      workforceMemberId: member.id,
+      organizationId: input.organizationId,
+      maxConcurrentWork: 5,
+      reservedWork: 0,
+      activeWork: 0,
+      effectiveCapacity: 5,
+      updatedAt: now,
+      version: 1,
+    })
+
     return clone(member)
   }
 
@@ -881,20 +1568,14 @@ export class MemoryStore implements Store {
       input.conversationId
     )
 
-    if (!conversation) {
-      throw new Error("CONVERSATION_NOT_FOUND")
-    }
+    if (!conversation) throw new Error("CONVERSATION_NOT_FOUND")
 
     const member = this.workforce.get(input.workforceMemberId)
-
     if (!member || member.organizationId !== input.organizationId) {
       throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
     }
 
-    if (member.status !== "ACTIVE") {
-      throw new Error("WORKFORCE_MEMBER_DISABLED")
-    }
-
+    if (member.status !== "ACTIVE") throw new Error("WORKFORCE_MEMBER_DISABLED")
     if (conversation.version !== input.expectedConversationVersion) {
       throw new Error("STALE_VERSION")
     }
@@ -905,9 +1586,17 @@ export class MemoryStore implements Store {
         assignment.conversationId === input.conversationId &&
         assignment.status === "ACTIVE"
     )
+    if (activeAssignment) throw new Error("ACTIVE_ASSIGNMENT_EXISTS")
 
-    if (activeAssignment) {
-      throw new Error("ACTIVE_ASSIGNMENT_EXISTS")
+    const capacity = this.workforceCapacity.get(member.id)
+    const activeWork = [...this.assignments.values()].filter(
+      (assignment) =>
+        assignment.organizationId === input.organizationId &&
+        assignment.workforceMemberId === member.id &&
+        assignment.status === "ACTIVE"
+    ).length
+    if (!capacity || activeWork + capacity.reservedWork >= capacity.maxConcurrentWork) {
+      throw new Error("CAPACITY_EXHAUSTED")
     }
 
     const now = new Date().toISOString()
@@ -920,11 +1609,12 @@ export class MemoryStore implements Store {
       assignedAt: now,
       releasedAt: null,
       reason: input.reason.trim() || "manual",
+      routingDecisionId: null,
       version: 1,
     }
 
     conversation.status = "ASSIGNED"
-    conversation.control = "human"
+    conversation.control = member.type === "AI" ? "ai" : "human"
     conversation.controlVersion += 1
     conversation.version += 1
     conversation.updatedAt = now
@@ -941,6 +1631,86 @@ export class MemoryStore implements Store {
     }
 
     this.assignments.set(assignment.id, assignment)
+
+    for (const item of this.queueItems.values()) {
+      if (
+        item.organizationId === input.organizationId &&
+        item.conversationId === input.conversationId &&
+        (item.status === "QUEUED" || item.status === "CLAIMED")
+      ) {
+        item.status = "CLAIMED"
+        item.lastRoutedAt = now
+        item.attempts += 1
+        item.version += 1
+      }
+    }
+
+    this.emitOutbox({
+      organizationId: input.organizationId,
+      eventType: "conversation.assignment.changed",
+      aggregateType: "conversation",
+      aggregateId: input.conversationId,
+      correlationId: assignment.id,
+      causationId: assignment.id,
+      payload: { assignment },
+    })
+    return clone(assignment)
+  }
+
+  async releaseAssignment(input: {
+    organizationId: string
+    assignmentId: string
+    expectedVersion: number
+    status: Extract<Assignment["status"], "RELEASED" | "COMPLETED" | "TRANSFERRED" | "CANCELED">
+  }): Promise<Assignment> {
+    const assignment = this.assignments.get(input.assignmentId)
+    if (!assignment || assignment.organizationId !== input.organizationId) {
+      throw new Error("ASSIGNMENT_NOT_FOUND")
+    }
+    if (assignment.status !== "ACTIVE") throw new Error("ASSIGNMENT_NOT_ACTIVE")
+    if (assignment.version !== input.expectedVersion) throw new Error("STALE_ASSIGNMENT_VERSION")
+
+    const conversation = this.conversations.get(assignment.conversationId)
+    if (!conversation || conversation.organizationId !== input.organizationId) {
+      throw new Error("CONVERSATION_NOT_FOUND")
+    }
+
+    const now = new Date().toISOString()
+    assignment.status = input.status
+    assignment.releasedAt = now
+    assignment.version += 1
+
+    if (input.status !== "COMPLETED") {
+      for (const item of this.queueItems.values()) {
+        if (
+          item.organizationId === input.organizationId &&
+          item.conversationId === assignment.conversationId &&
+          item.status === "CLAIMED"
+        ) {
+          item.status = "QUEUED"
+          item.enqueuedAt = now
+          item.lastRoutedAt = null
+          item.version += 1
+        }
+      }
+    }
+
+    conversation.control = "queue"
+    conversation.status = input.status === "COMPLETED" ? "WAITING_CUSTOMER" : "OPEN"
+    conversation.controlVersion += 1
+    conversation.version += 1
+    conversation.updatedAt = now
+
+    this.emitOutbox({
+      organizationId: input.organizationId,
+      eventType: "conversation.assignment.changed",
+      aggregateType: "conversation",
+      aggregateId: assignment.conversationId,
+      correlationId: assignment.id,
+      causationId: assignment.id,
+      payload: { assignment: clone(assignment) },
+    })
+
     return clone(assignment)
   }
 

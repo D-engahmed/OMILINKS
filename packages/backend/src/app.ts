@@ -5,6 +5,7 @@ import { loadConfig } from "./config.js"
 import type {
   ChannelProvider,
   HandoffStatus,
+  PresenceState,
 } from "./domain/types.js"
 import { DevIdentityProvider, type IdentityProvider } from "./application/identity.js"
 import type { Store } from "./infrastructure/store.js"
@@ -544,6 +545,43 @@ async function route(
     )
   }
 
+  if (method === "GET" && url.pathname === "/api/v1/workforce/members") {
+    return json({ items: await appApplication.listWorkforceMembers(context) })
+  }
+
+  if (method === "GET" && url.pathname === "/api/v1/workforce/skills") {
+    return json({ items: await appApplication.listWorkforceSkills(context) })
+  }
+
+  if (method === "POST" && url.pathname === "/api/v1/workforce/skills") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.createWorkforceSkill(context, {
+        code: stringValue(body.code),
+        name: stringValue(body.name),
+      }),
+      201
+    )
+  }
+
+  const memberStatusMatch = url.pathname.match(
+    /^\/api\/v1\/workforce\/members\/([^/]+)\/status$/
+  )
+
+  if (memberStatusMatch && method === "PUT") {
+    const body = await readJson(request)
+    if (body.status !== "ACTIVE" && body.status !== "DISABLED") {
+      throw new AppError(400, "VALIDATION_ERROR", "status must be ACTIVE or DISABLED.")
+    }
+
+    return json(
+      await appApplication.setWorkforceMemberStatus(context, {
+        workforceMemberId: memberStatusMatch[1]!,
+        status: body.status,
+      })
+    )
+  }
+
   if (method === "POST" && url.pathname === "/api/v1/workforce/members") {
     const body = await readJson(request)
 
@@ -554,6 +592,209 @@ async function route(
         type: body.type === "AI" ? "AI" : "HUMAN",
       }),
       201
+    )
+  }
+
+  const memberSkillsMatch = url.pathname.match(
+    /^\/api\/v1\/workforce\/members\/([^/]+)\/skills$/
+  )
+
+  if (memberSkillsMatch && method === "GET") {
+    return json({
+      items: await appApplication.getWorkforceMemberSkills(
+        context,
+        memberSkillsMatch[1]!
+      ),
+    })
+  }
+
+  if (memberSkillsMatch && method === "PUT") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.setMemberSkills(context, {
+        workforceMemberId: memberSkillsMatch[1]!,
+        skills: Array.isArray(body.skills)
+          ? body.skills
+              .filter(
+                (value): value is Record<string, unknown> =>
+                  !!value && typeof value === "object" && !Array.isArray(value)
+              )
+              .map((value) => ({
+                skillId: stringValue(value.skillId),
+                proficiency: Number(value.proficiency),
+              }))
+          : [],
+      })
+    )
+  }
+
+  const memberPresenceMatch = url.pathname.match(
+    /^\/api\/v1\/workforce\/members\/([^/]+)\/presence$/
+  )
+
+  if (memberPresenceMatch && method === "PUT") {
+    const body = await readJson(request)
+    const expectedVersionRaw = request.headers.get("If-Match-Version") ?? body.version
+    const expectedVersion =
+      expectedVersionRaw === undefined || expectedVersionRaw === null
+        ? null
+        : Number(expectedVersionRaw)
+
+    return json(
+      await appApplication.setWorkforcePresence(context, {
+        workforceMemberId: memberPresenceMatch[1]!,
+        state: stringValue(body.state) as PresenceState,
+        source: stringValue(body.source) || "api",
+        ttlSeconds: Number(body.ttlSeconds ?? 90),
+        expectedVersion:
+          expectedVersion === null || !Number.isInteger(expectedVersion)
+            ? null
+            : expectedVersion,
+      })
+    )
+  }
+
+  const memberCapacityMatch = url.pathname.match(
+    /^\/api\/v1\/workforce\/members\/([^/]+)\/capacity$/
+  )
+
+  if (memberCapacityMatch && method === "PUT") {
+    const body = await readJson(request)
+    const expectedVersionRaw = request.headers.get("If-Match-Version") ?? body.version
+    const expectedVersion =
+      expectedVersionRaw === undefined || expectedVersionRaw === null
+        ? null
+        : Number(expectedVersionRaw)
+
+    return json(
+      await appApplication.setWorkforceCapacity(context, {
+        workforceMemberId: memberCapacityMatch[1]!,
+        maxConcurrentWork: Number(body.maxConcurrentWork),
+        expectedVersion:
+          expectedVersion === null || !Number.isInteger(expectedVersion)
+            ? null
+            : expectedVersion,
+      })
+    )
+  }
+
+  if (method === "GET" && url.pathname === "/api/v1/workforce/teams") {
+    return json({ items: await appApplication.listWorkforceTeams(context) })
+  }
+
+  if (method === "POST" && url.pathname === "/api/v1/workforce/teams") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.createWorkforceTeam(
+        context,
+        stringValue(body.name)
+      ),
+      201
+    )
+  }
+
+  const teamMembersMatch = url.pathname.match(
+    /^\/api\/v1\/workforce\/teams\/([^/]+)\/members$/
+  )
+
+  if (teamMembersMatch && method === "PUT") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.setTeamMembers(context, {
+        teamId: teamMembersMatch[1]!,
+        workforceMemberIds: Array.isArray(body.workforceMemberIds)
+          ? body.workforceMemberIds.filter(
+              (value): value is string => typeof value === "string"
+            )
+          : [],
+      })
+    )
+  }
+
+  if (method === "GET" && url.pathname === "/api/v1/workforce/queues") {
+    return json({ items: await appApplication.listQueues(context) })
+  }
+
+  if (method === "POST" && url.pathname === "/api/v1/workforce/queues") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.createQueue(context, {
+        name: stringValue(body.name),
+        requiredSkillIds: Array.isArray(body.requiredSkillIds)
+          ? body.requiredSkillIds.filter(
+              (value): value is string => typeof value === "string"
+            )
+          : [],
+      }),
+      201
+    )
+  }
+
+  if (method === "GET" && url.pathname === "/api/v1/routing/policies") {
+    return json({ items: await appApplication.listRoutingPolicies(context) })
+  }
+
+  if (method === "POST" && url.pathname === "/api/v1/routing/policies") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.createRoutingPolicy(context, {
+        name: stringValue(body.name),
+        config: body.config as Parameters<Application["createRoutingPolicy"]>[1]["config"],
+      }),
+      201
+    )
+  }
+
+  const routeMatch = url.pathname.match(
+    /^\/api\/v1\/conversations\/([^/]+)\/route$/
+  )
+
+  if (routeMatch && method === "POST") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.routeConversation(context, {
+        conversationId: routeMatch[1]!,
+        requiredSkills: Array.isArray(body.requiredSkills)
+          ? body.requiredSkills.filter(
+              (value): value is string => typeof value === "string"
+            )
+          : [],
+        teamId: body.teamId === null || body.teamId === undefined
+          ? null
+          : stringValue(body.teamId),
+        requestedWorkerTypes: Array.isArray(body.requestedWorkerTypes)
+          ? body.requestedWorkerTypes.filter(
+              (value): value is "HUMAN" | "AI" =>
+                value === "HUMAN" || value === "AI"
+            )
+          : [],
+        policyName: body.policyName ? stringValue(body.policyName) : undefined,
+        reason: stringValue(body.reason) || "routed",
+        commit: body.commit !== false,
+      })
+    )
+  }
+
+  const releaseAssignmentMatch = url.pathname.match(
+    /^\/api\/v1\/workforce\/assignments\/([^/]+)\/release$/
+  )
+
+  if (releaseAssignmentMatch && method === "POST") {
+    const body = await readJson(request)
+    const expectedVersion = Number(
+      request.headers.get("If-Match-Version") ?? body.version
+    )
+    return json(
+      await appApplication.releaseAssignment(context, {
+        assignmentId: releaseAssignmentMatch[1]!,
+        expectedVersion,
+        status:
+          body.status === "COMPLETED" ||
+          body.status === "TRANSFERRED" ||
+          body.status === "CANCELED"
+            ? body.status
+            : "RELEASED",
+      })
     )
   }
 
