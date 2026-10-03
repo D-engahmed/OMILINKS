@@ -270,7 +270,7 @@ storeTest("phase 7: failed step retries and then fails without losing durable st
         nextStepKey: null,
         onFailureStepKey: null,
         retryMaxAttempts: 2,
-        retryBackoffSeconds: 0,
+        retryBackoffSeconds: 1,
         timeoutSeconds: 30,
         compensationStepKey: null,
       },
@@ -302,6 +302,7 @@ storeTest("phase 7: failed step retries and then fails without losing durable st
   )
   assert.equal(firstAttempt[0]?.attempt, 1)
 
+  await new Promise((resolve) => setTimeout(resolve, 1100))
   await runtime.runOnce()
   run = await service.getRun(owner.organization.id, started.run.id)
   assert.equal(run.status, "FAILED")
