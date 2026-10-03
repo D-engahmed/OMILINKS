@@ -509,6 +509,127 @@ async function route(
     })
   }
 
+  if (method === "GET" && url.pathname === "/api/v1/workflows") {
+    return json({ items: await appApplication.listWorkflows(context) })
+  }
+
+  if (method === "POST" && url.pathname === "/api/v1/workflows/versions") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.createWorkflowVersion(context, {
+        name: stringValue(body.name),
+        triggerTypes: Array.isArray(body.triggerTypes)
+          ? body.triggerTypes.filter((value): value is string => typeof value === "string")
+          : [],
+        entryStepKey: stringValue(body.entryStepKey),
+        steps: Array.isArray(body.steps) ? body.steps : [],
+      }),
+      201
+    )
+  }
+
+  const workflowVersionsMatch = url.pathname.match(
+    /^\/api\/v1\/workflows\/([^/]+)\/versions$/
+  )
+  if (workflowVersionsMatch && method === "GET") {
+    return json({
+      items: await appApplication.listWorkflowVersions(
+        context,
+        workflowVersionsMatch[1]!
+      ),
+    })
+  }
+
+  const workflowPublishMatch = url.pathname.match(
+    /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/publish$/
+  )
+  if (workflowPublishMatch && method === "POST") {
+    return json(
+      await appApplication.publishWorkflowVersion(context, {
+        workflowId: workflowPublishMatch[1]!,
+        versionId: workflowPublishMatch[2]!,
+      })
+    )
+  }
+
+  const workflowStartMatch = url.pathname.match(
+    /^\/api\/v1\/workflows\/([^/]+)\/start$/
+  )
+  if (workflowStartMatch && method === "POST") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.startWorkflow(context, {
+        workflowId: workflowStartMatch[1]!,
+        triggerType: stringValue(body.triggerType),
+        sourceEventId: nullableStringValue(body.sourceEventId),
+        dedupeKey: stringValue(body.dedupeKey),
+        payload:
+          body.payload &&
+          typeof body.payload === "object" &&
+          !Array.isArray(body.payload)
+            ? body.payload as Record<string, unknown>
+            : {},
+      }),
+      201
+    )
+  }
+
+  const workflowRunMatch = url.pathname.match(
+    /^\/api\/v1\/workflow-runs\/([^/]+)$/
+  )
+  if (workflowRunMatch && method === "GET") {
+    return json(
+      await appApplication.getWorkflowRun(
+        context,
+        workflowRunMatch[1]!
+      )
+    )
+  }
+
+  const workflowStepRunsMatch = url.pathname.match(
+    /^\/api\/v1\/workflow-runs\/([^/]+)\/steps$/
+  )
+  if (workflowStepRunsMatch && method === "GET") {
+    return json({
+      items: await appApplication.getWorkflowStepRuns(
+        context,
+        workflowStepRunsMatch[1]!
+      ),
+    })
+  }
+
+  if (method === "GET" && url.pathname === "/api/v1/workflow-approvals") {
+    const runId = url.searchParams.get("runId") ?? undefined
+    return json({
+      items: await appApplication.listWorkflowApprovals(context, runId),
+    })
+  }
+
+  if (method === "POST" && url.pathname === "/api/v1/workflow-approvals/resolve") {
+    const body = await readJson(request)
+    if (body.decision !== "APPROVED" && body.decision !== "REJECTED") {
+      throw new AppError(400, "VALIDATION_ERROR", "decision must be APPROVED or REJECTED.")
+    }
+    return json(
+      await appApplication.resolveWorkflowApproval(context, {
+        approvalId: stringValue(body.approvalId),
+        decision: body.decision,
+      })
+    )
+  }
+
+  const workflowCancelMatch = url.pathname.match(
+    /^\/api\/v1\/workflow-runs\/([^/]+)\/cancel$/
+  )
+  if (workflowCancelMatch && method === "POST") {
+    return json(
+      await appApplication.cancelWorkflowRun(
+        context,
+        workflowCancelMatch[1]!
+      )
+    )
+  }
+
   if (method === "GET" && url.pathname === "/api/v1/ai/models") {
     return json({ items: await appApplication.listAiModels(context) })
   }
