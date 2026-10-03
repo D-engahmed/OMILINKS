@@ -564,6 +564,21 @@ async function route(
     )
   }
 
+  const memberStatusMatch = url.pathname.match(
+    /^\/api\/v1\/workforce\/members\/([^/]+)\/status$/
+  )
+
+  if (memberStatusMatch && method === "PUT") {
+    const body = await readJson(request)
+    const status = body.status === "DISABLED" ? "DISABLED" : "ACTIVE"
+    return json(
+      await appApplication.setWorkforceMemberStatus(context, {
+        workforceMemberId: memberStatusMatch[1]!,
+        status,
+      })
+    )
+  }
+
   if (method === "POST" && url.pathname === "/api/v1/workforce/members") {
     const body = await readJson(request)
 
