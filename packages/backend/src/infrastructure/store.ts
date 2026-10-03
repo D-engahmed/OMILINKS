@@ -1631,6 +1631,20 @@ export class MemoryStore implements Store {
     }
 
     this.assignments.set(assignment.id, assignment)
+
+    for (const item of this.queueItems.values()) {
+      if (
+        item.organizationId === input.organizationId &&
+        item.conversationId === input.conversationId &&
+        (item.status === "QUEUED" || item.status === "CLAIMED")
+      ) {
+        item.status = "CLAIMED"
+        item.lastRoutedAt = now
+        item.attempts += 1
+        item.version += 1
+      }
+    }
+
     this.emitOutbox({
       organizationId: input.organizationId,
       eventType: "conversation.assignment.changed",
