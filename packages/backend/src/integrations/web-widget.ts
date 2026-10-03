@@ -44,8 +44,8 @@ export class WebWidgetAdapter implements ChannelAdapter {
       providerAccountId: input.integration.providerAccountId,
       externalCustomerId: visitorId,
       customerDisplayName,
-      providerMessageId: clientMessageId,
-      clientMessageId,
+      providerMessageId: input.providerEventId,
+      clientMessageId: clientMessageId ?? input.providerEventId,
       content,
     }
   }
