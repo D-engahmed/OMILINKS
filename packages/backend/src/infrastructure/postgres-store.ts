@@ -2667,4 +2667,68 @@ export class PostgresStore implements Store {
       throw error
     }
   }
+  async releaseAssignment(input: {
+    organizationId: string
+    assignmentId: string
+    expectedVersion: number
+    status: Extract<Assignment["status"], "RELEASED" | "COMPLETED" | "TRANSFERRED" | "CANCELED">
+  }): Promise<Assignment> {
+    if (!isUuid(input.assignmentId)) throw new Error("ASSIGNMENT_NOT_FOUND")
+
+    return this.tenantTx(input.organizationId, async (client) => {
+      const assignmentResult = await client.query(
+        `SELECT * FROM assignments
+          WHERE id = $1 AND organization_id = $2
+          FOR UPDATE`,
+        [input.assignmentId, input.organizationId]
+      )
+      const row = assignmentResult.rows[0]
+      if (!row) throw new Error("ASSIGNMENT_NOT_FOUND")
+      if (str(row.status) !== "ACTIVE") throw new Error("ASSIGNMENT_NOT_ACTIVE")
+      if (num(row.version) !== input.expectedVersion) {
+        throw new Error("STALE_ASSIGNMENT_VERSION")
+      }
+
+      const conversationResult = await client.query(
+        `SELECT * FROM conversations
+          WHERE id = $1 AND organization_id = $2
+          FOR UPDATE`,
+        [row.conversation_id, input.organizationId]
+      )
+      if (!conversationResult.rows[0]) throw new Error("CONVERSATION_NOT_FOUND")
+
+      const updated = await client.query(
+        `UPDATE assignments
+            SET status = $3, released_at = now(), version = version + 1
+          WHERE id = $1 AND organization_id = $2
+          RETURNING *`,
+        [input.assignmentId, input.organizationId, input.status]
+      )
+
+      await client.query(
+        `UPDATE conversations
+            SET status = CASE WHEN $3 = 'COMPLETED' THEN 'WAITING_CUSTOMER' ELSE 'OPEN' END,
+                control = 'queue',
+                control_version = control_version + 1,
+                version = version + 1,
+                updated_at = now()
+          WHERE id = $1 AND organization_id = $2`,
+        [row.conversation_id, input.organizationId, input.status]
+      )
+
+      const assignment = toAssignment(updated.rows[0])
+      await insertOutboxEvent(client, {
+        organizationId: input.organizationId,
+        eventType: "conversation.assignment.changed",
+        aggregateType: "conversation",
+        aggregateId: assignment.conversationId,
+        correlationId: assignment.id,
+        causationId: assignment.id,
+        payload: { assignment },
+      })
+
+      return assignment
+    })
+  }
+
 }
