@@ -38,7 +38,6 @@ import type {
   RoutingEvaluationCandidate,
   EventInbox,
   WorkerLease,
-  Organization,
 } from "../domain/types.js"
 
 import { hashRequest, hashToken, normalizeEmail } from "./common.js"
