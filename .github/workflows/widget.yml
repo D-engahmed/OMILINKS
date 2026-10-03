@@ -1,0 +1,55 @@
+name: Widget CI
+
+on:
+  push:
+    paths:
+      - "apps/widget/**"
+      - "packages/ui/**"
+      - "packages/typescript-config/**"
+      - "packages/eslint-config/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+  pull_request:
+    paths:
+      - "apps/widget/**"
+      - "packages/ui/**"
+      - "packages/typescript-config/**"
+      - "packages/eslint-config/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+
+permissions:
+  contents: read
+
+jobs:
+  widget:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm --filter widget lint
+
+      - name: Typecheck
+        run: pnpm --filter widget typecheck
+
+      - name: Build
+        run: pnpm --filter widget build

@@ -13,6 +13,8 @@ const APP_ROLE = "omnilinks_app"
 const APP_PASSWORD = "omnilinks_app_test"
 
 const TABLES = [
+  "channel_inbound_events",
+  "channel_integrations",
   "outbox_events",
   "assignments",
   "messages",

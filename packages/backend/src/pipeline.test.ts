@@ -100,12 +100,13 @@ let sequence = 0
 function inbound(tenant: Tenant, content: string, overrides: Partial<InboundMessage> = {}): InboundMessage {
   return {
     organizationId: tenant.organizationId,
-    channel: "web",
-    provider: "web",
+    channel: "widget",
+    provider: "widget",
     providerAccountId: "widget-1",
     externalCustomerId: "visitor-1",
     customerDisplayName: "Visitor",
     providerMessageId: "pm-" + ++sequence,
+    clientMessageId: null,
     content,
     ...overrides,
   }

@@ -34,12 +34,13 @@ async function world(makeStore: MakeStore) {
 function inbound(orgId: string, messageId: string, content: string): InboundMessage {
   return {
     organizationId: orgId,
-    channel: "web",
-    provider: "web",
+    channel: "widget",
+    provider: "widget",
     providerAccountId: "widget-1",
     externalCustomerId: "visitor-1",
     customerDisplayName: "Visitor",
     providerMessageId: messageId,
+    clientMessageId: null,
     content,
   }
 }
@@ -77,8 +78,8 @@ storeTest("phase 2: answered conversations emit durable message and AI-run outbo
     events.map((event) => event.eventType).sort(),
     [
       "ai.run.completed",
-      "conversation.message.created",
-      "conversation.message.created",
+      "conversation.message.received",
+      "conversation.message.sent",
     ].sort()
   )
   assert.ok(events.every((event) => event.status === "PENDING"))
@@ -158,7 +159,8 @@ storeTest("phase 2: handoff produces control, handoff, message and AI trace even
   }
 
   assert.equal(events.length, 5)
-  assert.equal(counts.get("conversation.message.created"), 2)
+  assert.equal(counts.get("conversation.message.received"), 1)
+  assert.equal(counts.get("conversation.message.sent"), 1)
   assert.equal(counts.get("conversation.control.changed"), 1)
   assert.equal(counts.get("conversation.handoff.created"), 1)
   assert.equal(counts.get("ai.run.completed"), 1)

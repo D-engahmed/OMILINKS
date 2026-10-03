@@ -18,9 +18,12 @@ import type {
   HandoffReason,
   Message,
   RetrievedChunk,
+  InboundMessage,
 } from "../domain/types.js"
 import type { Store } from "../infrastructure/store.js"
 import { AppError } from "../shared/errors.js"
+
+export type { InboundMessage } from "../domain/types.js"
 
 export const MAX_INBOUND_CHARS = 4000
 
@@ -33,23 +36,6 @@ export interface PipelineOptions {
   retrievalK?: number
   historyLimit?: number
   maxTokens?: number
-}
-
-/**
- * A normalized inbound customer message. Channel adapters (web widget,
- * WhatsApp webhook) build this after authenticating the channel, and MUST take
- * organizationId from their own channel credentials, never from request input.
- */
-export interface InboundMessage {
-  organizationId: string
-  channel: string
-  provider: string
-  providerAccountId: string
-  externalCustomerId: string
-  customerDisplayName: string
-  providerMessageId: string | null
-  clientMessageId?: string | null
-  content: string
 }
 
 export interface InboundResult {

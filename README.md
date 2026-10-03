@@ -47,7 +47,7 @@ OMILINKS/
 └── turbo.json
 ```
 
-The codebase is currently an implementation scaffold. The documentation describes the target product, architecture, contracts, and engineering rules that implementation should converge toward.
+The codebase is being implemented as vertical phases. Phase 0-2 establish the tenant and conversation/AI core; Phase 3 now provides a real Web Widget channel boundary with durable inbound-event deduplication. The remaining domains are still target architecture until their implementation and tests land.
 
 ## Documentation
 

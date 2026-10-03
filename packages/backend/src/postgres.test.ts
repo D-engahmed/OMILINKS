@@ -73,7 +73,7 @@ test("application role is subject to RLS (test is not vacuous)", options, async 
        JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
        JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'organization_id'
       WHERE c.relkind = 'r' AND c.relname <> ALL($1)`,
-    [["memberships", "idempotency_keys"]]
+    [["memberships", "idempotency_keys", "channel_integrations"]]
   )
   const names = tables.rows.map((row) => row.relname as string).sort()
   assert.ok(names.includes("ai_runs") && names.includes("handoffs"))
@@ -151,7 +151,13 @@ test("migration runner is idempotent", options, async () => {
   const recorded = await requireAdminPool().query("SELECT name FROM schema_migrations ORDER BY name")
   assert.deepEqual(
     recorded.rows.map((row) => row.name),
-    ["0001_core.sql", "0002_rls_and_roles.sql", "0003_session_expiry.sql", "0004_ai_core.sql"]
+    [
+      "0001_core.sql",
+      "0002_rls_and_roles.sql",
+      "0003_session_expiry.sql",
+      "0004_ai_core.sql",
+      "0005_channels.sql",
+    ]
   )
 })
 

@@ -163,7 +163,8 @@ The transactional database writes durable event intent alongside the business mu
 Current Phase 2 events:
 
 ```text
-conversation.message.created
+conversation.message.received
+conversation.message.sent
 conversation.control.changed
 conversation.handoff.created
 ai.run.completed

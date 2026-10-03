@@ -6,6 +6,8 @@ import type {
   AiRun,
   AiRunInput,
   Assignment,
+  ChannelInboundEvent,
+  ChannelIntegration,
   ControlOwner,
   Handoff,
   HandoffReason,
@@ -84,6 +86,39 @@ const toUser = (row: Row): User => ({
   status: str(row.status) as User["status"],
   createdAt: iso(row.created_at),
   updatedAt: iso(row.updated_at),
+})
+
+const toChannelIntegration = (row: Row): ChannelIntegration => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  provider: str(row.provider) as ChannelIntegration["provider"],
+  providerAccountId: str(row.provider_account_id),
+  displayName: str(row.display_name),
+  publicKey: str(row.public_key),
+  status: str(row.status) as ChannelIntegration["status"],
+  capabilities: (row.capabilities ?? {}) as Record<string, boolean>,
+  allowedOrigins: (row.allowed_origins ?? []) as string[],
+  credentialRef: strOrNull(row.credential_ref),
+  createdAt: iso(row.created_at),
+  updatedAt: iso(row.updated_at),
+})
+
+const toChannelInboundEvent = (row: Row): ChannelInboundEvent => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  integrationId: str(row.integration_id),
+  providerEventId: str(row.provider_event_id),
+  eventType: str(row.event_type),
+  payloadHash: str(row.payload_hash),
+  status: str(row.status) as ChannelInboundEvent["status"],
+  attempts: num(row.attempts),
+  leaseUntil: isoOrNull(row.lease_until),
+  messageId: strOrNull(row.message_id),
+  correlationId: str(row.correlation_id),
+  lastError: strOrNull(row.last_error),
+  receivedAt: iso(row.received_at),
+  processedAt: isoOrNull(row.processed_at),
+  createdAt: iso(row.created_at),
 })
 
 const toOrganization = (row: Row): Organization => ({
@@ -386,6 +421,204 @@ export class PostgresStore implements Store {
     }
 
     return this.tx(fn, organizationId)
+  }
+
+  async createChannelIntegration(
+    input: {
+      organizationId: string
+      provider: ChannelIntegration["provider"]
+      providerAccountId: string
+      displayName: string
+      allowedOrigins: string[]
+      capabilities: Record<string, boolean>
+      credentialRef: string | null
+    }
+  ): Promise<ChannelIntegration> {
+    const publicKey = "wk_" + randomBytes(24).toString("base64url")
+
+    try {
+      return await this.tenantTx(input.organizationId, async (client) => {
+        const result = await client.query(
+          `INSERT INTO channel_integrations
+             (organization_id, provider, provider_account_id, display_name,
+              public_key, status, capabilities, allowed_origins, credential_ref)
+           VALUES ($1,$2,$3,$4,$5,'ACTIVE',$6::jsonb,$7::jsonb,$8)
+           RETURNING *`,
+          [
+            input.organizationId,
+            input.provider,
+            input.providerAccountId,
+            input.displayName.trim(),
+            publicKey,
+            JSON.stringify(input.capabilities),
+            JSON.stringify(input.allowedOrigins),
+            input.credentialRef,
+          ]
+        )
+        return toChannelIntegration(result.rows[0])
+      })
+    } catch (error) {
+      if (pgCode(error) === UNIQUE_VIOLATION) {
+        throw new Error(
+          pgConstraint(error)?.includes("channel_integrations_organization_id_provider_provider_account_id_key")
+            ? "CHANNEL_INTEGRATION_EXISTS"
+            : "CHANNEL_PUBLIC_KEY_EXISTS"
+        )
+      }
+      throw error
+    }
+  }
+
+  async listChannelIntegrations(
+    organizationId: string
+  ): Promise<ChannelIntegration[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM channel_integrations
+          WHERE organization_id = $1
+          ORDER BY created_at ASC, id ASC`,
+        [organizationId]
+      )
+      return result.rows.map(toChannelIntegration)
+    })
+  }
+
+  async getPublicChannelIntegration(
+    publicKey: string
+  ): Promise<ChannelIntegration | null> {
+    const result = await this.pool.query(
+      `SELECT id, organization_id, provider, provider_account_id, display_name,
+              public_key, status, capabilities, allowed_origins, credential_ref,
+              created_at, updated_at
+         FROM channel_integrations
+        WHERE public_key = $1`,
+      [publicKey]
+    )
+    return result.rows[0] ? toChannelIntegration(result.rows[0]) : null
+  }
+
+  async claimInboundEvent(
+    input: {
+      organizationId: string
+      integrationId: string
+      providerEventId: string
+      eventType: string
+      payloadHash: string
+      correlationId: string
+    }
+  ): Promise<{
+    event: ChannelInboundEvent
+    claimed: boolean
+    inFlight: boolean
+  }> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const inserted = await client.query(
+        `INSERT INTO channel_inbound_events
+           (organization_id, integration_id, provider_event_id, event_type,
+            payload_hash, correlation_id, lease_until)
+         VALUES ($1,$2,$3,$4,$5,$6,now() + interval '60 seconds')
+         ON CONFLICT (integration_id, provider_event_id) DO NOTHING
+         RETURNING *`,
+        [
+          input.organizationId,
+          input.integrationId,
+          input.providerEventId,
+          input.eventType,
+          input.payloadHash,
+          input.correlationId,
+        ]
+      )
+
+      if (inserted.rows[0]) {
+        return {
+          event: toChannelInboundEvent(inserted.rows[0]),
+          claimed: true,
+          inFlight: false,
+        }
+      }
+
+      const existing = await client.query(
+        `SELECT * FROM channel_inbound_events
+          WHERE organization_id = $1
+            AND integration_id = $2
+            AND provider_event_id = $3
+          FOR UPDATE`,
+        [input.organizationId, input.integrationId, input.providerEventId]
+      )
+      const row = existing.rows[0]
+      if (!row) throw new Error("INBOUND_EVENT_NOT_FOUND")
+
+      const event = toChannelInboundEvent(row)
+
+      if (
+        event.payloadHash !== input.payloadHash ||
+        event.eventType !== input.eventType
+      ) {
+        throw new Error("INBOUND_EVENT_CONFLICT")
+      }
+
+      if (event.status === "PROCESSED") {
+        return { event, claimed: false, inFlight: false }
+      }
+
+      if (
+        event.status === "PROCESSING" &&
+        event.leaseUntil !== null &&
+        new Date(event.leaseUntil).getTime() > Date.now()
+      ) {
+        return { event, claimed: false, inFlight: true }
+      }
+
+      const updated = await client.query(
+        `UPDATE channel_inbound_events
+            SET status = 'PROCESSING',
+                attempts = attempts + 1,
+                lease_until = now() + interval '60 seconds',
+                last_error = NULL
+          WHERE id = $1
+          RETURNING *`,
+        [event.id]
+      )
+
+      return {
+        event: toChannelInboundEvent(updated.rows[0]),
+        claimed: true,
+        inFlight: false,
+      }
+    })
+  }
+
+  async completeInboundEvent(
+    organizationId: string,
+    eventId: string,
+    messageId: string
+  ): Promise<void> {
+    await this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `UPDATE channel_inbound_events
+            SET status = 'PROCESSED', message_id = $3,
+                lease_until = NULL, processed_at = now(), last_error = NULL
+          WHERE id = $1 AND organization_id = $2`,
+        [eventId, organizationId, messageId]
+      )
+      if (!result.rowCount) throw new Error("INBOUND_EVENT_NOT_FOUND")
+    })
+  }
+
+  async failInboundEvent(
+    organizationId: string,
+    eventId: string,
+    error: string
+  ): Promise<void> {
+    await this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `UPDATE channel_inbound_events
+            SET status = 'FAILED', lease_until = NULL, last_error = $3
+          WHERE id = $1 AND organization_id = $2`,
+        [eventId, organizationId, error.slice(0, 500)]
+      )
+      if (!result.rowCount) throw new Error("INBOUND_EVENT_NOT_FOUND")
+    })
   }
 
   async findUserByEmail(email: string): Promise<User | null> {
@@ -883,7 +1116,10 @@ export class PostgresStore implements Store {
       const message = toMessage(inserted.rows[0])
       await insertOutboxEvent(client, {
         organizationId: message.organizationId,
-        eventType: "conversation.message.created",
+        eventType:
+          message.direction === "INBOUND"
+            ? "conversation.message.received"
+            : "conversation.message.sent",
         aggregateType: "conversation",
         aggregateId: message.conversationId,
         correlationId: message.id,

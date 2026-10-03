@@ -1,5 +1,5 @@
 import { authorize } from "../domain/authorization.js"
-import type { Principal } from "../domain/types.js"
+import type { ChannelIntegration, ChannelProvider, Principal } from "../domain/types.js"
 import { AppError } from "../shared/errors.js"
 import { chunkText } from "../ai/text.js"
 import type { HandoffStatus } from "../domain/types.js"
@@ -216,6 +216,93 @@ export class Application {
         })
       ),
     }
+  }
+
+  async createChannelIntegration(
+    ctx: AuthenticatedContext,
+    input: {
+      provider: ChannelProvider
+      providerAccountId: string
+      displayName: string
+      allowedOrigins: string[]
+    }
+  ): Promise<ChannelIntegration> {
+    authorize(ctx.principal.membership, "integration.manage")
+
+    if (input.provider !== "widget") {
+      throw new AppError(
+        501,
+        "CHANNEL_NOT_IMPLEMENTED",
+        "Only the web widget channel is enabled in Phase 3."
+      )
+    }
+
+    if (input.providerAccountId.trim().length < 2) {
+      throw new AppError(
+        400,
+        "VALIDATION_ERROR",
+        "providerAccountId is required."
+      )
+    }
+
+    if (input.displayName.trim().length < 2) {
+      throw new AppError(400, "VALIDATION_ERROR", "Display name is required.")
+    }
+
+    const allowedOrigins = [...new Set(input.allowedOrigins.map((origin) => origin.trim()).filter(Boolean))]
+
+    if (allowedOrigins.length === 0) {
+      throw new AppError(
+        400,
+        "VALIDATION_ERROR",
+        "At least one allowed origin is required for a widget integration."
+      )
+    }
+
+    for (const origin of allowedOrigins) {
+      try {
+        const url = new URL(origin)
+        if (!["http:", "https:"].includes(url.protocol)) throw new Error()
+        if (url.pathname !== "/" || url.search || url.hash) throw new Error()
+      } catch {
+        throw new AppError(
+          400,
+          "VALIDATION_ERROR",
+          "allowedOrigins must contain valid http(s) origins."
+        )
+      }
+    }
+
+    try {
+      return await this.store.createChannelIntegration({
+        organizationId: ctx.organizationId,
+        provider: input.provider,
+        providerAccountId: input.providerAccountId.trim(),
+        displayName: input.displayName.trim(),
+        allowedOrigins,
+        capabilities: {
+          inbound_text: true,
+          outbound_text: false,
+          media: false,
+          realtime: false,
+        },
+        credentialRef: null,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message === "CHANNEL_INTEGRATION_EXISTS") {
+        throw new AppError(
+          409,
+          "CONFLICT",
+          "A channel integration already exists for this provider account."
+        )
+      }
+      throw error
+    }
+  }
+
+  async listChannelIntegrations(ctx: AuthenticatedContext) {
+    authorize(ctx.principal.membership, "integration.read")
+    return await this.store.listChannelIntegrations(ctx.organizationId)
   }
 
   async listCustomers(ctx: AuthenticatedContext) {
