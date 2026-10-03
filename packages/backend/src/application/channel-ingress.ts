@@ -187,6 +187,19 @@ export class ChannelIngressService {
         claim.event.id,
         error instanceof Error ? error.message : "Inbound processing failed."
       )
+
+      if (
+        error instanceof Error &&
+        (/^INVALID_/.test(error.message) ||
+          error.message === "STRING_TOO_LONG")
+      ) {
+        throw new AppError(
+          400,
+          "VALIDATION_ERROR",
+          "Invalid channel message payload."
+        )
+      }
+
       throw error
     }
   }
