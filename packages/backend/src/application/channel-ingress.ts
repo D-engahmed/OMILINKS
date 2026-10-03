@@ -40,6 +40,30 @@ export class ChannelIngressService {
     private readonly pipeline: ConversationPipeline
   ) {}
 
+  async getPublicConfig(publicKey: string) {
+    const integration = await this.store.getPublicChannelIntegration(publicKey)
+
+    if (!integration || integration.status === "DISABLED") {
+      throw new AppError(404, "CHANNEL_NOT_FOUND", "Channel integration not found.")
+    }
+
+    if (integration.provider !== "widget") {
+      throw new AppError(
+        501,
+        "CHANNEL_NOT_IMPLEMENTED",
+        "This public channel is not enabled in Phase 3."
+      )
+    }
+
+    return {
+      provider: integration.provider,
+      publicKey: integration.publicKey,
+      displayName: integration.displayName,
+      capabilities: integration.capabilities,
+      status: integration.status,
+    }
+  }
+
   getAdapter(provider: ChannelIntegration["provider"]): ChannelAdapter {
     const adapter = this.adapters.get(provider)
     if (!adapter) {
