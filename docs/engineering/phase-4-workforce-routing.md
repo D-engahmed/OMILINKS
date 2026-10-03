@@ -229,6 +229,13 @@ Load score:
 1 - active_work / max_concurrent_work
 ~~~
 
+Important current-phase detail:
+
+- required skills are hard filters, so eligible candidates already have full required-skill coverage;
+- conversation priority is the same for every candidate in one routing decision.
+
+Therefore the current `skill` and `urgency` weights shift the absolute score but do not distinguish candidates. In Phase 4, `proficiency` and `load` are the effective differentiators. Later routing can introduce preferred skills, affinity, SLA age, or other candidate-specific signals without changing the commit protocol.
+
 Stable tie-break:
 
 ~~~text
