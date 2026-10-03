@@ -39,6 +39,7 @@ export interface WorkerRuntimeOptions {
   publishBatchSize?: number
   classConcurrency?: Record<string, number>
   onError?: (error: unknown) => void
+  tickers?: readonly Array<() => Promise<void>>
 }
 
 export const BACKOFF = {
@@ -94,6 +95,7 @@ export class WorkerRuntime {
   private readonly classConcurrency: Record<string, number>
   private readonly onError: (error: unknown) => void
   private readonly states = new Map<string, WorkerState>()
+  private readonly tickers: readonly Array<() => Promise<void>>
   private stopRequested = false
   private loopPromise: Promise<void> | null = null
 
@@ -117,6 +119,7 @@ export class WorkerRuntime {
     this.onError = options.onError ?? ((error) => {
       console.error("OMNILINKS worker runtime error", error)
     })
+    this.tickers = options.tickers ?? []
   }
 
   async runOnce(): Promise<{
@@ -135,6 +138,10 @@ export class WorkerRuntime {
       processed += result.processed
       retried += result.retried
       dead += result.dead
+    }
+
+    for (const tick of this.tickers) {
+      await tick()
     }
 
     return { published: published.length, processed, retried, dead }
