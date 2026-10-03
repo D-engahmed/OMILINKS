@@ -34,8 +34,8 @@ async function world(makeStore: MakeStore) {
 function inbound(orgId: string, messageId: string, content: string): InboundMessage {
   return {
     organizationId: orgId,
-    channel: "web",
-    provider: "web",
+    channel: "widget",
+    provider: "widget",
     providerAccountId: "widget-1",
     externalCustomerId: "visitor-1",
     customerDisplayName: "Visitor",
