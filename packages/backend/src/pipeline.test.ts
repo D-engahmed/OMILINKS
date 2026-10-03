@@ -106,6 +106,7 @@ function inbound(tenant: Tenant, content: string, overrides: Partial<InboundMess
     externalCustomerId: "visitor-1",
     customerDisplayName: "Visitor",
     providerMessageId: "pm-" + ++sequence,
+    clientMessageId: null,
     content,
     ...overrides,
   }
