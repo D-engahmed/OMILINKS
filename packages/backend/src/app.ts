@@ -570,11 +570,14 @@ async function route(
 
   if (memberStatusMatch && method === "PUT") {
     const body = await readJson(request)
-    const status = body.status === "DISABLED" ? "DISABLED" : "ACTIVE"
+    if (body.status !== "ACTIVE" && body.status !== "DISABLED") {
+      throw new AppError(400, "VALIDATION_ERROR", "status must be ACTIVE or DISABLED.")
+    }
+
     return json(
       await appApplication.setWorkforceMemberStatus(context, {
         workforceMemberId: memberStatusMatch[1]!,
-        status,
+        status: body.status,
       })
     )
   }
