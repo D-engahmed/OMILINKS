@@ -100,6 +100,71 @@ export interface Conversation {
   updatedAt: string
 }
 
+
+export type ChannelProvider =
+  | "widget"
+  | "whatsapp"
+  | "telegram"
+  | "sms"
+  | "facebook"
+  | "instagram"
+
+export type ChannelIntegrationStatus =
+  | "CONFIGURING"
+  | "ACTIVE"
+  | "DEGRADED"
+  | "DISABLED"
+
+export interface ChannelIntegration {
+  id: string
+  organizationId: string
+  provider: ChannelProvider
+  providerAccountId: string
+  displayName: string
+  publicKey: string
+  status: ChannelIntegrationStatus
+  capabilities: Record<string, boolean>
+  allowedOrigins: string[]
+  credentialRef: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type ChannelInboundEventStatus =
+  | "PROCESSING"
+  | "PROCESSED"
+  | "FAILED"
+
+export interface ChannelInboundEvent {
+  id: string
+  organizationId: string
+  integrationId: string
+  providerEventId: string
+  eventType: string
+  payloadHash: string
+  status: ChannelInboundEventStatus
+  attempts: number
+  leaseUntil: string | null
+  messageId: string | null
+  correlationId: string
+  lastError: string | null
+  receivedAt: string
+  processedAt: string | null
+  createdAt: string
+}
+
+export interface InboundMessage {
+  organizationId: string
+  channel: ChannelProvider
+  provider: ChannelProvider
+  providerAccountId: string
+  externalCustomerId: string
+  customerDisplayName: string
+  providerMessageId: string | null
+  clientMessageId: string | null
+  content: string
+}
+
 export interface Message {
   id: string
   organizationId: string
