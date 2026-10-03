@@ -42,7 +42,7 @@ export class FailoverModelGateway implements ModelGateway {
           provider: result.provider || model.provider,
           model: result.model || model.model,
           modelRegistryId: model.id,
-          costUsd: inputCost + outputCost,
+          costUsd: Number((inputCost + outputCost).toFixed(8)),
         }
       } catch (error) {
         failures.push(
