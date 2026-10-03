@@ -190,6 +190,7 @@ export interface CreateWorkflowVersionInput {
   organizationId: string
   name: string
   triggerTypes: string[]
+  entryStepKey: string
   steps: Array<{
     stepKey: string
     stepType: WorkflowStep["stepType"]
