@@ -19,6 +19,9 @@ import type { IdentityProvider } from "./identity.js"
 import { AiPlatformService } from "./ai-platform.js"
 import { EnvironmentAiGatewayResolver } from "../ai/provider-resolver.js"
 import type { AiModelGatewayResolver } from "../ai/model-router.js"
+import { WorkflowService } from "./workflows.js"
+import type { CreateWorkflowVersionInput } from "../infrastructure/store.js"
+import type { WorkflowApproval } from "../domain/types.js"
 
 export interface AuthenticatedContext {
   principal: Principal
@@ -551,6 +554,75 @@ export class Application {
   async listHandoffs(ctx: AuthenticatedContext, status: HandoffStatus | undefined) {
     authorize(ctx.principal.membership, "conversation.read")
     return await this.store.listHandoffs(ctx.organizationId, status)
+  }
+
+  private workflows(): WorkflowService {
+    return new WorkflowService(this.store)
+  }
+
+  async listWorkflows(ctx: AuthenticatedContext) {
+    authorize(ctx.principal.membership, "workflow.manage")
+    return await this.store.listWorkflowDefinitions(ctx.organizationId)
+  }
+
+  async createWorkflowVersion(ctx: AuthenticatedContext, input: Omit<CreateWorkflowVersionInput, "organizationId">) {
+    authorize(ctx.principal.membership, "workflow.manage")
+    return await this.workflows().createWorkflowVersion({
+      organizationId: ctx.organizationId,
+      ...input,
+    })
+  }
+
+  async listWorkflowVersions(ctx: AuthenticatedContext, workflowId: string) {
+    authorize(ctx.principal.membership, "workflow.manage")
+    return await this.store.listWorkflowVersions(ctx.organizationId, workflowId)
+  }
+
+  async publishWorkflowVersion(ctx: AuthenticatedContext, input: { workflowId: string; versionId: string }) {
+    authorize(ctx.principal.membership, "workflow.manage")
+    return await this.workflows().publishWorkflowVersion(
+      ctx.organizationId,
+      input.workflowId,
+      input.versionId
+    )
+  }
+
+  async startWorkflow(ctx: AuthenticatedContext, input: Omit<Parameters<WorkflowService["startWorkflow"]>[0], "organizationId">) {
+    authorize(ctx.principal.membership, "workflow.manage")
+    return await this.workflows().startWorkflow({
+      organizationId: ctx.organizationId,
+      ...input,
+    })
+  }
+
+  async getWorkflowRun(ctx: AuthenticatedContext, runId: string) {
+    authorize(ctx.principal.membership, "workflow.manage")
+    return await this.workflows().getRun(ctx.organizationId, runId)
+  }
+
+  async getWorkflowStepRuns(ctx: AuthenticatedContext, runId: string) {
+    authorize(ctx.principal.membership, "workflow.manage")
+    return await this.workflows().getStepRuns(ctx.organizationId, runId)
+  }
+
+  async listWorkflowApprovals(ctx: AuthenticatedContext, runId?: string) {
+    authorize(ctx.principal.membership, "workflow.approve")
+    return await this.workflows().listApprovals(ctx.organizationId, runId)
+  }
+
+  async resolveWorkflowApproval(ctx: AuthenticatedContext, input: { approvalId: string; decision: "APPROVED" | "REJECTED" }) {
+    authorize(ctx.principal.membership, "workflow.approve")
+    return await this.workflows().resolveApproval({
+      organizationId: ctx.organizationId,
+      approvalId: input.approvalId,
+      userId: ctx.principal.user.id,
+      decision: input.decision,
+    })
+  }
+
+  async cancelWorkflowRun(ctx: AuthenticatedContext, runId: string) {
+    authorize(ctx.principal.membership, "workflow.manage")
+    return await this.workflows().cancelRun(ctx.organizationId, runId)
   }
 
   async listAiModels(ctx: AuthenticatedContext) {
