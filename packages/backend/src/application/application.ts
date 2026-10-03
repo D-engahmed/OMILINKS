@@ -1,5 +1,13 @@
 import { authorize } from "../domain/authorization.js"
-import type { ChannelIntegration, ChannelProvider, Principal } from "../domain/types.js"
+import type {
+  ChannelIntegration,
+  ChannelProvider,
+  Conversation,
+  Principal,
+  RoutingPolicyConfig,
+  PresenceState,
+} from "../domain/types.js"
+import { RoutingService, type RouteConversationInput } from "./routing.js"
 import { AppError } from "../shared/errors.js"
 import { chunkText } from "../ai/text.js"
 import type { HandoffStatus } from "../domain/types.js"
@@ -594,6 +602,246 @@ export class Application {
 
       throw error
     }
+  }
+
+  async listWorkforceMembers(ctx: AuthenticatedContext) {
+    authorize(ctx.principal.membership, "workforce.manage")
+    return await this.store.listWorkforceMembers(ctx.organizationId)
+  }
+
+  async createWorkforceSkill(
+    ctx: AuthenticatedContext,
+    input: { code: string; name: string }
+  ) {
+    authorize(ctx.principal.membership, "workforce.manage")
+    if (!/^[a-z0-9][a-z0-9._-]{1,63}$/.test(input.code.trim().toLowerCase())) {
+      throw new AppError(400, "VALIDATION_ERROR", "Skill code is invalid.")
+    }
+    if (input.name.trim().length < 2 || input.name.trim().length > 120) {
+      throw new AppError(400, "VALIDATION_ERROR", "Skill name must be 2-120 characters.")
+    }
+    try {
+      return await this.store.createWorkforceSkill({
+        organizationId: ctx.organizationId,
+        code: input.code,
+        name: input.name,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message === "WORKFORCE_SKILL_EXISTS") {
+        throw new AppError(409, "CONFLICT", "Skill code already exists.")
+      }
+      throw error
+    }
+  }
+
+  async listWorkforceSkills(ctx: AuthenticatedContext) {
+    authorize(ctx.principal.membership, "workforce.manage")
+    return await this.store.listWorkforceSkills(ctx.organizationId)
+  }
+
+  async setMemberSkills(
+    ctx: AuthenticatedContext,
+    input: {
+      workforceMemberId: string
+      skills: Array<{ skillId: string; proficiency: number }>
+    }
+  ) {
+    authorize(ctx.principal.membership, "workforce.manage")
+    if (!Array.isArray(input.skills)) {
+      throw new AppError(400, "VALIDATION_ERROR", "skills must be an array.")
+    }
+    try {
+      return await this.store.setMemberSkills({
+        organizationId: ctx.organizationId,
+        ...input,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message === "INVALID_PROFICIENCY") {
+        throw new AppError(400, "VALIDATION_ERROR", "Proficiency must be 0-100.")
+      }
+      if (error instanceof Error && error.message === "WORKFORCE_SKILL_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Skill not found.")
+      }
+      if (error instanceof Error && error.message === "WORKFORCE_MEMBER_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Workforce member not found.")
+      }
+      throw error
+    }
+  }
+
+  async setWorkforcePresence(
+    ctx: AuthenticatedContext,
+    input: {
+      workforceMemberId: string
+      state: PresenceState
+      source: string
+      ttlSeconds: number
+      expectedVersion: number | null
+    }
+  ) {
+    authorize(ctx.principal.membership, "workforce.manage")
+    if (!Number.isInteger(input.ttlSeconds) || input.ttlSeconds < 10 || input.ttlSeconds > 86_400) {
+      throw new AppError(400, "VALIDATION_ERROR", "TTL must be between 10 seconds and 24 hours.")
+    }
+    try {
+      return await this.store.setWorkforcePresence({
+        organizationId: ctx.organizationId,
+        ...input,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message === "STALE_PRESENCE_VERSION") {
+        throw new AppError(409, "STALE_VERSION", "Presence was updated by another operation.")
+      }
+      if (error instanceof Error && error.message === "WORKFORCE_MEMBER_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Workforce member not found.")
+      }
+      throw error
+    }
+  }
+
+  async setWorkforceCapacity(
+    ctx: AuthenticatedContext,
+    input: {
+      workforceMemberId: string
+      maxConcurrentWork: number
+      expectedVersion: number | null
+    }
+  ) {
+    authorize(ctx.principal.membership, "workforce.manage")
+    try {
+      return await this.store.setWorkforceCapacity({
+        organizationId: ctx.organizationId,
+        ...input,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message === "INVALID_CAPACITY") {
+        throw new AppError(400, "VALIDATION_ERROR", "Capacity must be an integer from 1 to 1000.")
+      }
+      if (error instanceof Error && error.message === "STALE_CAPACITY_VERSION") {
+        throw new AppError(409, "STALE_VERSION", "Capacity was updated by another operation.")
+      }
+      if (error instanceof Error && error.message === "WORKFORCE_MEMBER_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Workforce member not found.")
+      }
+      throw error
+    }
+  }
+
+  async createWorkforceTeam(ctx: AuthenticatedContext, name: string) {
+    authorize(ctx.principal.membership, "workforce.manage")
+    if (name.trim().length < 2 || name.trim().length > 120) {
+      throw new AppError(400, "VALIDATION_ERROR", "Team name must be 2-120 characters.")
+    }
+    try {
+      return await this.store.createWorkforceTeam({
+        organizationId: ctx.organizationId,
+        name,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message === "WORKFORCE_TEAM_EXISTS") {
+        throw new AppError(409, "CONFLICT", "Team already exists.")
+      }
+      throw error
+    }
+  }
+
+  async listWorkforceTeams(ctx: AuthenticatedContext) {
+    authorize(ctx.principal.membership, "workforce.manage")
+    return await this.store.listWorkforceTeams(ctx.organizationId)
+  }
+
+  async setTeamMembers(
+    ctx: AuthenticatedContext,
+    input: { teamId: string; workforceMemberIds: string[] }
+  ) {
+    authorize(ctx.principal.membership, "workforce.manage")
+    try {
+      return await this.store.setTeamMembers({
+        organizationId: ctx.organizationId,
+        ...input,
+      })
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        ["WORKFORCE_TEAM_NOT_FOUND", "WORKFORCE_MEMBER_NOT_FOUND"].includes(error.message)
+      ) {
+        throw new AppError(404, "NOT_FOUND", "Team or workforce member not found.")
+      }
+      throw error
+    }
+  }
+
+  async createQueue(
+    ctx: AuthenticatedContext,
+    input: { name: string; requiredSkillIds: string[] }
+  ) {
+    authorize(ctx.principal.membership, "workforce.manage")
+    if (input.name.trim().length < 2 || input.name.trim().length > 120) {
+      throw new AppError(400, "VALIDATION_ERROR", "Queue name must be 2-120 characters.")
+    }
+    try {
+      return await this.store.createQueue({
+        organizationId: ctx.organizationId,
+        ...input,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message === "QUEUE_EXISTS") {
+        throw new AppError(409, "CONFLICT", "Queue already exists.")
+      }
+      if (error instanceof Error && error.message === "WORKFORCE_SKILL_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Queue skill not found.")
+      }
+      throw error
+    }
+  }
+
+  async listQueues(ctx: AuthenticatedContext) {
+    authorize(ctx.principal.membership, "workforce.manage")
+    return await this.store.listQueues(ctx.organizationId)
+  }
+
+  async createRoutingPolicy(
+    ctx: AuthenticatedContext,
+    input: { name: string; config: RoutingPolicyConfig }
+  ) {
+    authorize(ctx.principal.membership, "workforce.manage")
+    const config = input.config
+    if (
+      !Array.isArray(config.allowedWorkerTypes) ||
+      !Number.isInteger(config.presenceTtlSeconds) ||
+      config.presenceTtlSeconds < 10 ||
+      config.presenceTtlSeconds > 3600 ||
+      !config.weights ||
+      Object.values(config.weights).some((value) => typeof value !== "number" || value < 0) ||
+      (config.defaultQueueId !== null && typeof config.defaultQueueId !== "string")
+    ) {
+      throw new AppError(400, "VALIDATION_ERROR", "Invalid routing policy configuration.")
+    }
+    try {
+      return await this.store.createOrPublishRoutingPolicy({
+        organizationId: ctx.organizationId,
+        ...input,
+      })
+    } catch (error) {
+      throw error
+    }
+  }
+
+  async listRoutingPolicies(ctx: AuthenticatedContext) {
+    authorize(ctx.principal.membership, "workforce.manage")
+    return await this.store.listRoutingPolicies(ctx.organizationId)
+  }
+
+  async routeConversation(
+    ctx: AuthenticatedContext,
+    input: Omit<RouteConversationInput, "policyName"> & { policyName?: string }
+  ) {
+    authorize(ctx.principal.membership, "conversation.assign")
+    const service = new RoutingService(this.store)
+    return await service.routeConversation(ctx.organizationId, {
+      ...input,
+      policyName: input.policyName ?? "default",
+    })
   }
 
   async createWorkforceMember(
