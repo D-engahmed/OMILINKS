@@ -846,26 +846,44 @@ export class Application {
     input: { name: string; config: RoutingPolicyConfig }
   ) {
     authorize(ctx.principal.membership, "workforce.manage")
+
+    if (input.name.trim().length < 2 || input.name.trim().length > 120) {
+      throw new AppError(400, "VALIDATION_ERROR", "Policy name must be 2-120 characters.")
+    }
+
     const config = input.config
-    if (
-      !Array.isArray(config.allowedWorkerTypes) ||
-      !Number.isInteger(config.presenceTtlSeconds) ||
-      config.presenceTtlSeconds < 10 ||
-      config.presenceTtlSeconds > 3600 ||
-      !config.weights ||
-      Object.values(config.weights).some((value) => typeof value !== "number" || value < 0) ||
-      (config.defaultQueueId !== null && typeof config.defaultQueueId !== "string")
-    ) {
+    const validWorkerTypes =
+      Array.isArray(config.allowedWorkerTypes) &&
+      config.allowedWorkerTypes.length > 0 &&
+      config.allowedWorkerTypes.every((value) => value === "HUMAN" || value === "AI")
+    const validWeights =
+      !!config.weights &&
+      Object.keys(config.weights).length === 4 &&
+      ["skill", "proficiency", "load", "urgency"].every((key) => {
+        const value = config.weights[key as keyof typeof config.weights]
+        return typeof value === "number" && Number.isFinite(value) && value >= 0
+      })
+    const validTtl =
+      Number.isInteger(config.presenceTtlSeconds) &&
+      config.presenceTtlSeconds >= 10 &&
+      config.presenceTtlSeconds <= 3600
+
+    if (!validWorkerTypes || !validWeights || !validTtl) {
       throw new AppError(400, "VALIDATION_ERROR", "Invalid routing policy configuration.")
     }
-    try {
-      return await this.store.createOrPublishRoutingPolicy({
-        organizationId: ctx.organizationId,
-        ...input,
-      })
-    } catch (error) {
-      throw error
+
+    if (config.defaultQueueId !== null) {
+      const queues = await this.store.listQueues(ctx.organizationId)
+      if (!queues.some((queue) => queue.id === config.defaultQueueId && queue.status === "ACTIVE")) {
+        throw new AppError(400, "VALIDATION_ERROR", "defaultQueueId must reference an active queue in this organization.")
+      }
     }
+
+    return await this.store.createOrPublishRoutingPolicy({
+      organizationId: ctx.organizationId,
+      name: input.name.trim(),
+      config,
+    })
   }
 
   async listRoutingPolicies(ctx: AuthenticatedContext) {
