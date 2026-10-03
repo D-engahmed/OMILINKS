@@ -233,6 +233,11 @@ export interface Store {
     queueId: string
     conversationId: string
   }): Promise<QueueItem>
+  getActiveQueueItem(
+    organizationId: string,
+    conversationId: string
+  ): Promise<QueueItem | null>
+
   createOrPublishRoutingPolicy(input: {
     organizationId: string
     name: string
@@ -1318,6 +1323,19 @@ export class MemoryStore implements Store {
 
   async listQueues(organizationId: string): Promise<WorkforceQueue[]> {
     return clone([...this.queues.values()].filter((queue) => queue.organizationId === organizationId))
+  }
+
+  async getActiveQueueItem(
+    organizationId: string,
+    conversationId: string
+  ): Promise<QueueItem | null> {
+    const item = [...this.queueItems.values()].find(
+      (candidate) =>
+        candidate.organizationId === organizationId &&
+        candidate.conversationId === conversationId &&
+        (candidate.status === "QUEUED" || candidate.status === "CLAIMED")
+    )
+    return item ? clone(item) : null
   }
 
   async enqueueConversation(input: { organizationId: string; queueId: string; conversationId: string }): Promise<QueueItem> {
