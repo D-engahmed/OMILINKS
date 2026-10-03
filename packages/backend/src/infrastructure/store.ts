@@ -1028,16 +1028,6 @@ export class MemoryStore implements Store {
     }
 
     this.conversations.set(conversation.id, conversation)
-
-    this.emitOutbox({
-      organizationId: input.organizationId,
-      eventType: "conversation.created",
-      aggregateType: "conversation",
-      aggregateId: conversation.id,
-      correlationId: conversation.id,
-      payload: { conversation: clone(conversation) },
-    })
-
     return clone(conversation)
   }
 
