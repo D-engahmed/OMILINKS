@@ -1,5 +1,5 @@
 import type { ChannelIntegration, InboundMessage } from "../domain/types.js"
-import {
+import type {
   ChannelInboundRequest,
   ChannelAdapter,
   requireString,
