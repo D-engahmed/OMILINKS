@@ -639,6 +639,24 @@ export class Application {
     return await this.store.listWorkforceSkills(ctx.organizationId)
   }
 
+  async getWorkforceMemberSkills(
+    ctx: AuthenticatedContext,
+    workforceMemberId: string
+  ) {
+    authorize(ctx.principal.membership, "workforce.manage")
+    try {
+      return await this.store.listMemberSkills(
+        ctx.organizationId,
+        workforceMemberId
+      )
+    } catch (error) {
+      if (error instanceof Error && error.message === "WORKFORCE_MEMBER_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Workforce member not found.")
+      }
+      throw error
+    }
+  }
+
   async setMemberSkills(
     ctx: AuthenticatedContext,
     input: {
