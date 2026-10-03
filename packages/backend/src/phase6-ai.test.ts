@@ -65,7 +65,7 @@ test("model failover preserves the registered model id and computes registry cos
   const result = await gateway.generate({ system: "s", messages: [{ role: "user", content: "hi" }], maxTokens: 20 })
   assert.equal(attempts, 1)
   assert.equal(result.modelRegistryId, "model-2")
-  assert.equal(result.costUsd, 2 * 100 / 1_000_000 + 4 * 20 / 1_000_000)
+  assert.equal(result.costUsd, 0.00028)
 })
 
 async function signup(store: Store) {
@@ -179,7 +179,7 @@ storeTest("phase 6: registered agent runs through governed RAG and persists trac
   assert.equal(result.run.agentPolicyVersionId, agentPolicy.id)
   assert.equal(result.run.modelRegistryId, registeredModel.id)
   assert.equal(result.run.promptVersion, "phase6-test-prompt")
-  assert.equal(result.run.costUsd, 2 * 100 / 1_000_000 + 4 * 20 / 1_000_000)
+  assert.equal(result.run.costUsd, 0.00028)
   assert.equal(gateway.calls.length, 1)
 
   const evaluation = await service.createEvaluation({
