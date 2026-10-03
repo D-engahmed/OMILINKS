@@ -73,11 +73,11 @@ These are deliberate next milestones, not hidden capabilities.
 
 The Store interface is async. The same test suite runs against MemoryStore and PostgresStore (set TEST_DATABASE_URL to an admin connection for a scratch database to include the PostgreSQL variants; without it they are reported as skipped).
 
-Next database milestones:
+Next database/runtime milestones:
 
-1. transactional outbox write on message creation, then a publisher;
-2. inbound messages and client/provider message-id deduplication (the schema has the columns but no unique index, and the code has no inbound path yet);
-3. a real identity-provider adapter, invites, and login rate limiting.
+1. outbox publisher/consumer runtime with retry, dead-letter and replay controls;
+2. real identity-provider adapter, invites, login rate limiting and persistent session operations;
+3. richer conversation delivery state once real channel adapters are introduced.
 
 ## AI pipeline (conversation core)
 
@@ -96,5 +96,26 @@ Not implemented, and not to be assumed:
 - **Retrieval quality is unmeasured, especially for Egyptian Arabic.** Normalization and light stemming only unify spelling variants. `evaluateRetrieval` exists to measure recall and MRR, but no real labeled questions have been run through it. The coverage threshold (default 0.5) is uncalibrated.
 - **The human-request and handoff-notice wording are heuristics and draft copy.** The Arabic copy needs a native Egyptian review.
 - **Retrieval reads every active chunk of the tenant per message.** That is fine for a pilot-sized knowledge base and is the first thing to replace (FTS or vectors) behind the `Retriever` interface.
-- **The AI step runs inline, with no queue or worker.** Several quick messages from one customer are each answered separately; there is no debounce. The outbox is still unused.
+- **The AI step runs inline, with no queue or worker.** Several quick messages from one customer are each answered separately; there is no debounce. Moving execution to durable workers belongs to the event-runtime/AI-platform phases.
 - No actions or tools, no cost calculation (tokens are recorded), no groundedness check beyond the citation requirement (a model can cite the wrong chunk).
+
+
+## Phase 2 completion boundary
+
+Phase 2 is complete when the conversation core and initial governed AI pipeline provide executable evidence for:
+
+- canonical customer and conversation resolution;
+- inbound message deduplication under retries and concurrency;
+- tenant-scoped knowledge retrieval;
+- deterministic relevance gating before model execution;
+- explicit human-request handoff;
+- structured model output validation;
+- citation requirement before customer-visible AI replies;
+- durable AI run traceability;
+- human takeover protection through control-version checks;
+- atomic outbox records for message creation, handoff/control changes and AI-run completion;
+- tenant-isolated outbox reads.
+
+Phase 2 deliberately does **not** include live channel providers, outbound delivery, durable workers, embeddings/vector retrieval, tool execution, workflow automation, production identity, billing or production UI. Those are later phases and must not be inferred from this slice.
+
+The authoritative verification file is `src/phase2-completion.test.ts`; the existing pipeline, AI, PostgreSQL and hardening suites remain part of the same release gate.
