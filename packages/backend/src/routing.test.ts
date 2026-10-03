@@ -547,3 +547,64 @@ storeTest("phase 4: routing decision records explain why candidates were rejecte
   assert.equal(badCandidate?.rejectionCode, "PRESENCE_NOT_AVAILABLE")
   assert.equal(result.decision.contextSnapshot.policy !== undefined, true)
 })
+
+
+storeTest("phase 4: HTTP route endpoint returns a durable assignment decision", async (makeStore) => {
+  const store = await makeStore()
+  const handle = await createApp(store)
+  const owner = await signup(handle, "HTTP", "http-routing@example.test")
+
+  const member = await store.createWorkforceMember({
+    organizationId: owner.organization.id,
+    userId: owner.user.id,
+    displayName: "HTTP Agent",
+    type: "HUMAN",
+  })
+  await store.setWorkforcePresence({
+    organizationId: owner.organization.id,
+    workforceMemberId: member.id,
+    state: "AVAILABLE",
+    source: "test",
+    ttlSeconds: 300,
+    expectedVersion: null,
+  })
+
+  const conversation = await createConversation(handle, owner.session.accessToken)
+
+  const response = await handle(
+    new Request(
+      "http://localhost/api/v1/conversations/" + conversation.id + "/route",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer " + owner.session.accessToken,
+        },
+        body: JSON.stringify({
+          requestedWorkerTypes: ["HUMAN"],
+          requiredSkills: [],
+          commit: true,
+          reason: "http route",
+        }),
+      }
+    )
+  )
+
+  assert.equal(response.status, 200)
+  const body = (await response.json()) as {
+    decision: {
+      outcome: string
+      selectedWorkforceMemberId: string | null
+    }
+    assignment?: {
+      id: string
+      workforceMemberId: string
+      routingDecisionId: string | null
+    }
+  }
+
+  assert.equal(body.decision.outcome, "ASSIGNED")
+  assert.equal(body.decision.selectedWorkforceMemberId, member.id)
+  assert.equal(body.assignment?.workforceMemberId, member.id)
+  assert.equal(body.assignment?.routingDecisionId, body.decision === undefined ? null : body.assignment?.routingDecisionId)
+})
