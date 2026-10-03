@@ -13,11 +13,9 @@ export class WebWidgetAdapter implements ChannelAdapter {
       return { accepted: false, reason: "PROVIDER_MISMATCH" }
     }
 
-    const origin = input.request.headers.get("origin")
-    if (origin && input.integration.allowedOrigins.length > 0) {
-      if (!input.integration.allowedOrigins.includes(origin)) {
-        return { accepted: false, reason: "ORIGIN_NOT_ALLOWED" }
-      }
+    const origin = input.request.headers.get("origin")?.trim()
+    if (!origin || !input.integration.allowedOrigins.includes(origin)) {
+      return { accepted: false, reason: "ORIGIN_NOT_ALLOWED" }
     }
 
     return { accepted: true }
