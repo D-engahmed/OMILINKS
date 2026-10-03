@@ -1,12 +1,12 @@
 import { Application } from "./application/application.js"
 import { loadConfig } from "./config.js"
-import { MemoryStore } from "./infrastructure/store.js"
+import type { HandoffStatus } from "./domain/types.js"
+import { DevIdentityProvider, type IdentityProvider } from "./application/identity.js"
+import type { Store } from "./infrastructure/store.js"
 import { AppError } from "./shared/errors.js"
 import { errorResponse, getRequestId, json } from "./shared/http.js"
 
 const config = loadConfig()
-export const defaultStore = new MemoryStore()
-export const application = new Application(defaultStore)
 
 async function readJson(
   request: Request
@@ -49,6 +49,10 @@ async function readJson(
       "Request body must be valid JSON."
     )
   }
+}
+
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null
 }
 
 function bearer(request: Request): string {
@@ -95,16 +99,25 @@ function slugify(input: string): string {
   return slug || "organization"
 }
 
+export interface AppOptions {
+  identity?: IdentityProvider
+  sessionTtlSeconds?: number
+}
+
 export async function createApp(
-  store = defaultStore
+  store: Store,
+  options: AppOptions = {}
 ): Promise<(request: Request) => Promise<Response>> {
-  const appApplication = new Application(store)
+  const appApplication = new Application(store, {
+    identity: options.identity ?? new DevIdentityProvider(config.environment),
+    sessionTtlSeconds: options.sessionTtlSeconds ?? config.sessionTtlSeconds,
+  })
 
   return async (request: Request): Promise<Response> => {
     const requestId = getRequestId(request)
 
     try {
-      const response = await route(request, appApplication, requestId)
+      const response = await route(request, appApplication, requestId, store)
       response.headers.set("x-request-id", requestId)
       return response
     } catch (error) {
@@ -118,7 +131,8 @@ export async function createApp(
 async function route(
   request: Request,
   appApplication: Application,
-  requestId: string
+  requestId: string,
+  store: Store
 ): Promise<Response> {
   const url = new URL(request.url)
   const method = request.method.toUpperCase()
@@ -133,6 +147,12 @@ async function route(
   }
 
   if (method === "GET" && url.pathname === "/ready") {
+    try {
+      await store.ping()
+    } catch {
+      throw new AppError(503, "NOT_READY", "Dependencies are not ready.")
+    }
+
     return json({
       status: "ready",
       service: config.serviceName,
@@ -151,12 +171,13 @@ async function route(
   if (method === "POST" && url.pathname === "/api/v1/auth/signup") {
     const body = await readJson(request)
 
-    const result = appApplication.signup({
+    const result = await appApplication.signup({
       organizationName: stringValue(body.organizationName),
       ownerEmail: stringValue(body.email),
       ownerDisplayName: stringValue(body.displayName),
       slug: stringValue(body.slug) || slugify(stringValue(body.organizationName)),
       idempotencyKey: request.headers.get("Idempotency-Key"),
+      credential: optionalString(body.credential),
     })
 
     return json(
@@ -172,6 +193,7 @@ async function route(
         session: {
           tokenType: "Bearer",
           accessToken: result.sessionToken,
+          expiresInSeconds: appApplication.sessionTtlSeconds,
         },
         replayed: result.replayed,
       },
@@ -179,14 +201,44 @@ async function route(
     )
   }
 
-  const context = appApplication.authenticate(bearer(request))
+  if (method === "POST" && url.pathname === "/api/v1/auth/login") {
+    const body = await readJson(request)
+
+    const result = await appApplication.login({
+      email: stringValue(body.email),
+      credential: optionalString(body.credential),
+    })
+
+    return json({
+      user: result.user,
+      memberships: result.memberships.map((membership) => ({
+        organizationId: membership.organizationId,
+        role: membership.role,
+      })),
+      session: {
+        tokenType: "Bearer",
+        accessToken: result.sessionToken,
+        expiresInSeconds: appApplication.sessionTtlSeconds,
+      },
+    })
+  }
+
+  const context = await appApplication.authenticate(
+    bearer(request),
+    request.headers.get("x-organization-id")
+  )
+
+  if (method === "POST" && url.pathname === "/api/v1/auth/logout") {
+    await appApplication.logout(context)
+    return json({ revoked: true })
+  }
 
   if (method === "GET" && url.pathname === "/api/v1/organizations/me") {
-    return json(appApplication.getOrganizationContext(context))
+    return json(await appApplication.getOrganizationContext(context))
   }
 
   if (method === "GET" && url.pathname === "/api/v1/customers") {
-    return json({ items: appApplication.listCustomers(context) })
+    return json({ items: await appApplication.listCustomers(context) })
   }
 
   if (method === "POST" && url.pathname === "/api/v1/customers") {
@@ -207,7 +259,7 @@ async function route(
 
     const identity = identityValue as Record<string, unknown>
 
-    const result = appApplication.createCustomer(context, {
+    const result = await appApplication.createCustomer(context, {
       displayName: stringValue(body.displayName),
       provider: stringValue(identity.provider),
       providerAccountId: stringValue(identity.channelAccountId),
@@ -222,7 +274,7 @@ async function route(
   )
 
   if (customerMatch && method === "GET") {
-    return json(appApplication.getCustomer(context, customerMatch[1]!))
+    return json(await appApplication.getCustomer(context, customerMatch[1]!))
   }
 
   if (customerMatch && method === "PATCH") {
@@ -242,7 +294,7 @@ async function route(
     const customerId = customerMatch[1]
     if (!customerId) throw new AppError(404, "NOT_FOUND", "Customer not found.")
     return json(
-      appApplication.updateCustomer(
+      await appApplication.updateCustomer(
         context,
         customerId,
         expectedVersion,
@@ -252,14 +304,14 @@ async function route(
   }
 
   if (method === "GET" && url.pathname === "/api/v1/conversations") {
-    return json({ items: appApplication.listConversations(context) })
+    return json({ items: await appApplication.listConversations(context) })
   }
 
   if (method === "POST" && url.pathname === "/api/v1/conversations") {
     const body = await readJson(request)
 
     return json(
-      appApplication.createConversation(context, {
+      await appApplication.createConversation(context, {
         customerId: stringValue(body.customerId),
         channel: stringValue(body.channel),
       }),
@@ -273,7 +325,7 @@ async function route(
 
   if (conversationMatch && method === "GET") {
     return json(
-      appApplication.getConversation(context, conversationMatch[1]!)
+      await appApplication.getConversation(context, conversationMatch[1]!)
     )
   }
 
@@ -284,12 +336,69 @@ async function route(
   if (messageMatch && method === "POST") {
     const body = await readJson(request)
 
-    return json(
-      appApplication.createMessage(context, messageMatch[1]!, {
+    const { message, created } = await appApplication.createMessage(
+      context,
+      messageMatch[1]!,
+      {
         content: stringValue(body.content),
         clientMessageId: nullableStringValue(body.clientMessageId),
-      }),
-      202
+      }
+    )
+
+    return json(message, created ? 202 : 200)
+  }
+
+  if (messageMatch && method === "GET") {
+    const requested = Number(url.searchParams.get("limit") ?? 100)
+    const limit = Number.isInteger(requested)
+      ? Math.min(Math.max(requested, 1), 500)
+      : 100
+
+    return json({
+      items: await appApplication.listMessages(context, messageMatch[1]!, limit),
+    })
+  }
+
+  if (method === "GET" && url.pathname === "/api/v1/handoffs") {
+    const status = url.searchParams.get("status")
+
+    if (status !== null && !["OPEN", "CLAIMED", "CLOSED"].includes(status)) {
+      throw new AppError(400, "VALIDATION_ERROR", "Invalid status filter.")
+    }
+
+    return json({
+      items: await appApplication.listHandoffs(
+        context,
+        (status as HandoffStatus | null) ?? undefined
+      ),
+    })
+  }
+
+  if (url.pathname === "/api/v1/knowledge/documents") {
+    if (method === "GET") {
+      return json({ items: await appApplication.listKnowledgeDocuments(context) })
+    }
+
+    if (method === "POST") {
+      const body = await readJson(request)
+
+      return json(
+        await appApplication.createKnowledgeDocument(context, {
+          title: stringValue(body.title),
+          content: stringValue(body.content),
+        }),
+        201
+      )
+    }
+  }
+
+  const archiveMatch = url.pathname.match(
+    /^\/api\/v1\/knowledge\/documents\/([^/]+)\/archive$/
+  )
+
+  if (archiveMatch && method === "POST") {
+    return json(
+      await appApplication.archiveKnowledgeDocument(context, archiveMatch[1]!)
     )
   }
 
@@ -297,7 +406,7 @@ async function route(
     const body = await readJson(request)
 
     return json(
-      appApplication.createWorkforceMember(context, {
+      await appApplication.createWorkforceMember(context, {
         displayName: stringValue(body.displayName),
         userId: nullableStringValue(body.userId),
         type: body.type === "AI" ? "AI" : "HUMAN",
@@ -329,7 +438,7 @@ async function route(
     }
 
     return json(
-      appApplication.createAssignment(context, {
+      await appApplication.createAssignment(context, {
         conversationId: stringValue(body.conversationId),
         workforceMemberId: stringValue(body.workforceMemberId),
         reason: stringValue(body.reason),
@@ -342,5 +451,3 @@ async function route(
   throw new AppError(404, "NOT_FOUND", "Route not found.")
 }
 
-
-export const handle = await createApp()

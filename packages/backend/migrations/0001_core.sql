@@ -106,6 +106,7 @@ CREATE TABLE conversations (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   resolved_at timestamptz,
+  UNIQUE(id, organization_id),
   CONSTRAINT conversation_customer_owner_fk
     FOREIGN KEY (customer_id, organization_id)
     REFERENCES customers (id, organization_id)
@@ -156,7 +157,8 @@ CREATE TABLE workforce_members (
   type text NOT NULL CHECK (type IN ('HUMAN','AI')),
   status text NOT NULL CHECK (status IN ('ACTIVE','DISABLED')),
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(id, organization_id)
 );
 
 CREATE INDEX workforce_members_org_status_idx

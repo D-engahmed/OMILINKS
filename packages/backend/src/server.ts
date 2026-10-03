@@ -1,59 +1,56 @@
-import { createServer } from "node:http"
+import pg from "pg"
 
-import { handle } from "./app.js"
+import { createApp } from "./app.js"
+import { loadConfig } from "./config.js"
+import { MemoryStore, type Store } from "./infrastructure/store.js"
+import { PostgresStore } from "./infrastructure/postgres-store.js"
+import { DevIdentityProvider } from "./application/identity.js"
+import { createNodeServer } from "./node-server.js"
 
-const port = Number.parseInt(process.env.PORT ?? "4000", 10)
+const config = loadConfig()
 
-if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+if (config.port > 65_535) {
   throw new Error("PORT must be an integer between 1 and 65535")
 }
 
-const server = createServer(async (incoming, outgoing) => {
-  try {
-    const host = incoming.headers.host ?? `localhost:${port}`
-    const headers = new Headers()
+let store: Store
 
-    for (const [key, value] of Object.entries(incoming.headers)) {
-      if (Array.isArray(value)) {
-        headers.set(key, value.join(", "))
-      } else if (value !== undefined) {
-        headers.set(key, value)
-      }
-    }
+if (config.databaseUrl) {
+  store = new PostgresStore(
+    new pg.Pool({ connectionString: config.databaseUrl, max: 10 })
+  )
+} else if (config.environment === "production") {
+  throw new Error("DATABASE_URL is required in production")
+} else {
+  console.warn(
+    "DATABASE_URL is not set: using the in-memory store (data is lost on restart)."
+  )
+  store = new MemoryStore()
+}
 
-    const request = new Request(
-      `http://${host}${incoming.url ?? "/"}`,
-      {
-        method: incoming.method ?? "GET",
-        headers,
-      }
-    )
+if (config.identityProvider === null) {
+  throw new Error(
+    "IDENTITY_PROVIDER is required in production, and no production identity provider is implemented yet."
+  )
+}
 
-    const response = await handle(request)
-    const body = await response.text()
-
-    outgoing.writeHead(response.status, {
-      "content-type":
-        response.headers.get("content-type") ??
-        "application/json; charset=utf-8",
-    })
-    outgoing.end(body)
-  } catch (error) {
-    console.error(error)
-    outgoing.writeHead(500, {
-      "content-type": "application/json; charset=utf-8",
-    })
-    outgoing.end(
-      JSON.stringify({
-        error: {
-          code: "INTERNAL_ERROR",
-          message: "Internal server error",
-        },
-      })
-    )
-  }
+const handle = await createApp(store, {
+  identity: new DevIdentityProvider(config.environment),
+  sessionTtlSeconds: config.sessionTtlSeconds,
+})
+const server = createNodeServer(handle, {
+  maxRequestBytes: config.maxRequestBytes,
 })
 
-server.listen(port, () => {
-  console.log(`OMNILINKS backend listening on http://localhost:${port}`)
+server.listen(config.port, () => {
+  console.log(`OMNILINKS backend listening on http://localhost:${config.port}`)
 })
+
+async function shutdown(): Promise<void> {
+  server.close()
+  await store.close()
+  process.exit(0)
+}
+
+process.on("SIGTERM", () => void shutdown())
+process.on("SIGINT", () => void shutdown())

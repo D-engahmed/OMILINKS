@@ -13,6 +13,8 @@ export type Permission =
   | "conversation.send"
   | "conversation.assign"
   | "workforce.manage"
+  | "knowledge.read"
+  | "knowledge.manage"
 
 export type ConversationStatus =
   | "OPEN"
@@ -139,4 +141,78 @@ export interface Assignment {
 export interface Principal {
   user: User
   membership: Membership
+}
+
+export interface KnowledgeDocument {
+  id: string
+  organizationId: string
+  title: string
+  source: string
+  status: "ACTIVE" | "ARCHIVED"
+  chunkCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface KnowledgeChunk {
+  id: string
+  organizationId: string
+  documentId: string
+  documentTitle: string
+  position: number
+  content: string
+}
+
+export type AiRunOutcome = "ANSWERED" | "HANDOFF" | "DISCARDED_STALE"
+
+export type HandoffReason =
+  | "CUSTOMER_REQUESTED_HUMAN"
+  | "NO_RELEVANT_KNOWLEDGE"
+  | "MODEL_COULD_NOT_ANSWER"
+  | "UNGROUNDED_ANSWER"
+  | "MODEL_OUTPUT_INVALID"
+  | "PROVIDER_ERROR"
+
+export interface RetrievedChunk {
+  chunkId: string
+  score: number
+  coverage: number
+  /** True when the model reported relying on this chunk for its answer. */
+  cited?: boolean
+}
+
+export interface AiRunInput {
+  organizationId: string
+  conversationId: string
+  inboundMessageId: string
+  provider: string | null
+  model: string | null
+  promptVersion: string
+  retrieved: RetrievedChunk[]
+  inputTokens: number | null
+  outputTokens: number | null
+  latencyMs: number | null
+  outcome: AiRunOutcome
+  reason: HandoffReason | null
+  error: string | null
+}
+
+export interface AiRun extends AiRunInput {
+  id: string
+  replyMessageId: string | null
+  handoffId: string | null
+  createdAt: string
+}
+
+export type HandoffStatus = "OPEN" | "CLAIMED" | "CLOSED"
+
+export interface Handoff {
+  id: string
+  organizationId: string
+  conversationId: string
+  reason: HandoffReason
+  summary: string
+  status: HandoffStatus
+  createdAt: string
+  updatedAt: string
 }
