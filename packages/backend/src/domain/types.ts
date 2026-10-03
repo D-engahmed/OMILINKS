@@ -478,6 +478,125 @@ export interface RetrievedChunk {
   cited?: boolean
 }
 
+export type WorkflowStatus = "ACTIVE" | "DISABLED" | "RETIRED"
+export type WorkflowVersionStatus = "DRAFT" | "VALIDATING" | "TESTING" | "PUBLISHED" | "DISABLED" | "RETIRED"
+export type WorkflowStepType = "NOOP" | "WAIT" | "APPROVAL" | "COMPLETE"
+export type WorkflowRunStatus = "PENDING" | "RUNNING" | "WAITING" | "SUCCEEDED" | "FAILED" | "RETRYING" | "DEAD_LETTERED" | "CANCELED" | "PARTIALLY_COMPLETED"
+export type WorkflowStepRunStatus = "PENDING" | "RUNNING" | "WAITING" | "SUCCEEDED" | "FAILED" | "RETRYING" | "CANCELED" | "COMPENSATED"
+export type WorkflowApprovalStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "CANCELED"
+
+export interface WorkflowDefinition {
+  id: string
+  organizationId: string
+  name: string
+  status: WorkflowStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkflowVersion {
+  id: string
+  organizationId: string
+  workflowId: string
+  version: number
+  status: WorkflowVersionStatus
+  triggerTypes: string[]
+  createdAt: string
+  publishedAt: string | null
+}
+
+export interface WorkflowStep {
+  id: string
+  organizationId: string
+  workflowVersionId: string
+  stepKey: string
+  stepType: WorkflowStepType
+  config: Record<string, unknown>
+  nextStepKey: string | null
+  onFailureStepKey: string | null
+  retryMaxAttempts: number
+  retryBackoffSeconds: number
+  timeoutSeconds: number
+  compensationStepKey: string | null
+  createdAt: string
+}
+
+export interface WorkflowTrigger {
+  id: string
+  organizationId: string
+  workflowId: string
+  workflowVersionId: string
+  triggerType: string
+  sourceEventId: string | null
+  dedupeKey: string
+  payload: Record<string, unknown>
+  receivedAt: string
+}
+
+export interface WorkflowRun {
+  id: string
+  organizationId: string
+  workflowId: string
+  workflowVersionId: string
+  triggerId: string
+  status: WorkflowRunStatus
+  context: Record<string, unknown>
+  currentStepKey: string | null
+  error: string | null
+  attempt: number
+  availableAt: string
+  leaseUntil: string | null
+  leasedBy: string | null
+  startedAt: string | null
+  completedAt: string | null
+  createdAt: string
+}
+
+export interface WorkflowStepRun {
+  id: string
+  organizationId: string
+  workflowRunId: string
+  stepId: string
+  stepKey: string
+  status: WorkflowStepRunStatus
+  attempt: number
+  input: Record<string, unknown>
+  output: Record<string, unknown>
+  error: string | null
+  availableAt: string
+  startedAt: string | null
+  completedAt: string | null
+  createdAt: string
+}
+
+export interface WorkflowWait {
+  id: string
+  organizationId: string
+  workflowRunId: string
+  workflowStepRunId: string
+  wakeAt: string
+  waitReason: string
+  resumeToken: string | null
+  createdAt: string
+  resumedAt: string | null
+}
+
+export interface WorkflowApproval {
+  id: string
+  organizationId: string
+  workflowRunId: string
+  workflowStepRunId: string
+  actionHash: string
+  action: Record<string, unknown>
+  workflowVersionId: string
+  requesterUserId: string | null
+  approverScope: string
+  status: WorkflowApprovalStatus
+  expiresAt: string | null
+  decidedByUserId: string | null
+  decidedAt: string | null
+  createdAt: string
+}
 export type AiModelStatus = "ACTIVE" | "DISABLED"
 export type AiAgentStatus = "DRAFT" | "TESTING" | "PUBLISHED" | "PAUSED" | "RETIRED"
 export type AiPolicyVersionStatus = "DRAFT" | "PUBLISHED" | "RETIRED"
