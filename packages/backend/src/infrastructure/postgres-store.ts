@@ -1938,14 +1938,15 @@ export class PostgresStore implements Store {
       )
       const createdVersion = await client.query(
         `INSERT INTO workflow_versions
-           (organization_id, workflow_id, version, status, trigger_types)
-         VALUES ($1,$2,$3,'DRAFT',$4::jsonb)
+           (organization_id, workflow_id, version, status, trigger_types, entry_step_key)
+         VALUES ($1,$2,$3,'DRAFT',$4::jsonb,$5)
          RETURNING *`,
         [
           input.organizationId,
           definition.id,
           num(versionResult.rows[0].version) + 1,
           JSON.stringify(input.triggerTypes),
+          input.entryStepKey,
         ]
       )
       const version = toWorkflowVersion(createdVersion.rows[0])
