@@ -10,7 +10,6 @@ import type {
   AiEvaluation,
   AiModel,
   AiModelPolicyConfig,
-  AiModelPolicyVersion,
   AiRun,
 } from "../domain/types.js"
 import type { Store } from "../infrastructure/store.js"
