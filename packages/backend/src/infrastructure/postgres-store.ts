@@ -2135,7 +2135,11 @@ export class PostgresStore implements Store {
       const models = await client.query(
         `SELECT m.* FROM ai_models m
           WHERE m.organization_id = $1
-            AND m.id = ANY(($2->'modelIds')::jsonb)::uuid[]`,
+            AND m.id = ANY(
+              ARRAY(
+                SELECT jsonb_array_elements_text($2::jsonb->'modelIds')
+              )::uuid[]
+            )`,
         [organizationId, row.model_policy_version_config]
       )
 
@@ -2236,7 +2240,9 @@ export class PostgresStore implements Store {
       )
       return result.rows.map(toAiEvaluation)
     })
-  }  async listMessages(
+  }
+
+  async listMessages(
     organizationId: string,
     conversationId: string,
     limit: number
