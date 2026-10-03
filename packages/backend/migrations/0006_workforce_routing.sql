@@ -258,13 +258,15 @@ ON CONFLICT (workforce_member_id) DO NOTHING;
 CREATE INDEX routing_candidates_decision_idx
   ON routing_candidates (organization_id, routing_decision_id, eligible, score DESC);
 
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  workforce_member_skills,
+  team_members;
+
 GRANT SELECT, INSERT, UPDATE ON
   workforce_skills,
-  workforce_member_skills,
   workforce_presence,
   workforce_capacity,
   teams,
-  team_members,
   queues,
   queue_skills,
   queue_items,
