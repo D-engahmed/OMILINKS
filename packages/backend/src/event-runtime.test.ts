@@ -277,6 +277,16 @@ storeTest("phase 5: routing worker drains a queue-controlled conversation", asyn
     displayName: "Queue Agent",
     type: "HUMAN",
   })
+  const skill = await store.createWorkforceSkill({
+    organizationId: owner.organization.id,
+    code: "billing",
+    name: "Billing",
+  })
+  await store.setMemberSkills({
+    organizationId: owner.organization.id,
+    workforceMemberId: member.id,
+    skills: [{ skillId: skill.id, proficiency: 95 }],
+  })
   await store.setWorkforcePresence({
     organizationId: owner.organization.id,
     workforceMemberId: member.id,
@@ -289,7 +299,7 @@ storeTest("phase 5: routing worker drains a queue-controlled conversation", asyn
   const queue = await store.createQueue({
     organizationId: owner.organization.id,
     name: "General",
-    requiredSkillIds: [],
+    requiredSkillIds: [skill.id],
   })
   const conversation = await createConversation(store, owner.session.accessToken)
   await store.enqueueConversation({
