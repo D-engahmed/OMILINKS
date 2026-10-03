@@ -598,6 +598,14 @@ export class MemoryStore implements Store {
   private readonly outboxEvents = new Map<string, OutboxEvent>()
   private readonly eventInbox = new Map<string, EventInbox>()
   private readonly workerLeases = new Map<string, WorkerLease>()
+  private readonly workflowDefinitions = new Map<string, WorkflowDefinition>()
+  private readonly workflowVersions = new Map<string, WorkflowVersion>()
+  private readonly workflowSteps = new Map<string, WorkflowStep>()
+  private readonly workflowTriggers = new Map<string, WorkflowTrigger>()
+  private readonly workflowRuns = new Map<string, WorkflowRun>()
+  private readonly workflowStepRuns = new Map<string, WorkflowStepRun>()
+  private readonly workflowWaits = new Map<string, WorkflowWait>()
+  private readonly workflowApprovals = new Map<string, WorkflowApproval>()
   private readonly aiModels = new Map<string, AiModel>()
   private readonly aiModelPolicies = new Map<string, AiModelPolicy>()
   private readonly aiModelPolicyVersions = new Map<string, AiModelPolicyVersion>()
@@ -2306,6 +2314,423 @@ export class MemoryStore implements Store {
         .filter((event) => event.organizationId === organizationId)
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     )
+  }
+
+  async listWorkflowDefinitions(organizationId: string): Promise<WorkflowDefinition[]> {
+    return clone([...this.workflowDefinitions.values()].filter((item) => item.organizationId === organizationId).sort((a, b) => a.name.localeCompare(b.name)))
+  }
+
+  async createWorkflowVersion(input: CreateWorkflowVersionInput) {
+    let definition = [...this.workflowDefinitions.values()].find(
+      (item) => item.organizationId === input.organizationId && item.name === input.name.trim()
+    )
+    const now = new Date().toISOString()
+    if (!definition) {
+      definition = {
+        id: randomUUID(),
+        organizationId: input.organizationId,
+        name: input.name.trim(),
+        status: "ACTIVE",
+        createdAt: now,
+        updatedAt: now,
+      }
+      this.workflowDefinitions.set(definition.id, definition)
+    }
+
+    const existingVersions = [...this.workflowVersions.values()].filter(
+      (item) => item.organizationId === input.organizationId && item.workflowId === definition!.id
+    )
+    const version: WorkflowVersion = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      workflowId: definition.id,
+      version: Math.max(0, ...existingVersions.map((item) => item.version)) + 1,
+      status: "DRAFT",
+      triggerTypes: [...input.triggerTypes],
+      createdAt: now,
+      publishedAt: null,
+    }
+    this.workflowVersions.set(version.id, version)
+
+    const steps: WorkflowStep[] = input.steps.map((inputStep) => {
+      const step: WorkflowStep = {
+        id: randomUUID(),
+        organizationId: input.organizationId,
+        workflowVersionId: version.id,
+        stepKey: inputStep.stepKey,
+        stepType: inputStep.stepType,
+        config: clone(inputStep.config),
+        nextStepKey: inputStep.nextStepKey,
+        onFailureStepKey: inputStep.onFailureStepKey,
+        retryMaxAttempts: inputStep.retryMaxAttempts,
+        retryBackoffSeconds: inputStep.retryBackoffSeconds,
+        timeoutSeconds: inputStep.timeoutSeconds,
+        compensationStepKey: inputStep.compensationStepKey,
+        createdAt: now,
+      }
+      this.workflowSteps.set(step.id, step)
+      return step
+    })
+
+    return { definition: clone(definition), version: clone(version), steps: clone(steps) }
+  }
+
+  async listWorkflowVersions(organizationId: string, workflowId: string) {
+    return clone(
+      [...this.workflowVersions.values()]
+        .filter((item) => item.organizationId === organizationId && item.workflowId === workflowId)
+        .sort((a, b) => b.version - a.version)
+        .map((version) => ({
+          ...version,
+          steps: [...this.workflowSteps.values()].filter((step) => step.workflowVersionId === version.id).sort((a, b) => a.stepKey.localeCompare(b.stepKey)),
+        }))
+    )
+  }
+
+  async publishWorkflowVersion(organizationId: string, workflowVersionId: string) {
+    const version = this.workflowVersions.get(workflowVersionId)
+    if (!version || version.organizationId !== organizationId) throw new Error("WORKFLOW_VERSION_NOT_FOUND")
+    const steps = [...this.workflowSteps.values()].filter((step) => step.workflowVersionId === version.id)
+    version.status = "PUBLISHED"
+    version.publishedAt = new Date().toISOString()
+    for (const candidate of this.workflowVersions.values()) {
+      if (candidate.organizationId === organizationId && candidate.workflowId === version.workflowId && candidate.id !== version.id && candidate.status === "PUBLISHED") {
+        candidate.status = "RETIRED"
+      }
+    }
+    const definition = this.workflowDefinitions.get(version.workflowId)
+    if (definition) {
+      definition.status = "ACTIVE"
+      definition.updatedAt = new Date().toISOString()
+    }
+    return { ...clone(version), steps: clone(steps) }
+  }
+
+  async startWorkflow(input: StartWorkflowInput) {
+    const version = [...this.workflowVersions.values()]
+      .filter((item) => item.organizationId === input.organizationId && item.workflowId === input.workflowId && item.status === "PUBLISHED")
+      .sort((a, b) => b.version - a.version)[0]
+    if (!version) throw new Error("WORKFLOW_NOT_PUBLISHED")
+    if (!version.triggerTypes.includes(input.triggerType) && !version.triggerTypes.includes("*")) throw new Error("WORKFLOW_TRIGGER_NOT_ALLOWED")
+
+    const existingTrigger = [...this.workflowTriggers.values()].find(
+      (item) => item.organizationId === input.organizationId && item.workflowId === input.workflowId && item.dedupeKey === input.dedupeKey
+    )
+    if (existingTrigger) {
+      const run = [...this.workflowRuns.values()].find((item) => item.triggerId === existingTrigger.id)
+      if (!run) throw new Error("WORKFLOW_TRIGGER_CORRUPT")
+      return { trigger: clone(existingTrigger), run: clone(run), created: false }
+    }
+
+    const now = new Date().toISOString()
+    const trigger: WorkflowTrigger = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      workflowId: input.workflowId,
+      workflowVersionId: version.id,
+      triggerType: input.triggerType,
+      sourceEventId: input.sourceEventId,
+      dedupeKey: input.dedupeKey,
+      payload: clone(input.payload),
+      receivedAt: now,
+    }
+    const run: WorkflowRun = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      workflowId: input.workflowId,
+      workflowVersionId: version.id,
+      triggerId: trigger.id,
+      status: "PENDING",
+      context: clone(input.payload),
+      currentStepKey: null,
+      error: null,
+      attempt: 0,
+      availableAt: now,
+      leaseUntil: null,
+      leasedBy: null,
+      startedAt: null,
+      completedAt: null,
+      createdAt: now,
+    }
+    this.workflowTriggers.set(trigger.id, trigger)
+    this.workflowRuns.set(run.id, run)
+    this.emitOutbox({
+      organizationId: input.organizationId,
+      eventType: "workflow.run.requested",
+      aggregateType: "workflow_run",
+      aggregateId: run.id,
+      correlationId: run.id,
+      payload: { runId: run.id, workflowId: run.workflowId },
+    })
+    return { trigger: clone(trigger), run: clone(run), created: true }
+  }
+
+  async getWorkflowRun(organizationId: string, runId: string): Promise<WorkflowRun | null> {
+    const run = this.workflowRuns.get(runId)
+    return run && run.organizationId === organizationId ? clone(run) : null
+  }
+
+  async listWorkflowStepRuns(organizationId: string, runId: string): Promise<WorkflowStepRun[]> {
+    return clone([...this.workflowStepRuns.values()].filter((item) => item.organizationId === organizationId && item.workflowRunId === runId).sort((a, b) => a.createdAt.localeCompare(b.createdAt)))
+  }
+
+  async startWorkflowStepRun(input: {
+    organizationId: string
+    runId: string
+    stepId: string
+    stepKey: string
+    input: Record<string, unknown>
+  }): Promise<WorkflowStepRun> {
+    const run = this.workflowRuns.get(input.runId)
+    if (!run || run.organizationId !== input.organizationId) throw new Error("WORKFLOW_RUN_NOT_FOUND")
+    const active = [...this.workflowStepRuns.values()]
+      .filter((item) => item.organizationId === input.organizationId && item.workflowRunId === input.runId && item.stepKey === input.stepKey && (item.status === "PENDING" || item.status === "RETRYING"))
+      .sort((a, b) => b.attempt - a.attempt)[0]
+    if (active) return clone(active)
+    const attempts = [...this.workflowStepRuns.values()].filter((item) => item.organizationId === input.organizationId && item.workflowRunId === input.runId && item.stepKey === input.stepKey)
+    const stepRun: WorkflowStepRun = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      workflowRunId: input.runId,
+      stepId: input.stepId,
+      stepKey: input.stepKey,
+      status: "RUNNING",
+      attempt: Math.max(0, ...attempts.map((item) => item.attempt)) + 1,
+      input: clone(input.input),
+      output: {},
+      error: null,
+      availableAt: new Date().toISOString(),
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+      createdAt: new Date().toISOString(),
+    }
+    this.workflowStepRuns.set(stepRun.id, stepRun)
+    return clone(stepRun)
+  }
+
+  async claimWorkflowRuns(input: ClaimWorkflowRunsInput): Promise<WorkflowRun[]> {
+    const now = Date.now()
+    const candidates = [...this.workflowRuns.values()]
+      .filter((run) =>
+        run.organizationId === input.organizationId &&
+        new Date(run.availableAt).getTime() <= now &&
+        (run.status === "PENDING" || run.status === "RETRYING" || (run.status === "RUNNING" && run.leaseUntil && new Date(run.leaseUntil).getTime() <= now))
+      )
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .slice(0, input.limit)
+    const lease = new Date(now + input.leaseSeconds * 1000).toISOString()
+    return clone(candidates.map((run) => {
+      run.status = "RUNNING"
+      run.attempt += 1
+      run.leaseUntil = lease
+      run.leasedBy = input.workerId
+      run.startedAt ??= new Date(now).toISOString()
+      return run
+    }))
+  }
+
+  async completeWorkflowStep(input: CompleteWorkflowStepInput): Promise<WorkflowRun> {
+    const run = this.workflowRuns.get(input.runId)
+    const stepRun = this.workflowStepRuns.get(input.stepRunId)
+    if (!run || run.organizationId !== input.organizationId) throw new Error("WORKFLOW_RUN_NOT_FOUND")
+    if (!stepRun || stepRun.organizationId !== input.organizationId || stepRun.workflowRunId !== input.runId || stepRun.status !== "RUNNING") throw new Error("WORKFLOW_STEP_LEASE_MISMATCH")
+    if (run.leasedBy !== input.workerId) throw new Error("WORKFLOW_STEP_LEASE_MISMATCH")
+    const step = this.workflowSteps.get(stepRun.stepId)
+    if (!step) throw new Error("WORKFLOW_STEP_NOT_FOUND")
+    stepRun.status = "SUCCEEDED"
+    stepRun.output = clone(input.output)
+    stepRun.completedAt = new Date().toISOString()
+    run.context = { ...run.context, ...clone(input.output) }
+    run.leaseUntil = null
+    run.leasedBy = null
+    if (step.nextStepKey) {
+      run.currentStepKey = step.nextStepKey
+      run.status = "PENDING"
+      run.availableAt = new Date().toISOString()
+    } else {
+      run.currentStepKey = null
+      run.status = "SUCCEEDED"
+      run.completedAt = new Date().toISOString()
+    }
+    return clone(run)
+  }
+
+  async failWorkflowStep(input: FailWorkflowStepInput): Promise<WorkflowRun> {
+    const run = this.workflowRuns.get(input.runId)
+    const stepRun = this.workflowStepRuns.get(input.stepRunId)
+    if (!run || run.organizationId !== input.organizationId) throw new Error("WORKFLOW_RUN_NOT_FOUND")
+    if (!stepRun || stepRun.status !== "RUNNING" || run.leasedBy !== input.workerId) throw new Error("WORKFLOW_STEP_LEASE_MISMATCH")
+    const step = this.workflowSteps.get(stepRun.stepId)
+    if (!step) throw new Error("WORKFLOW_STEP_NOT_FOUND")
+    stepRun.error = input.error.slice(0, 1000)
+    if (stepRun.attempt < step.retryMaxAttempts) {
+      stepRun.status = "RETRYING"
+      run.status = "RETRYING"
+      run.availableAt = new Date(Date.now() + Math.max(0, input.retryDelaySeconds) * 1000).toISOString()
+    } else {
+      stepRun.status = "FAILED"
+      run.status = "FAILED"
+      run.error = stepRun.error
+      run.completedAt = new Date().toISOString()
+    }
+    run.leaseUntil = null
+    run.leasedBy = null
+    return clone(run)
+  }
+
+  async putWorkflowStepWaiting(input: { organizationId: string; runId: string; stepRunId: string; workerId: string }): Promise<WorkflowRun> {
+    const run = this.workflowRuns.get(input.runId)
+    const stepRun = this.workflowStepRuns.get(input.stepRunId)
+    if (!run || !stepRun || run.organizationId !== input.organizationId || stepRun.organizationId !== input.organizationId || run.leasedBy !== input.workerId) throw new Error("WORKFLOW_STEP_LEASE_MISMATCH")
+    stepRun.status = "WAITING"
+    run.status = "WAITING"
+    run.leaseUntil = null
+    run.leasedBy = null
+    return clone(run)
+  }
+
+  async createWorkflowWait(input: { organizationId: string; runId: string; stepRunId: string; wakeAt: string; waitReason: string; resumeToken: string | null }): Promise<WorkflowWait> {
+    const wait: WorkflowWait = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      workflowRunId: input.runId,
+      workflowStepRunId: input.stepRunId,
+      wakeAt: input.wakeAt,
+      waitReason: input.waitReason,
+      resumeToken: input.resumeToken,
+      createdAt: new Date().toISOString(),
+      resumedAt: null,
+    }
+    this.workflowWaits.set(wait.id, wait)
+    return clone(wait)
+  }
+
+  private advanceWorkflowAfterWait(run: WorkflowRun, stepRun: WorkflowStepRun): WorkflowRun {
+    const step = this.workflowSteps.get(stepRun.stepId)
+    if (!step) throw new Error("WORKFLOW_STEP_NOT_FOUND")
+    stepRun.status = "SUCCEEDED"
+    stepRun.completedAt = new Date().toISOString()
+    if (step.nextStepKey) {
+      run.currentStepKey = step.nextStepKey
+      run.status = "PENDING"
+      run.availableAt = new Date().toISOString()
+    } else {
+      run.currentStepKey = null
+      run.status = "SUCCEEDED"
+      run.completedAt = new Date().toISOString()
+    }
+    return run
+  }
+
+  async resumeWorkflowWait(organizationId: string, waitId: string): Promise<WorkflowRun> {
+    const wait = this.workflowWaits.get(waitId)
+    if (!wait || wait.organizationId !== organizationId) throw new Error("WORKFLOW_WAIT_NOT_FOUND")
+    if (wait.resumedAt) throw new Error("WORKFLOW_WAIT_ALREADY_RESUMED")
+    if (new Date(wait.wakeAt).getTime() > Date.now()) throw new Error("WORKFLOW_WAIT_NOT_DUE")
+    const run = this.workflowRuns.get(wait.workflowRunId)
+    const stepRun = this.workflowStepRuns.get(wait.workflowStepRunId)
+    if (!run || !stepRun) throw new Error("WORKFLOW_RUN_NOT_FOUND")
+    wait.resumedAt = new Date().toISOString()
+    return clone(this.advanceWorkflowAfterWait(run, stepRun))
+  }
+
+  async resumeDueWorkflowWaits(organizationId: string, limit: number): Promise<WorkflowRun[]> {
+    const due = [...this.workflowWaits.values()]
+      .filter((wait) => wait.organizationId === organizationId && !wait.resumedAt && new Date(wait.wakeAt).getTime() <= Date.now())
+      .sort((a, b) => a.wakeAt.localeCompare(b.wakeAt))
+      .slice(0, Math.max(1, Math.min(limit, 100)))
+    const runs: WorkflowRun[] = []
+    for (const wait of due) runs.push(await this.resumeWorkflowWait(organizationId, wait.id))
+    return runs
+  }
+
+  async createWorkflowApproval(input: CreateWorkflowApprovalInput): Promise<WorkflowApproval> {
+    const existing = [...this.workflowApprovals.values()].find((item) => item.organizationId === input.organizationId && item.workflowStepRunId === input.stepRunId)
+    if (existing) return clone(existing)
+    const approval: WorkflowApproval = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      workflowRunId: input.runId,
+      workflowStepRunId: input.stepRunId,
+      actionHash: input.actionHash,
+      action: clone(input.action),
+      workflowVersionId: input.workflowVersionId,
+      requesterUserId: input.requesterUserId,
+      approverScope: input.approverScope,
+      status: "PENDING",
+      expiresAt: input.expiresAt,
+      decidedByUserId: null,
+      decidedAt: null,
+      createdAt: new Date().toISOString(),
+    }
+    this.workflowApprovals.set(approval.id, approval)
+    return clone(approval)
+  }
+
+  async resolveWorkflowApproval(input: ResolveWorkflowApprovalInput): Promise<WorkflowRun> {
+    const approval = this.workflowApprovals.get(input.approvalId)
+    if (!approval || approval.organizationId !== input.organizationId) throw new Error("WORKFLOW_APPROVAL_NOT_FOUND")
+    if (approval.status !== "PENDING") throw new Error("WORKFLOW_APPROVAL_NOT_PENDING")
+    if (approval.expiresAt && new Date(approval.expiresAt).getTime() <= Date.now()) {
+      approval.status = "EXPIRED"
+      throw new Error("WORKFLOW_APPROVAL_EXPIRED")
+    }
+    approval.status = input.decision
+    approval.decidedByUserId = input.userId
+    approval.decidedAt = new Date().toISOString()
+    const run = this.workflowRuns.get(approval.workflowRunId)
+    const stepRun = this.workflowStepRuns.get(approval.workflowStepRunId)
+    if (!run || !stepRun) throw new Error("WORKFLOW_RUN_NOT_FOUND")
+    if (input.decision === "APPROVED") return clone(this.advanceWorkflowAfterWait(run, stepRun))
+    stepRun.status = "FAILED"
+    stepRun.error = "APPROVAL_REJECTED"
+    run.status = "FAILED"
+    run.error = "APPROVAL_REJECTED"
+    run.completedAt = new Date().toISOString()
+    return clone(run)
+  }
+
+  async expireWorkflowApprovals(organizationId: string, limit: number): Promise<WorkflowApproval[]> {
+    const expired = [...this.workflowApprovals.values()]
+      .filter((item) => item.organizationId === organizationId && item.status === "PENDING" && item.expiresAt !== null && new Date(item.expiresAt).getTime() <= Date.now())
+      .slice(0, Math.max(1, Math.min(limit, 100)))
+    for (const approval of expired) {
+      approval.status = "EXPIRED"
+      approval.decidedAt = new Date().toISOString()
+      const stepRun = this.workflowStepRuns.get(approval.workflowStepRunId)
+      const run = this.workflowRuns.get(approval.workflowRunId)
+      if (stepRun) {
+        stepRun.status = "FAILED"
+        stepRun.error = "APPROVAL_EXPIRED"
+      }
+      if (run) {
+        run.status = "FAILED"
+        run.error = "APPROVAL_EXPIRED"
+        run.completedAt = new Date().toISOString()
+      }
+    }
+    return clone(expired)
+  }
+
+  async listWorkflowApprovals(organizationId: string, runId?: string): Promise<WorkflowApproval[]> {
+    return clone([...this.workflowApprovals.values()].filter((item) => item.organizationId === organizationId && (runId === undefined || item.workflowRunId === runId)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
+  }
+
+  async cancelWorkflowRun(organizationId: string, runId: string): Promise<WorkflowRun> {
+    const run = this.workflowRuns.get(runId)
+    if (!run || run.organizationId !== organizationId) throw new Error("WORKFLOW_RUN_NOT_FOUND")
+    if (["SUCCEEDED", "FAILED", "DEAD_LETTERED", "CANCELED"].includes(run.status)) return clone(run)
+    run.status = "CANCELED"
+    run.completedAt = new Date().toISOString()
+    run.leaseUntil = null
+    run.leasedBy = null
+    for (const stepRun of this.workflowStepRuns.values()) {
+      if (stepRun.organizationId === organizationId && stepRun.workflowRunId === runId && ["PENDING", "RUNNING", "WAITING", "RETRYING"].includes(stepRun.status)) {
+        stepRun.status = "CANCELED"
+        stepRun.completedAt = new Date().toISOString()
+      }
+    }
+    return clone(run)
   }
 
   async createAiModel(input: CreateAiModelInput): Promise<AiModel> {
