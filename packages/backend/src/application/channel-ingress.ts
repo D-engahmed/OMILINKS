@@ -109,6 +109,7 @@ export class ChannelIngressService {
       body,
       request,
       integration,
+      providerEventId,
     })
 
     if (!verification.accepted) {
@@ -154,6 +155,7 @@ export class ChannelIngressService {
         body,
         request,
         integration,
+        providerEventId,
       })
 
       const result = await this.pipeline.receiveInbound(inbound)
