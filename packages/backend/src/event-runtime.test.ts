@@ -76,8 +76,23 @@ function retryConsumer(counter: { value: number }): EventConsumer {
 storeTest("phase 5: outbox publishing is idempotent and fans out to one inbox row", async (makeStore) => {
   const store = await makeStore()
   const owner = await signup(store, "Outbox", "outbox@runtime.example")
-  const conversation = await createConversation(store, owner.session.accessToken)
-  const subscription = { consumerId: "test-consumer", workerClass: "test", eventTypes: ["conversation.created"] }
+  const createdConversation = await createConversation(store, owner.session.accessToken)
+  await store.appendMessage({
+    organizationId: owner.organization.id,
+    conversationId: createdConversation.id,
+    direction: "INBOUND",
+    authorType: "CUSTOMER",
+    content: "hello",
+    provider: "widget",
+    providerAccountId: "runtime",
+    providerMessageId: crypto.randomUUID(),
+  })
+
+  const subscription = {
+    consumerId: "test-consumer",
+    workerClass: "test",
+    eventTypes: ["conversation.message.received"],
+  }
 
   const first = await store.publishOutboxBatch({
     organizationId: owner.organization.id,
@@ -85,7 +100,7 @@ storeTest("phase 5: outbox publishing is idempotent and fans out to one inbox ro
     subscriptions: [subscription],
     limit: 100,
   })
-  assert.ok(first.some((event) => event.eventType === "conversation.created"))
+  assert.ok(first.some((event) => event.eventType === "conversation.message.received"))
 
   const second = await store.publishOutboxBatch({
     organizationId: owner.organization.id,
@@ -103,10 +118,12 @@ storeTest("phase 5: outbox publishing is idempotent and fans out to one inbox ro
     leaseSeconds: 30,
     maxAttempts: 3,
   })
-  const created = claimed.find((event) => event.eventType === "conversation.message.received")
-  assert.ok(created)
-  assert.equal(created?.status, "PROCESSING")
-  await store.completeEventInbox(owner.organization.id, created!.id, "worker-1")
+  const messageEvent = claimed.find(
+    (event) => event.eventType === "conversation.message.received"
+  )
+  assert.ok(messageEvent)
+  assert.equal(messageEvent?.status, "PROCESSING")
+  await store.completeEventInbox(owner.organization.id, messageEvent!.id, "worker-1")
 
   const none = await store.claimEventInboxBatch({
     organizationId: owner.organization.id,
@@ -123,12 +140,27 @@ storeTest("phase 5: outbox publishing is idempotent and fans out to one inbox ro
 storeTest("phase 5: retries reach dead letter and replay resets delivery state", async (makeStore) => {
   const store = await makeStore()
   const owner = await signup(store, "Retry", "retry@runtime.example")
-  await createConversation(store, owner.session.accessToken)
+  const conversation = await createConversation(store, owner.session.accessToken)
+
+  await store.appendMessage({
+    organizationId: owner.organization.id,
+    conversationId: conversation.id,
+    direction: "INBOUND",
+    authorType: "CUSTOMER",
+    content: "retry",
+    provider: "widget",
+    providerAccountId: "runtime",
+    providerMessageId: crypto.randomUUID(),
+  })
 
   await store.publishOutboxBatch({
     organizationId: owner.organization.id,
     publisherId: "publisher",
-    subscriptions: [{ consumerId: "retry-consumer", workerClass: "test", eventTypes: ["conversation.created"] }],
+    subscriptions: [{
+      consumerId: "retry-consumer",
+      workerClass: "test",
+      eventTypes: ["conversation.message.received"],
+    }],
     limit: 100,
   })
 
@@ -146,7 +178,7 @@ storeTest("phase 5: retries reach dead letter and replay resets delivery state",
     inboxId = claimed[0]!.id
     const failed = await store.failEventInbox({
       organizationId: owner.organization.id,
-      inboxId: inboxId,
+      inboxId,
       workerId: "retry-worker",
       error: "boom-" + attempt,
       retryDelaySeconds: 0,
@@ -155,9 +187,11 @@ storeTest("phase 5: retries reach dead letter and replay resets delivery state",
     if (attempt < 3) assert.equal(failed.status, "PENDING")
     else assert.equal(failed.status, "DEAD")
   }
-  assert.ok(inboxId)
 
-  const replayed = await store.replayDeadEventInbox({ organizationId: owner.organization.id, inboxId: inboxId! })
+  const replayed = await store.replayDeadEventInbox({
+    organizationId: owner.organization.id,
+    inboxId: inboxId!,
+  })
   assert.equal(replayed.status, "PENDING")
   assert.equal(replayed.attempts, 0)
 
@@ -170,13 +204,27 @@ storeTest("phase 5: retries reach dead letter and replay resets delivery state",
     maxAttempts: 3,
   })
   assert.equal(reclaimed.length, 1)
-  await store.completeEventInbox(owner.organization.id, reclaimed[0]!.id, "replay-worker")
+  await store.completeEventInbox(
+    owner.organization.id,
+    reclaimed[0]!.id,
+    "replay-worker"
+  )
 })
 
 storeTest("phase 5: generic worker runtime retries a failed handler and then succeeds", async (makeStore) => {
   const store = await makeStore()
   const owner = await signup(store, "Runtime", "runtime@runtime.example")
-  await createConversation(store, owner.session.accessToken)
+  const conversation = await createConversation(store, owner.session.accessToken)
+  await store.appendMessage({
+    organizationId: owner.organization.id,
+    conversationId: conversation.id,
+    direction: "INBOUND",
+    authorType: "CUSTOMER",
+    content: "runtime",
+    provider: "widget",
+    providerAccountId: "runtime",
+    providerMessageId: crypto.randomUUID(),
+  })
   const counter = { value: 0 }
   const runtime = new WorkerRuntime(store, [retryConsumer(counter)])
 
