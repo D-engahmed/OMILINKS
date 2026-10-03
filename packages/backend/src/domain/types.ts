@@ -390,6 +390,7 @@ export interface Assignment {
   assignedAt: string
   releasedAt: string | null
   reason: string
+  routingDecisionId: string | null
   version: number
 }
 
