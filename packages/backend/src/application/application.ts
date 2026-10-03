@@ -8,6 +8,10 @@ import type {
   AiModel,
   AiModelPolicyConfig,
   AiAgentPolicyConfig,
+  QualityCriterion,
+  QualityEvaluation,
+  QualityRemediation,
+  QualitySampleRule,
 } from "../domain/types.js"
 import { RoutingService, type RouteConversationInput } from "./routing.js"
 import { AppError } from "../shared/errors.js"
@@ -20,6 +24,7 @@ import { AiPlatformService } from "./ai-platform.js"
 import { EnvironmentAiGatewayResolver } from "../ai/provider-resolver.js"
 import type { AiModelGatewayResolver } from "../ai/model-router.js"
 import { WorkflowService } from "./workflows.js"
+import { QualityService } from "./quality.js"
 import type { CreateWorkflowVersionInput } from "../infrastructure/store.js"
 
 export interface AuthenticatedContext {
@@ -622,6 +627,208 @@ export class Application {
   async cancelWorkflowRun(ctx: AuthenticatedContext, runId: string) {
     authorize(ctx.principal.membership, "workflow.manage")
     return await this.workflows().cancelRun(ctx.organizationId, runId)
+  }
+
+  private quality(): QualityService {
+    return new QualityService(this.store)
+  }
+
+  async listQualityScorecards(ctx: AuthenticatedContext) {
+    authorize(ctx.principal.membership, "quality.manage")
+    return await this.store.listQualityScorecards(ctx.organizationId)
+  }
+
+  async createQualityScorecardVersion(ctx: AuthenticatedContext, input: { name: string; criteria: QualityCriterion[] }) {
+    authorize(ctx.principal.membership, "quality.manage")
+    return await this.quality().createScorecardVersion({ organizationId: ctx.organizationId, ...input })
+  }
+
+  async listQualityScorecardVersions(ctx: AuthenticatedContext, scorecardId: string) {
+    authorize(ctx.principal.membership, "quality.manage")
+    return await this.store.listQualityScorecardVersions(ctx.organizationId, scorecardId)
+  }
+
+  async publishQualityScorecardVersion(ctx: AuthenticatedContext, input: { scorecardId: string; versionId: string }) {
+    authorize(ctx.principal.membership, "quality.manage")
+    return await this.quality().publishScorecardVersion(ctx.organizationId, input.scorecardId, input.versionId)
+  }
+
+  async createQualitySampleRule(ctx: AuthenticatedContext, input: { name: string; strategy: QualitySampleRule["strategy"]; ratePerMille: number; seed: string }) {
+    authorize(ctx.principal.membership, "quality.manage")
+    return await this.quality().createSampleRule({ organizationId: ctx.organizationId, ...input })
+  }
+
+  async listQualitySampleRules(ctx: AuthenticatedContext) {
+    authorize(ctx.principal.membership, "quality.manage")
+    return await this.store.listQualitySampleRules(ctx.organizationId)
+  }
+
+  async sampleQualityConversations(ctx: AuthenticatedContext, input: { ruleId: string; conversationIds: string[] }) {
+    authorize(ctx.principal.membership, "quality.manage")
+    return await this.quality().sampleConversations({ organizationId: ctx.organizationId, ...input })
+  }
+
+  async listQualitySamples(ctx: AuthenticatedContext, ruleId: string) {
+    authorize(ctx.principal.membership, "quality.manage")
+    return await this.store.listQualitySamples(ctx.organizationId, ruleId)
+  }
+
+  async createQualityEvaluation(ctx: AuthenticatedContext, input: { conversationId: string; scorecardVersionId: string; sampleId: string | null; evaluatorType: QualityEvaluation["evaluatorType"]; aiProposalId: string | null }) {
+    authorize(ctx.principal.membership, "quality.manage")
+    return await this.quality().createEvaluation({ organizationId: ctx.organizationId, ...input })
+  }
+
+  async listQualityEvaluations(ctx: AuthenticatedContext, conversationId?: string) {
+    authorize(ctx.principal.membership, "quality.manage")
+    return await this.store.listQualityEvaluations(ctx.organizationId, conversationId)
+  }
+
+  async getQualityEvaluation(ctx: AuthenticatedContext, evaluationId: string) {
+    authorize(ctx.principal.membership, "quality.manage")
+    return await this.quality().getEvaluation(ctx.organizationId, evaluationId)
+  }
+
+  async assignQualityEvaluation(ctx: AuthenticatedContext, input: { evaluationId: string; reviewerMemberId: string; expectedVersion: number }) {
+    authorize(ctx.principal.membership, "quality.manage")
+    try {
+      return await this.store.assignQualityEvaluation({ organizationId: ctx.organizationId, ...input })
+    } catch (error) {
+      if (error instanceof Error && error.message === "QUALITY_EVALUATION_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Evaluation not found.")
+      }
+      if (error instanceof Error && error.message === "WORKFORCE_MEMBER_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Reviewer not found.")
+      }
+      if (error instanceof Error && error.message === "STALE_QUALITY_EVALUATION_VERSION") {
+        throw new AppError(409, "STALE_VERSION", "Evaluation changed before assignment.")
+      }
+      if (error instanceof Error && error.message === "QUALITY_EVALUATION_STATE") {
+        throw new AppError(409, "CONFLICT", "Evaluation is not awaiting assignment.")
+      }
+      throw error
+    }
+  }
+
+  async beginQualityReview(ctx: AuthenticatedContext, input: { evaluationId: string; expectedVersion: number }) {
+    authorize(ctx.principal.membership, "quality.manage")
+    try {
+      return await this.store.beginQualityReview({ organizationId: ctx.organizationId, ...input })
+    } catch (error) {
+      if (error instanceof Error && error.message === "QUALITY_EVALUATION_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Evaluation not found.")
+      }
+      if (error instanceof Error && error.message === "STALE_QUALITY_EVALUATION_VERSION") {
+        throw new AppError(409, "STALE_VERSION", "Evaluation changed before review.")
+      }
+      if (error instanceof Error && error.message === "QUALITY_EVALUATION_STATE") {
+        throw new AppError(409, "CONFLICT", "Evaluation is not ready for review.")
+      }
+      throw error
+    }
+  }
+
+  async submitQualityFindings(ctx: AuthenticatedContext, input: { evaluationId: string; expectedVersion: number; findings: Array<{ criterionKey: string; score: number; notes: string | null; evidence: Array<{ messageId: string }> }> }) {
+    authorize(ctx.principal.membership, "quality.manage")
+    return await this.quality().submitFindings({ organizationId: ctx.organizationId, ...input })
+  }
+
+  async returnQualityEvaluation(ctx: AuthenticatedContext, input: { evaluationId: string; expectedVersion: number }) {
+    authorize(ctx.principal.membership, "quality.manage")
+    try {
+      return await this.store.returnQualityEvaluation({ organizationId: ctx.organizationId, ...input })
+    } catch (error) {
+      if (error instanceof Error && error.message === "QUALITY_EVALUATION_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Evaluation not found.")
+      }
+      if (error instanceof Error && error.message === "STALE_QUALITY_EVALUATION_VERSION") {
+        throw new AppError(409, "STALE_VERSION", "Evaluation changed before return.")
+      }
+      if (error instanceof Error && error.message === "QUALITY_EVALUATION_STATE") {
+        throw new AppError(409, "CONFLICT", "Only submitted evaluations can be returned.")
+      }
+      throw error
+    }
+  }
+
+  async completeQualityEvaluation(ctx: AuthenticatedContext, input: { evaluationId: string; expectedVersion: number }) {
+    authorize(ctx.principal.membership, "quality.manage")
+    try {
+      return await this.store.completeQualityEvaluation({ organizationId: ctx.organizationId, ...input })
+    } catch (error) {
+      if (error instanceof Error && error.message === "QUALITY_EVALUATION_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Evaluation not found.")
+      }
+      if (error instanceof Error && error.message === "STALE_QUALITY_EVALUATION_VERSION") {
+        throw new AppError(409, "STALE_VERSION", "Evaluation changed before completion.")
+      }
+      if (error instanceof Error && error.message === "QUALITY_AI_PROPOSAL_NOT_FINAL") {
+        throw new AppError(409, "CONFLICT", "AI evaluations are proposals and cannot be completed.")
+      }
+      if (error instanceof Error && error.message === "QUALITY_EVALUATION_STATE") {
+        throw new AppError(409, "CONFLICT", "Only submitted evaluations can be completed.")
+      }
+      throw error
+    }
+  }
+
+  async cancelQualityEvaluation(ctx: AuthenticatedContext, input: { evaluationId: string; expectedVersion: number }) {
+    authorize(ctx.principal.membership, "quality.manage")
+    try {
+      return await this.store.cancelQualityEvaluation({ organizationId: ctx.organizationId, ...input })
+    } catch (error) {
+      if (error instanceof Error && error.message === "QUALITY_EVALUATION_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Evaluation not found.")
+      }
+      if (error instanceof Error && error.message === "STALE_QUALITY_EVALUATION_VERSION") {
+        throw new AppError(409, "STALE_VERSION", "Evaluation changed before cancellation.")
+      }
+      if (error instanceof Error && error.message === "QUALITY_EVALUATION_TERMINAL") {
+        throw new AppError(409, "CONFLICT", "Evaluation is already terminal.")
+      }
+      throw error
+    }
+  }
+
+  async createQualityRemediation(ctx: AuthenticatedContext, input: { findingId: string; kind: QualityRemediation["kind"]; notes: string | null }) {
+    authorize(ctx.principal.membership, "quality.manage")
+    const kinds: QualityRemediation["kind"][] = ["COACHING", "KNOWLEDGE_UPDATE", "PROMPT_UPDATE", "ROUTING_CHANGE", "GUARDRAIL_UPDATE", "WORKFLOW_FIX", "DEFECT"]
+    if (!kinds.includes(input.kind)) {
+      throw new AppError(400, "VALIDATION_ERROR", "Invalid remediation kind.")
+    }
+    try {
+      return await this.store.createQualityRemediation({ organizationId: ctx.organizationId, ...input })
+    } catch (error) {
+      if (error instanceof Error && error.message === "QUALITY_FINDING_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Finding not found.")
+      }
+      throw error
+    }
+  }
+
+  async listQualityRemediations(ctx: AuthenticatedContext, findingId: string) {
+    authorize(ctx.principal.membership, "quality.manage")
+    return await this.store.listQualityRemediations(ctx.organizationId, findingId)
+  }
+
+  async setQualityRemediationStatus(ctx: AuthenticatedContext, input: { remediationId: string; status: QualityRemediation["status"] }) {
+    authorize(ctx.principal.membership, "quality.manage")
+    if (!["OPEN", "IN_PROGRESS", "DONE", "CANCELED"].includes(input.status)) {
+      throw new AppError(400, "VALIDATION_ERROR", "Invalid remediation status.")
+    }
+    try {
+      return await this.store.setQualityRemediationStatus({ organizationId: ctx.organizationId, ...input })
+    } catch (error) {
+      if (error instanceof Error && error.message === "QUALITY_REMEDIATION_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Remediation not found.")
+      }
+      if (error instanceof Error && error.message === "QUALITY_REMEDIATION_TERMINAL") {
+        throw new AppError(409, "CONFLICT", "Remediation is already terminal.")
+      }
+      if (error instanceof Error && error.message === "QUALITY_REMEDIATION_TRANSITION") {
+        throw new AppError(409, "CONFLICT", "Invalid remediation transition.")
+      }
+      throw error
+    }
   }
 
   async listAiModels(ctx: AuthenticatedContext) {

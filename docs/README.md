@@ -172,7 +172,8 @@ Current verified runtime slices are:
 - Phase 4 workforce state, deterministic routing, queues, policy versions, and assignment commit safety;
 - Phase 5 PostgreSQL-backed outbox/event-inbox worker runtime with retries, leases, dead-letter replay, and queue routing;
 - Phase 6 AI control plane: model registry/failover, guardrails, durable AI traceability, cost attribution, and evaluation;
-- Phase 7 durable workflow engine: versioned definitions, idempotent triggers, run leases, WAIT/APPROVAL states, bounded retries, and scheduler resume (kernel step types only; no side-effect steps yet).
+- Phase 7 durable workflow engine: versioned definitions, idempotent triggers, run leases, WAIT/APPROVAL states, bounded retries, and scheduler resume (kernel step types only; no side-effect steps yet);
+- Phase 8 quality kernel: versioned scorecards, deterministic sampling, versioned human review with conversation-scoped evidence, reproducible scores, AI-proposal fencing, and finding-linked remediations (calibration/analytics deferred).
 
 The rest of the domain architecture remains target until implementation and automated evidence exist.
 

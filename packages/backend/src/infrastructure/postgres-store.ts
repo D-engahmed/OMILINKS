@@ -55,6 +55,13 @@ import type {
   WorkflowStepRun,
   WorkflowWait,
   WorkflowApproval,
+  QualityScorecard,
+  QualityScorecardVersion,
+  QualitySampleRule,
+  QualitySample,
+  QualityEvaluation,
+  QualityFinding,
+  QualityRemediation,
 } from "../domain/types.js"
 
 import {
@@ -87,6 +94,12 @@ import type {
   FailWorkflowStepInput,
   CreateWorkflowApprovalInput,
   ResolveWorkflowApprovalInput,
+  CreateQualityScorecardVersionInput,
+  CreateQualitySampleRuleInput,
+  RecordQualitySampleInput,
+  CreateQualityEvaluationInput,
+  SubmitQualityFindingsInput,
+  CreateQualityRemediationInput,
   Store,
 } from "./store.js"
 
@@ -412,6 +425,95 @@ const toWorkflowStep = (row: Row): WorkflowStep => ({
   timeoutSeconds: num(row.timeout_seconds),
   compensationStepKey: strOrNull(row.compensation_step_key),
   createdAt: iso(row.created_at),
+})
+
+const toQualityScorecard = (row: Row): QualityScorecard => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  name: str(row.name),
+  status: str(row.status) as QualityScorecard['status'],
+  calcPolicyVersion: str(row.calc_policy_version),
+  createdAt: iso(row.created_at),
+  updatedAt: iso(row.updated_at),
+})
+
+const toQualityScorecardVersion = (row: Row): QualityScorecardVersion => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  scorecardId: str(row.scorecard_id),
+  version: num(row.version),
+  status: str(row.status) as QualityScorecardVersion['status'],
+  criteria: (row.criteria ?? []) as QualityScorecardVersion['criteria'],
+  calcPolicyVersion: str(row.calc_policy_version),
+  createdAt: iso(row.created_at),
+  publishedAt: isoOrNull(row.published_at),
+})
+
+const toQualitySampleRule = (row: Row): QualitySampleRule => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  name: str(row.name),
+  strategy: str(row.strategy) as QualitySampleRule['strategy'],
+  ratePerMille: num(row.rate_per_mille),
+  seed: str(row.seed),
+  status: str(row.status) as QualitySampleRule['status'],
+  createdAt: iso(row.created_at),
+  updatedAt: iso(row.updated_at),
+})
+
+const toQualitySample = (row: Row): QualitySample => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  ruleId: str(row.rule_id),
+  conversationId: str(row.conversation_id),
+  decision: str(row.decision) as QualitySample['decision'],
+  reason: str(row.reason),
+  seedUsed: str(row.seed_used),
+  createdAt: iso(row.created_at),
+})
+
+const toQualityEvaluation = (row: Row): QualityEvaluation => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  conversationId: str(row.conversation_id),
+  scorecardVersionId: str(row.scorecard_version_id),
+  sampleId: strOrNull(row.sample_id),
+  evaluatorType: str(row.evaluator_type) as QualityEvaluation['evaluatorType'],
+  aiProposalId: strOrNull(row.ai_proposal_id),
+  status: str(row.status) as QualityEvaluation['status'],
+  totalScore: row.total_score === null || row.total_score === undefined ? null : Number(row.total_score),
+  criticalFailure: Boolean(row.critical_failure),
+  version: num(row.version),
+  reviewerMemberId: strOrNull(row.reviewer_member_id),
+  submittedAt: isoOrNull(row.submitted_at),
+  completedAt: isoOrNull(row.completed_at),
+  createdAt: iso(row.created_at),
+  updatedAt: iso(row.updated_at),
+})
+
+const toQualityFinding = (row: Row): QualityFinding => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  evaluationId: str(row.evaluation_id),
+  criterionKey: str(row.criterion_key),
+  score: Number(row.score),
+  weight: Number(row.weight),
+  critical: Boolean(row.critical),
+  notes: strOrNull(row.notes),
+  evidence: (row.evidence ?? []) as QualityFinding['evidence'],
+  createdAt: iso(row.created_at),
+})
+
+const toQualityRemediation = (row: Row): QualityRemediation => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  findingId: str(row.finding_id),
+  kind: str(row.kind) as QualityRemediation['kind'],
+  status: str(row.status) as QualityRemediation['status'],
+  notes: strOrNull(row.notes),
+  createdAt: iso(row.created_at),
+  updatedAt: iso(row.updated_at),
+  closedAt: isoOrNull(row.closed_at),
 })
 
 const toWorkflowTrigger = (row: Row): WorkflowTrigger => ({
@@ -2543,6 +2645,431 @@ export class PostgresStore implements Store {
       await client.query(`UPDATE workflow_step_runs SET status='CANCELED',completed_at=now() WHERE workflow_run_id=$1 AND organization_id=$2 AND status IN ('PENDING','RUNNING','WAITING','RETRYING')`,[runId,organizationId])
       const result=await client.query(`UPDATE workflow_runs SET status='CANCELED',completed_at=now(),lease_until=NULL,leased_by=NULL WHERE id=$1 AND organization_id=$2 RETURNING *`,[runId,organizationId])
       return toWorkflowRun(result.rows[0])
+    })
+  }
+
+  async createQualityScorecardVersion(input: CreateQualityScorecardVersionInput) {
+    return this.tenantTx(input.organizationId, async (client) => {
+      let scorecardResult = await client.query(
+        `SELECT * FROM quality_scorecards WHERE organization_id = $1 AND name = $2 FOR UPDATE`,
+        [input.organizationId, input.name.trim()]
+      )
+      if (!scorecardResult.rows[0]) {
+        scorecardResult = await client.query(
+          `INSERT INTO quality_scorecards (organization_id, name) VALUES ($1,$2) RETURNING *`,
+          [input.organizationId, input.name.trim()]
+        )
+      }
+      const scorecard = toQualityScorecard(scorecardResult.rows[0])
+      const maxResult = await client.query(
+        `SELECT COALESCE(max(version),0)::int AS version FROM quality_scorecard_versions WHERE organization_id = $1 AND scorecard_id = $2`,
+        [input.organizationId, scorecard.id]
+      )
+      const created = await client.query(
+        `INSERT INTO quality_scorecard_versions
+           (organization_id, scorecard_id, version, status, criteria)
+         VALUES ($1,$2,$3,'DRAFT',$4::jsonb)
+         RETURNING *`,
+        [input.organizationId, scorecard.id, num(maxResult.rows[0].version) + 1, JSON.stringify(input.criteria)]
+      )
+      return { scorecard, version: toQualityScorecardVersion(created.rows[0]) }
+    })
+  }
+
+  async listQualityScorecards(organizationId: string): Promise<QualityScorecard[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM quality_scorecards WHERE organization_id = $1 ORDER BY name ASC, id ASC`,
+        [organizationId]
+      )
+      return result.rows.map(toQualityScorecard)
+    })
+  }
+
+  async getQualityScorecardVersion(organizationId: string, versionId: string): Promise<QualityScorecardVersion | null> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM quality_scorecard_versions WHERE id = $1 AND organization_id = $2`,
+        [versionId, organizationId]
+      )
+      if (!result.rows[0]) return null
+      return toQualityScorecardVersion(result.rows[0])
+    })
+  }
+
+  async listQualityScorecardVersions(organizationId: string, scorecardId: string): Promise<QualityScorecardVersion[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM quality_scorecard_versions
+         WHERE organization_id = $1 AND scorecard_id = $2
+         ORDER BY version ASC`,
+        [organizationId, scorecardId]
+      )
+      return result.rows.map(toQualityScorecardVersion)
+    })
+  }
+
+  async publishQualityScorecardVersion(organizationId: string, versionId: string): Promise<QualityScorecardVersion> {
+    return this.tenantTx(organizationId, async (client) => {
+      const current = await client.query(
+        `SELECT * FROM quality_scorecard_versions WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+        [versionId, organizationId]
+      )
+      if (!current.rows[0]) throw new Error("QUALITY_VERSION_NOT_FOUND")
+      const version = toQualityScorecardVersion(current.rows[0])
+      if (version.status !== "DRAFT") throw new Error("QUALITY_VERSION_NOT_DRAFT")
+      await client.query(
+        `UPDATE quality_scorecard_versions SET status = 'RETIRED'
+         WHERE organization_id = $1 AND scorecard_id = $2 AND status = 'PUBLISHED' AND id <> $3`,
+        [organizationId, version.scorecardId, version.id]
+      )
+      const published = await client.query(
+        `UPDATE quality_scorecard_versions SET status = 'PUBLISHED', published_at = now()
+         WHERE id = $1 AND organization_id = $2 RETURNING *`,
+        [version.id, organizationId]
+      )
+      return toQualityScorecardVersion(published.rows[0])
+    })
+  }
+
+  async createQualitySampleRule(input: CreateQualitySampleRuleInput): Promise<QualitySampleRule> {
+    try {
+      return await this.tenantTx(input.organizationId, async (client) => {
+        const result = await client.query(
+          `INSERT INTO quality_sample_rules
+             (organization_id, name, strategy, rate_per_mille, seed)
+           VALUES ($1,$2,$3,$4,$5)
+           RETURNING *`,
+          [input.organizationId, input.name.trim(), input.strategy, input.ratePerMille, input.seed]
+        )
+        return toQualitySampleRule(result.rows[0])
+      })
+    } catch (error) {
+      if (pgCode(error) === UNIQUE_VIOLATION) throw new Error("QUALITY_SAMPLE_RULE_EXISTS")
+      throw error
+    }
+  }
+
+  async listQualitySampleRules(organizationId: string): Promise<QualitySampleRule[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM quality_sample_rules WHERE organization_id = $1 ORDER BY created_at ASC, id ASC`,
+        [organizationId]
+      )
+      return result.rows.map(toQualitySampleRule)
+    })
+  }
+
+  async recordQualitySample(input: RecordQualitySampleInput): Promise<{ sample: QualitySample; created: boolean }> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const rule = await client.query(
+        `SELECT id FROM quality_sample_rules WHERE id = $1 AND organization_id = $2`,
+        [input.ruleId, input.organizationId]
+      )
+      if (!rule.rows[0]) throw new Error("QUALITY_SAMPLE_RULE_NOT_FOUND")
+      const conversation = await client.query(
+        `SELECT id FROM conversations WHERE id = $1 AND organization_id = $2`,
+        [input.conversationId, input.organizationId]
+      )
+      if (!conversation.rows[0]) throw new Error("CONVERSATION_NOT_FOUND")
+      const result = await client.query(
+        `INSERT INTO quality_samples
+           (organization_id, rule_id, conversation_id, decision, reason, seed_used)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (organization_id, rule_id, conversation_id) DO NOTHING
+         RETURNING *`,
+        [input.organizationId, input.ruleId, input.conversationId, input.decision, input.reason, input.seedUsed]
+      )
+      if (result.rows[0]) return { sample: toQualitySample(result.rows[0]), created: true }
+      const existing = await client.query(
+        `SELECT * FROM quality_samples WHERE organization_id = $1 AND rule_id = $2 AND conversation_id = $3`,
+        [input.organizationId, input.ruleId, input.conversationId]
+      )
+      return { sample: toQualitySample(existing.rows[0]), created: false }
+    })
+  }
+
+  async listQualitySamples(organizationId: string, ruleId: string): Promise<QualitySample[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM quality_samples WHERE organization_id = $1 AND rule_id = $2 ORDER BY created_at ASC, id ASC`,
+        [organizationId, ruleId]
+      )
+      return result.rows.map(toQualitySample)
+    })
+  }
+
+  async createQualityEvaluation(input: CreateQualityEvaluationInput): Promise<QualityEvaluation> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const conversation = await client.query(
+        `SELECT id FROM conversations WHERE id = $1 AND organization_id = $2`,
+        [input.conversationId, input.organizationId]
+      )
+      if (!conversation.rows[0]) throw new Error("CONVERSATION_NOT_FOUND")
+      const version = await client.query(
+        `SELECT * FROM quality_scorecard_versions WHERE id = $1 AND organization_id = $2`,
+        [input.scorecardVersionId, input.organizationId]
+      )
+      if (!version.rows[0]) throw new Error("QUALITY_VERSION_NOT_FOUND")
+      if (str(version.rows[0].status) !== "PUBLISHED") throw new Error("QUALITY_VERSION_NOT_PUBLISHED")
+      if (input.sampleId !== null) {
+        const sample = await client.query(
+          `SELECT id FROM quality_samples WHERE id = $1 AND organization_id = $2`,
+          [input.sampleId, input.organizationId]
+        )
+        if (!sample.rows[0]) throw new Error("QUALITY_SAMPLE_NOT_FOUND")
+      }
+      if (input.aiProposalId !== null) {
+        const proposal = await client.query(
+          `SELECT * FROM quality_evaluations WHERE id = $1 AND organization_id = $2`,
+          [input.aiProposalId, input.organizationId]
+        )
+        if (!proposal.rows[0]) throw new Error("QUALITY_PROPOSAL_NOT_FOUND")
+        if (str(proposal.rows[0].evaluator_type) !== "AI") throw new Error("QUALITY_PROPOSAL_NOT_AI")
+      }
+      const result = await client.query(
+        `INSERT INTO quality_evaluations
+           (organization_id, conversation_id, scorecard_version_id, sample_id, evaluator_type, ai_proposal_id)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         RETURNING *`,
+        [input.organizationId, input.conversationId, input.scorecardVersionId, input.sampleId, input.evaluatorType, input.aiProposalId]
+      )
+      return toQualityEvaluation(result.rows[0])
+    })
+  }
+
+  async getQualityEvaluation(organizationId: string, evaluationId: string): Promise<QualityEvaluation | null> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM quality_evaluations WHERE id = $1 AND organization_id = $2`,
+        [evaluationId, organizationId]
+      )
+      if (!result.rows[0]) return null
+      return toQualityEvaluation(result.rows[0])
+    })
+  }
+
+  async listQualityEvaluations(organizationId: string, conversationId?: string): Promise<QualityEvaluation[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = conversationId === undefined
+        ? await client.query(
+            `SELECT * FROM quality_evaluations WHERE organization_id = $1 ORDER BY created_at DESC, id DESC`,
+            [organizationId]
+          )
+        : await client.query(
+            `SELECT * FROM quality_evaluations WHERE organization_id = $1 AND conversation_id = $2 ORDER BY created_at DESC, id DESC`,
+            [organizationId, conversationId]
+          )
+      return result.rows.map(toQualityEvaluation)
+    })
+  }
+
+  private async lockedQualityEvaluation(
+    client: pg.PoolClient,
+    organizationId: string,
+    evaluationId: string,
+    expectedVersion: number
+  ): Promise<QualityEvaluation> {
+    const current = await client.query(
+      `SELECT * FROM quality_evaluations WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+      [evaluationId, organizationId]
+    )
+    if (!current.rows[0]) throw new Error("QUALITY_EVALUATION_NOT_FOUND")
+    const evaluation = toQualityEvaluation(current.rows[0])
+    if (evaluation.version !== expectedVersion) throw new Error("STALE_QUALITY_EVALUATION_VERSION")
+    return evaluation
+  }
+
+  async assignQualityEvaluation(input: { organizationId: string; evaluationId: string; reviewerMemberId: string; expectedVersion: number }): Promise<QualityEvaluation> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const evaluation = await this.lockedQualityEvaluation(client, input.organizationId, input.evaluationId, input.expectedVersion)
+      if (evaluation.status !== "QUEUED") throw new Error("QUALITY_EVALUATION_STATE")
+      const member = await client.query(
+        `SELECT id FROM workforce_members WHERE id = $1 AND organization_id = $2`,
+        [input.reviewerMemberId, input.organizationId]
+      )
+      if (!member.rows[0]) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+      const result = await client.query(
+        `UPDATE quality_evaluations
+           SET status = 'ASSIGNED', reviewer_member_id = $3, version = version + 1, updated_at = now()
+         WHERE id = $1 AND organization_id = $2 RETURNING *`,
+        [input.evaluationId, input.organizationId, input.reviewerMemberId]
+      )
+      return toQualityEvaluation(result.rows[0])
+    })
+  }
+
+  async beginQualityReview(input: { organizationId: string; evaluationId: string; expectedVersion: number }): Promise<QualityEvaluation> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const evaluation = await this.lockedQualityEvaluation(client, input.organizationId, input.evaluationId, input.expectedVersion)
+      if (evaluation.status !== "ASSIGNED" && evaluation.status !== "RETURNED") throw new Error("QUALITY_EVALUATION_STATE")
+      const result = await client.query(
+        `UPDATE quality_evaluations
+           SET status = 'IN_REVIEW', version = version + 1, updated_at = now()
+         WHERE id = $1 AND organization_id = $2 RETURNING *`,
+        [input.evaluationId, input.organizationId]
+      )
+      return toQualityEvaluation(result.rows[0])
+    })
+  }
+
+  async submitQualityFindings(input: SubmitQualityFindingsInput): Promise<{ evaluation: QualityEvaluation; findings: QualityFinding[] }> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const evaluation = await this.lockedQualityEvaluation(client, input.organizationId, input.evaluationId, input.expectedVersion)
+      if (evaluation.status !== "IN_REVIEW") throw new Error("QUALITY_EVALUATION_STATE")
+      const version = await client.query(
+        `SELECT * FROM quality_scorecard_versions WHERE id = $1 AND organization_id = $2`,
+        [evaluation.scorecardVersionId, input.organizationId]
+      )
+      const criteria = toQualityScorecardVersion(version.rows[0]).criteria
+      const byKey = new Map(criteria.map((criterion) => [criterion.key, criterion]))
+      for (const finding of input.findings) {
+        for (const ref of finding.evidence) {
+          const message = await client.query(
+            `SELECT id FROM messages WHERE id = $1 AND organization_id = $2 AND conversation_id = $3`,
+            [ref.messageId, input.organizationId, evaluation.conversationId]
+          )
+          if (!message.rows[0]) throw new Error("QUALITY_EVIDENCE_NOT_FOUND")
+        }
+      }
+      await client.query(
+        `DELETE FROM quality_findings WHERE organization_id = $1 AND evaluation_id = $2`,
+        [input.organizationId, input.evaluationId]
+      )
+      const findings: QualityFinding[] = []
+      for (const finding of input.findings) {
+        const criterion = byKey.get(finding.criterionKey)
+        const created = await client.query(
+          `INSERT INTO quality_findings
+             (organization_id, evaluation_id, criterion_key, score, weight, critical, notes, evidence)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+           RETURNING *`,
+          [
+            input.organizationId,
+            input.evaluationId,
+            finding.criterionKey,
+            finding.score,
+            criterion?.weight ?? 0,
+            criterion?.critical ?? false,
+            finding.notes,
+            JSON.stringify(finding.evidence),
+          ]
+        )
+        findings.push(toQualityFinding(created.rows[0]))
+      }
+      const updated = await client.query(
+        `UPDATE quality_evaluations
+           SET status = 'SUBMITTED', total_score = $3, critical_failure = $4,
+               submitted_at = now(), version = version + 1, updated_at = now()
+         WHERE id = $1 AND organization_id = $2 RETURNING *`,
+        [input.evaluationId, input.organizationId, input.totalScore, input.criticalFailure]
+      )
+      findings.sort((a, b) => a.criterionKey.localeCompare(b.criterionKey))
+      return { evaluation: toQualityEvaluation(updated.rows[0]), findings }
+    })
+  }
+
+  async listQualityFindings(organizationId: string, evaluationId: string): Promise<QualityFinding[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM quality_findings WHERE organization_id = $1 AND evaluation_id = $2 ORDER BY criterion_key ASC, id ASC`,
+        [organizationId, evaluationId]
+      )
+      return result.rows.map(toQualityFinding)
+    })
+  }
+
+  async returnQualityEvaluation(input: { organizationId: string; evaluationId: string; expectedVersion: number }): Promise<QualityEvaluation> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const evaluation = await this.lockedQualityEvaluation(client, input.organizationId, input.evaluationId, input.expectedVersion)
+      if (evaluation.status !== "SUBMITTED") throw new Error("QUALITY_EVALUATION_STATE")
+      const result = await client.query(
+        `UPDATE quality_evaluations
+           SET status = 'RETURNED', version = version + 1, updated_at = now()
+         WHERE id = $1 AND organization_id = $2 RETURNING *`,
+        [input.evaluationId, input.organizationId]
+      )
+      return toQualityEvaluation(result.rows[0])
+    })
+  }
+
+  async completeQualityEvaluation(input: { organizationId: string; evaluationId: string; expectedVersion: number }): Promise<QualityEvaluation> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const evaluation = await this.lockedQualityEvaluation(client, input.organizationId, input.evaluationId, input.expectedVersion)
+      if (evaluation.status !== "SUBMITTED") throw new Error("QUALITY_EVALUATION_STATE")
+      if (evaluation.evaluatorType !== "HUMAN") throw new Error("QUALITY_AI_PROPOSAL_NOT_FINAL")
+      if (evaluation.totalScore === null) throw new Error("QUALITY_EVALUATION_STATE")
+      const result = await client.query(
+        `UPDATE quality_evaluations
+           SET status = 'COMPLETED', completed_at = now(), version = version + 1, updated_at = now()
+         WHERE id = $1 AND organization_id = $2 RETURNING *`,
+        [input.evaluationId, input.organizationId]
+      )
+      return toQualityEvaluation(result.rows[0])
+    })
+  }
+
+  async cancelQualityEvaluation(input: { organizationId: string; evaluationId: string; expectedVersion: number }): Promise<QualityEvaluation> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const evaluation = await this.lockedQualityEvaluation(client, input.organizationId, input.evaluationId, input.expectedVersion)
+      if (evaluation.status === "COMPLETED" || evaluation.status === "CANCELED") throw new Error("QUALITY_EVALUATION_TERMINAL")
+      const result = await client.query(
+        `UPDATE quality_evaluations
+           SET status = 'CANCELED', version = version + 1, updated_at = now()
+         WHERE id = $1 AND organization_id = $2 RETURNING *`,
+        [input.evaluationId, input.organizationId]
+      )
+      return toQualityEvaluation(result.rows[0])
+    })
+  }
+
+  async createQualityRemediation(input: CreateQualityRemediationInput): Promise<QualityRemediation> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const finding = await client.query(
+        `SELECT id FROM quality_findings WHERE id = $1 AND organization_id = $2`,
+        [input.findingId, input.organizationId]
+      )
+      if (!finding.rows[0]) throw new Error("QUALITY_FINDING_NOT_FOUND")
+      const result = await client.query(
+        `INSERT INTO quality_remediations (organization_id, finding_id, kind, notes)
+         VALUES ($1,$2,$3,$4) RETURNING *`,
+        [input.organizationId, input.findingId, input.kind, input.notes]
+      )
+      return toQualityRemediation(result.rows[0])
+    })
+  }
+
+  async listQualityRemediations(organizationId: string, findingId: string): Promise<QualityRemediation[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM quality_remediations WHERE organization_id = $1 AND finding_id = $2 ORDER BY created_at ASC, id ASC`,
+        [organizationId, findingId]
+      )
+      return result.rows.map(toQualityRemediation)
+    })
+  }
+
+  async setQualityRemediationStatus(input: { organizationId: string; remediationId: string; status: QualityRemediation["status"] }): Promise<QualityRemediation> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const current = await client.query(
+        `SELECT * FROM quality_remediations WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+        [input.remediationId, input.organizationId]
+      )
+      if (!current.rows[0]) throw new Error("QUALITY_REMEDIATION_NOT_FOUND")
+      const remediation = toQualityRemediation(current.rows[0])
+      if (remediation.status === "DONE" || remediation.status === "CANCELED") throw new Error("QUALITY_REMEDIATION_TERMINAL")
+      const allowed =
+        (remediation.status === "OPEN" && (input.status === "IN_PROGRESS" || input.status === "CANCELED")) ||
+        (remediation.status === "IN_PROGRESS" && (input.status === "DONE" || input.status === "CANCELED"))
+      if (!allowed) throw new Error("QUALITY_REMEDIATION_TRANSITION")
+      const result = await client.query(
+        `UPDATE quality_remediations
+           SET status = $3, updated_at = now(),
+               closed_at = CASE WHEN $3 IN ('DONE','CANCELED') THEN now() ELSE closed_at END
+         WHERE id = $1 AND organization_id = $2 RETURNING *`,
+        [input.remediationId, input.organizationId, input.status]
+      )
+      return toQualityRemediation(result.rows[0])
     })
   }
 

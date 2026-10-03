@@ -18,6 +18,7 @@ export type Permission =
   | "integration.read"
   | "integration.manage"
   | "ai.manage"
+  | "quality.manage"
   | "workflow.manage"
   | "workflow.approve"
 
@@ -486,6 +487,129 @@ export type WorkflowStepType = "NOOP" | "WAIT" | "APPROVAL" | "COMPLETE"
 export type WorkflowRunStatus = "PENDING" | "RUNNING" | "WAITING" | "SUCCEEDED" | "FAILED" | "RETRYING" | "DEAD_LETTERED" | "CANCELED" | "PARTIALLY_COMPLETED"
 export type WorkflowStepRunStatus = "PENDING" | "RUNNING" | "WAITING" | "SUCCEEDED" | "FAILED" | "RETRYING" | "CANCELED" | "COMPENSATED"
 export type WorkflowApprovalStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "CANCELED"
+
+export type QualityScorecardStatus = "ACTIVE" | "DISABLED"
+export type QualityVersionStatus = "DRAFT" | "PUBLISHED" | "RETIRED"
+export type QualitySampleStrategy = "MANUAL" | "RANDOM" | "HANDOFF_TRIGGERED"
+export type QualitySampleDecision = "SELECTED" | "SKIPPED"
+export type QualityEvaluationStatus =
+  | "QUEUED"
+  | "ASSIGNED"
+  | "IN_REVIEW"
+  | "SUBMITTED"
+  | "COMPLETED"
+  | "RETURNED"
+  | "CANCELED"
+export type QualityEvaluatorType = "HUMAN" | "AI"
+export type QualityRemediationKind =
+  | "COACHING"
+  | "KNOWLEDGE_UPDATE"
+  | "PROMPT_UPDATE"
+  | "ROUTING_CHANGE"
+  | "GUARDRAIL_UPDATE"
+  | "WORKFLOW_FIX"
+  | "DEFECT"
+export type QualityRemediationStatus = "OPEN" | "IN_PROGRESS" | "DONE" | "CANCELED"
+
+export interface QualityCriterion {
+  key: string
+  name: string
+  weight: number
+  critical: boolean
+}
+
+export interface QualityEvidenceRef {
+  messageId: string
+}
+
+export interface QualityScorecard {
+  id: string
+  organizationId: string
+  name: string
+  status: QualityScorecardStatus
+  calcPolicyVersion: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface QualityScorecardVersion {
+  id: string
+  organizationId: string
+  scorecardId: string
+  version: number
+  status: QualityVersionStatus
+  criteria: QualityCriterion[]
+  calcPolicyVersion: string
+  createdAt: string
+  publishedAt: string | null
+}
+
+export interface QualitySampleRule {
+  id: string
+  organizationId: string
+  name: string
+  strategy: QualitySampleStrategy
+  ratePerMille: number
+  seed: string
+  status: QualityScorecardStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface QualitySample {
+  id: string
+  organizationId: string
+  ruleId: string
+  conversationId: string
+  decision: QualitySampleDecision
+  reason: string
+  seedUsed: string
+  createdAt: string
+}
+
+export interface QualityEvaluation {
+  id: string
+  organizationId: string
+  conversationId: string
+  scorecardVersionId: string
+  sampleId: string | null
+  evaluatorType: QualityEvaluatorType
+  aiProposalId: string | null
+  status: QualityEvaluationStatus
+  totalScore: number | null
+  criticalFailure: boolean
+  version: number
+  reviewerMemberId: string | null
+  submittedAt: string | null
+  completedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface QualityFinding {
+  id: string
+  organizationId: string
+  evaluationId: string
+  criterionKey: string
+  score: number
+  weight: number
+  critical: boolean
+  notes: string | null
+  evidence: QualityEvidenceRef[]
+  createdAt: string
+}
+
+export interface QualityRemediation {
+  id: string
+  organizationId: string
+  findingId: string
+  kind: QualityRemediationKind
+  status: QualityRemediationStatus
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+  closedAt: string | null
+}
 
 export interface WorkflowDefinition {
   id: string

@@ -54,6 +54,14 @@ import type {
   WorkflowStepRun,
   WorkflowWait,
   WorkflowApproval,
+  QualityScorecard,
+  QualityScorecardVersion,
+  QualityCriterion,
+  QualitySampleRule,
+  QualitySample,
+  QualityEvaluation,
+  QualityFinding,
+  QualityRemediation,
 } from "../domain/types.js"
 
 import { hashRequest, hashToken, normalizeEmail } from "./common.js"
@@ -249,6 +257,53 @@ export interface ResolveWorkflowApprovalInput {
   userId: string
   decision: "APPROVED" | "REJECTED"
 }
+export interface CreateQualityScorecardVersionInput {
+  organizationId: string
+  name: string
+  criteria: QualityCriterion[]
+}
+export interface CreateQualitySampleRuleInput {
+  organizationId: string
+  name: string
+  strategy: QualitySampleRule["strategy"]
+  ratePerMille: number
+  seed: string
+}
+export interface RecordQualitySampleInput {
+  organizationId: string
+  ruleId: string
+  conversationId: string
+  decision: QualitySample["decision"]
+  reason: string
+  seedUsed: string
+}
+export interface CreateQualityEvaluationInput {
+  organizationId: string
+  conversationId: string
+  scorecardVersionId: string
+  sampleId: string | null
+  evaluatorType: QualityEvaluation["evaluatorType"]
+  aiProposalId: string | null
+}
+export interface SubmitQualityFindingsInput {
+  organizationId: string
+  evaluationId: string
+  expectedVersion: number
+  totalScore: number
+  criticalFailure: boolean
+  findings: Array<{
+    criterionKey: string
+    score: number
+    notes: string | null
+    evidence: Array<{ messageId: string }>
+  }>
+}
+export interface CreateQualityRemediationInput {
+  organizationId: string
+  findingId: string
+  kind: QualityRemediation["kind"]
+  notes: string | null
+}
 export interface PublishOutboxBatchInput {
   organizationId: string
   publisherId: string
@@ -438,6 +493,29 @@ export interface Store {
   listWorkflowApprovals(organizationId: string, runId?: string): Promise<WorkflowApproval[]>
   cancelWorkflowRun(organizationId: string, runId: string): Promise<WorkflowRun>
 
+  listQualityScorecards(organizationId: string): Promise<QualityScorecard[]>
+  createQualityScorecardVersion(input: CreateQualityScorecardVersionInput): Promise<{ scorecard: QualityScorecard; version: QualityScorecardVersion }>
+  getQualityScorecardVersion(organizationId: string, versionId: string): Promise<QualityScorecardVersion | null>
+  listQualityScorecardVersions(organizationId: string, scorecardId: string): Promise<QualityScorecardVersion[]>
+  publishQualityScorecardVersion(organizationId: string, versionId: string): Promise<QualityScorecardVersion>
+  createQualitySampleRule(input: CreateQualitySampleRuleInput): Promise<QualitySampleRule>
+  listQualitySampleRules(organizationId: string): Promise<QualitySampleRule[]>
+  recordQualitySample(input: RecordQualitySampleInput): Promise<{ sample: QualitySample; created: boolean }>
+  listQualitySamples(organizationId: string, ruleId: string): Promise<QualitySample[]>
+  createQualityEvaluation(input: CreateQualityEvaluationInput): Promise<QualityEvaluation>
+  getQualityEvaluation(organizationId: string, evaluationId: string): Promise<QualityEvaluation | null>
+  listQualityEvaluations(organizationId: string, conversationId?: string): Promise<QualityEvaluation[]>
+  assignQualityEvaluation(input: { organizationId: string; evaluationId: string; reviewerMemberId: string; expectedVersion: number }): Promise<QualityEvaluation>
+  beginQualityReview(input: { organizationId: string; evaluationId: string; expectedVersion: number }): Promise<QualityEvaluation>
+  submitQualityFindings(input: SubmitQualityFindingsInput): Promise<{ evaluation: QualityEvaluation; findings: QualityFinding[] }>
+  listQualityFindings(organizationId: string, evaluationId: string): Promise<QualityFinding[]>
+  returnQualityEvaluation(input: { organizationId: string; evaluationId: string; expectedVersion: number }): Promise<QualityEvaluation>
+  completeQualityEvaluation(input: { organizationId: string; evaluationId: string; expectedVersion: number }): Promise<QualityEvaluation>
+  cancelQualityEvaluation(input: { organizationId: string; evaluationId: string; expectedVersion: number }): Promise<QualityEvaluation>
+  createQualityRemediation(input: CreateQualityRemediationInput): Promise<QualityRemediation>
+  listQualityRemediations(organizationId: string, findingId: string): Promise<QualityRemediation[]>
+  setQualityRemediationStatus(input: { organizationId: string; remediationId: string; status: QualityRemediation["status"] }): Promise<QualityRemediation>
+
   createAiModel(input: CreateAiModelInput): Promise<AiModel>
   listAiModels(organizationId: string): Promise<AiModel[]>
   setAiModelStatus(input: { organizationId: string; modelId: string; status: AiModel["status"] }): Promise<AiModel>
@@ -608,6 +686,13 @@ export class MemoryStore implements Store {
   private readonly workflowStepRuns = new Map<string, WorkflowStepRun>()
   private readonly workflowWaits = new Map<string, WorkflowWait>()
   private readonly workflowApprovals = new Map<string, WorkflowApproval>()
+  private readonly qualityScorecards = new Map<string, QualityScorecard>()
+  private readonly qualityScorecardVersions = new Map<string, QualityScorecardVersion>()
+  private readonly qualitySampleRules = new Map<string, QualitySampleRule>()
+  private readonly qualitySamples = new Map<string, QualitySample>()
+  private readonly qualityEvaluations = new Map<string, QualityEvaluation>()
+  private readonly qualityFindings = new Map<string, QualityFinding>()
+  private readonly qualityRemediations = new Map<string, QualityRemediation>()
   private readonly aiModels = new Map<string, AiModel>()
   private readonly aiModelPolicies = new Map<string, AiModelPolicy>()
   private readonly aiModelPolicyVersions = new Map<string, AiModelPolicyVersion>()
@@ -2753,6 +2838,344 @@ export class MemoryStore implements Store {
       }
     }
     return clone(run)
+  }
+
+  async createQualityScorecardVersion(input: CreateQualityScorecardVersionInput) {
+    let scorecard = [...this.qualityScorecards.values()].find(
+      (item) => item.organizationId === input.organizationId && item.name === input.name.trim()
+    )
+    const now = new Date().toISOString()
+    if (!scorecard) {
+      scorecard = {
+        id: randomUUID(),
+        organizationId: input.organizationId,
+        name: input.name.trim(),
+        status: "ACTIVE",
+        calcPolicyVersion: "v1",
+        createdAt: now,
+        updatedAt: now,
+      }
+      this.qualityScorecards.set(scorecard.id, scorecard)
+    }
+    const existing = [...this.qualityScorecardVersions.values()].filter(
+      (item) => item.organizationId === input.organizationId && item.scorecardId === scorecard.id
+    )
+    const version: QualityScorecardVersion = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      scorecardId: scorecard.id,
+      version: existing.length === 0 ? 1 : Math.max(...existing.map((item) => item.version)) + 1,
+      status: "DRAFT",
+      criteria: clone(input.criteria),
+      calcPolicyVersion: "v1",
+      createdAt: now,
+      publishedAt: null,
+    }
+    this.qualityScorecardVersions.set(version.id, version)
+    return { scorecard: clone(scorecard), version: clone(version) }
+  }
+
+  async listQualityScorecards(organizationId: string): Promise<QualityScorecard[]> {
+    return clone(
+      [...this.qualityScorecards.values()]
+        .filter((item) => item.organizationId === organizationId)
+        .sort((a, b) => a.name.localeCompare(b.name))
+    )
+  }
+
+  async getQualityScorecardVersion(organizationId: string, versionId: string): Promise<QualityScorecardVersion | null> {
+    const version = this.qualityScorecardVersions.get(versionId)
+    if (!version || version.organizationId !== organizationId) return null
+    return clone(version)
+  }
+
+  async listQualityScorecardVersions(organizationId: string, scorecardId: string): Promise<QualityScorecardVersion[]> {
+    return clone(
+      [...this.qualityScorecardVersions.values()]
+        .filter((item) => item.organizationId === organizationId && item.scorecardId === scorecardId)
+        .sort((a, b) => a.version - b.version)
+    )
+  }
+
+  async publishQualityScorecardVersion(organizationId: string, versionId: string): Promise<QualityScorecardVersion> {
+    const version = this.qualityScorecardVersions.get(versionId)
+    if (!version || version.organizationId !== organizationId) throw new Error("QUALITY_VERSION_NOT_FOUND")
+    if (version.status !== "DRAFT") throw new Error("QUALITY_VERSION_NOT_DRAFT")
+    const now = new Date().toISOString()
+    for (const candidate of this.qualityScorecardVersions.values()) {
+      if (candidate.organizationId === organizationId && candidate.scorecardId === version.scorecardId && candidate.status === "PUBLISHED") {
+        candidate.status = "RETIRED"
+      }
+    }
+    version.status = "PUBLISHED"
+    version.publishedAt = now
+    return clone(version)
+  }
+
+  async createQualitySampleRule(input: CreateQualitySampleRuleInput): Promise<QualitySampleRule> {
+    const duplicate = [...this.qualitySampleRules.values()].find(
+      (item) => item.organizationId === input.organizationId && item.name === input.name.trim()
+    )
+    if (duplicate) throw new Error("QUALITY_SAMPLE_RULE_EXISTS")
+    const now = new Date().toISOString()
+    const rule: QualitySampleRule = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      name: input.name.trim(),
+      strategy: input.strategy,
+      ratePerMille: input.ratePerMille,
+      seed: input.seed,
+      status: "ACTIVE",
+      createdAt: now,
+      updatedAt: now,
+    }
+    this.qualitySampleRules.set(rule.id, rule)
+    return clone(rule)
+  }
+
+  async listQualitySampleRules(organizationId: string): Promise<QualitySampleRule[]> {
+    return clone(
+      [...this.qualitySampleRules.values()]
+        .filter((item) => item.organizationId === organizationId)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    )
+  }
+
+  async recordQualitySample(input: RecordQualitySampleInput): Promise<{ sample: QualitySample; created: boolean }> {
+    const rule = this.qualitySampleRules.get(input.ruleId)
+    if (!rule || rule.organizationId !== input.organizationId) throw new Error("QUALITY_SAMPLE_RULE_NOT_FOUND")
+    const conversation = this.conversations.get(input.conversationId)
+    if (!conversation || conversation.organizationId !== input.organizationId) throw new Error("CONVERSATION_NOT_FOUND")
+    const existing = [...this.qualitySamples.values()].find(
+      (item) => item.organizationId === input.organizationId && item.ruleId === input.ruleId && item.conversationId === input.conversationId
+    )
+    if (existing) return { sample: clone(existing), created: false }
+    const sample: QualitySample = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      ruleId: input.ruleId,
+      conversationId: input.conversationId,
+      decision: input.decision,
+      reason: input.reason,
+      seedUsed: input.seedUsed,
+      createdAt: new Date().toISOString(),
+    }
+    this.qualitySamples.set(sample.id, sample)
+    return { sample: clone(sample), created: true }
+  }
+
+  async listQualitySamples(organizationId: string, ruleId: string): Promise<QualitySample[]> {
+    return clone(
+      [...this.qualitySamples.values()]
+        .filter((item) => item.organizationId === organizationId && item.ruleId === ruleId)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    )
+  }
+
+  async createQualityEvaluation(input: CreateQualityEvaluationInput): Promise<QualityEvaluation> {
+    const conversation = this.conversations.get(input.conversationId)
+    if (!conversation || conversation.organizationId !== input.organizationId) throw new Error("CONVERSATION_NOT_FOUND")
+    const version = this.qualityScorecardVersions.get(input.scorecardVersionId)
+    if (!version || version.organizationId !== input.organizationId) throw new Error("QUALITY_VERSION_NOT_FOUND")
+    if (version.status !== "PUBLISHED") throw new Error("QUALITY_VERSION_NOT_PUBLISHED")
+    if (input.sampleId !== null) {
+      const sample = this.qualitySamples.get(input.sampleId)
+      if (!sample || sample.organizationId !== input.organizationId) throw new Error("QUALITY_SAMPLE_NOT_FOUND")
+    }
+    if (input.aiProposalId !== null) {
+      const proposal = this.qualityEvaluations.get(input.aiProposalId)
+      if (!proposal || proposal.organizationId !== input.organizationId) throw new Error("QUALITY_PROPOSAL_NOT_FOUND")
+      if (proposal.evaluatorType !== "AI") throw new Error("QUALITY_PROPOSAL_NOT_AI")
+    }
+    const now = new Date().toISOString()
+    const evaluation: QualityEvaluation = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      conversationId: input.conversationId,
+      scorecardVersionId: input.scorecardVersionId,
+      sampleId: input.sampleId,
+      evaluatorType: input.evaluatorType,
+      aiProposalId: input.aiProposalId,
+      status: "QUEUED",
+      totalScore: null,
+      criticalFailure: false,
+      version: 1,
+      reviewerMemberId: null,
+      submittedAt: null,
+      completedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    }
+    this.qualityEvaluations.set(evaluation.id, evaluation)
+    return clone(evaluation)
+  }
+
+  async getQualityEvaluation(organizationId: string, evaluationId: string): Promise<QualityEvaluation | null> {
+    const evaluation = this.qualityEvaluations.get(evaluationId)
+    if (!evaluation || evaluation.organizationId !== organizationId) return null
+    return clone(evaluation)
+  }
+
+  async listQualityEvaluations(organizationId: string, conversationId?: string): Promise<QualityEvaluation[]> {
+    return clone(
+      [...this.qualityEvaluations.values()]
+        .filter((item) => item.organizationId === organizationId && (conversationId === undefined || item.conversationId === conversationId))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    )
+  }
+
+  private qualityEvaluationForMutation(organizationId: string, evaluationId: string, expectedVersion: number): QualityEvaluation {
+    const evaluation = this.qualityEvaluations.get(evaluationId)
+    if (!evaluation || evaluation.organizationId !== organizationId) throw new Error("QUALITY_EVALUATION_NOT_FOUND")
+    if (evaluation.version !== expectedVersion) throw new Error("STALE_QUALITY_EVALUATION_VERSION")
+    return evaluation
+  }
+
+  async assignQualityEvaluation(input: { organizationId: string; evaluationId: string; reviewerMemberId: string; expectedVersion: number }): Promise<QualityEvaluation> {
+    const evaluation = this.qualityEvaluationForMutation(input.organizationId, input.evaluationId, input.expectedVersion)
+    if (evaluation.status !== "QUEUED") throw new Error("QUALITY_EVALUATION_STATE")
+    const member = this.workforce.get(input.reviewerMemberId)
+    if (!member || member.organizationId !== input.organizationId) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+    evaluation.status = "ASSIGNED"
+    evaluation.reviewerMemberId = input.reviewerMemberId
+    evaluation.version += 1
+    evaluation.updatedAt = new Date().toISOString()
+    return clone(evaluation)
+  }
+
+  async beginQualityReview(input: { organizationId: string; evaluationId: string; expectedVersion: number }): Promise<QualityEvaluation> {
+    const evaluation = this.qualityEvaluationForMutation(input.organizationId, input.evaluationId, input.expectedVersion)
+    if (evaluation.status !== "ASSIGNED" && evaluation.status !== "RETURNED") throw new Error("QUALITY_EVALUATION_STATE")
+    evaluation.status = "IN_REVIEW"
+    evaluation.version += 1
+    evaluation.updatedAt = new Date().toISOString()
+    return clone(evaluation)
+  }
+
+  async submitQualityFindings(input: SubmitQualityFindingsInput): Promise<{ evaluation: QualityEvaluation; findings: QualityFinding[] }> {
+    const evaluation = this.qualityEvaluationForMutation(input.organizationId, input.evaluationId, input.expectedVersion)
+    if (evaluation.status !== "IN_REVIEW") throw new Error("QUALITY_EVALUATION_STATE")
+    for (const finding of input.findings) {
+      for (const ref of finding.evidence) {
+        const message = this.messages.get(ref.messageId)
+        if (!message || message.organizationId !== input.organizationId || message.conversationId !== evaluation.conversationId) {
+          throw new Error("QUALITY_EVIDENCE_NOT_FOUND")
+        }
+      }
+    }
+    for (const [id, existing] of this.qualityFindings) {
+      if (existing.organizationId === input.organizationId && existing.evaluationId === input.evaluationId) {
+        this.qualityFindings.delete(id)
+      }
+    }
+    const version = this.qualityScorecardVersions.get(evaluation.scorecardVersionId)
+    const criteriaByKey = new Map((version?.criteria ?? []).map((criterion) => [criterion.key, criterion]))
+    const findings: QualityFinding[] = input.findings.map((finding) => {
+      const criterion = criteriaByKey.get(finding.criterionKey)
+      const record: QualityFinding = {
+        id: randomUUID(),
+        organizationId: input.organizationId,
+        evaluationId: input.evaluationId,
+        criterionKey: finding.criterionKey,
+        score: finding.score,
+        weight: criterion?.weight ?? 0,
+        critical: criterion?.critical ?? false,
+        notes: finding.notes,
+        evidence: clone(finding.evidence),
+        createdAt: new Date().toISOString(),
+      }
+      this.qualityFindings.set(record.id, record)
+      return record
+    })
+    const now = new Date().toISOString()
+    evaluation.status = "SUBMITTED"
+    evaluation.totalScore = input.totalScore
+    evaluation.criticalFailure = input.criticalFailure
+    evaluation.submittedAt = now
+    evaluation.updatedAt = now
+    evaluation.version += 1
+    return { evaluation: clone(evaluation), findings: clone(findings) }
+  }
+
+  async listQualityFindings(organizationId: string, evaluationId: string): Promise<QualityFinding[]> {
+    return clone(
+      [...this.qualityFindings.values()]
+        .filter((item) => item.organizationId === organizationId && item.evaluationId === evaluationId)
+        .sort((a, b) => a.criterionKey.localeCompare(b.criterionKey))
+    )
+  }
+
+  async returnQualityEvaluation(input: { organizationId: string; evaluationId: string; expectedVersion: number }): Promise<QualityEvaluation> {
+    const evaluation = this.qualityEvaluationForMutation(input.organizationId, input.evaluationId, input.expectedVersion)
+    if (evaluation.status !== "SUBMITTED") throw new Error("QUALITY_EVALUATION_STATE")
+    evaluation.status = "RETURNED"
+    evaluation.version += 1
+    evaluation.updatedAt = new Date().toISOString()
+    return clone(evaluation)
+  }
+
+  async completeQualityEvaluation(input: { organizationId: string; evaluationId: string; expectedVersion: number }): Promise<QualityEvaluation> {
+    const evaluation = this.qualityEvaluationForMutation(input.organizationId, input.evaluationId, input.expectedVersion)
+    if (evaluation.status !== "SUBMITTED") throw new Error("QUALITY_EVALUATION_STATE")
+    if (evaluation.evaluatorType !== "HUMAN") throw new Error("QUALITY_AI_PROPOSAL_NOT_FINAL")
+    if (evaluation.totalScore === null) throw new Error("QUALITY_EVALUATION_STATE")
+    evaluation.status = "COMPLETED"
+    evaluation.completedAt = new Date().toISOString()
+    evaluation.updatedAt = evaluation.completedAt
+    evaluation.version += 1
+    return clone(evaluation)
+  }
+
+  async cancelQualityEvaluation(input: { organizationId: string; evaluationId: string; expectedVersion: number }): Promise<QualityEvaluation> {
+    const evaluation = this.qualityEvaluationForMutation(input.organizationId, input.evaluationId, input.expectedVersion)
+    if (evaluation.status === "COMPLETED" || evaluation.status === "CANCELED") throw new Error("QUALITY_EVALUATION_TERMINAL")
+    evaluation.status = "CANCELED"
+    evaluation.version += 1
+    evaluation.updatedAt = new Date().toISOString()
+    return clone(evaluation)
+  }
+
+  async createQualityRemediation(input: CreateQualityRemediationInput): Promise<QualityRemediation> {
+    const finding = this.qualityFindings.get(input.findingId)
+    if (!finding || finding.organizationId !== input.organizationId) throw new Error("QUALITY_FINDING_NOT_FOUND")
+    const now = new Date().toISOString()
+    const remediation: QualityRemediation = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      findingId: input.findingId,
+      kind: input.kind,
+      status: "OPEN",
+      notes: input.notes,
+      createdAt: now,
+      updatedAt: now,
+      closedAt: null,
+    }
+    this.qualityRemediations.set(remediation.id, remediation)
+    return clone(remediation)
+  }
+
+  async listQualityRemediations(organizationId: string, findingId: string): Promise<QualityRemediation[]> {
+    return clone(
+      [...this.qualityRemediations.values()]
+        .filter((item) => item.organizationId === organizationId && item.findingId === findingId)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    )
+  }
+
+  async setQualityRemediationStatus(input: { organizationId: string; remediationId: string; status: QualityRemediation["status"] }): Promise<QualityRemediation> {
+    const remediation = this.qualityRemediations.get(input.remediationId)
+    if (!remediation || remediation.organizationId !== input.organizationId) throw new Error("QUALITY_REMEDIATION_NOT_FOUND")
+    if (remediation.status === "DONE" || remediation.status === "CANCELED") throw new Error("QUALITY_REMEDIATION_TERMINAL")
+    if (remediation.status === "OPEN" && input.status !== "IN_PROGRESS" && input.status !== "CANCELED") {
+      throw new Error("QUALITY_REMEDIATION_TRANSITION")
+    }
+    if (remediation.status === "IN_PROGRESS" && input.status !== "DONE" && input.status !== "CANCELED") {
+      throw new Error("QUALITY_REMEDIATION_TRANSITION")
+    }
+    remediation.status = input.status
+    remediation.updatedAt = new Date().toISOString()
+    if (input.status === "DONE" || input.status === "CANCELED") remediation.closedAt = remediation.updatedAt
+    return clone(remediation)
   }
 
   async createAiModel(input: CreateAiModelInput): Promise<AiModel> {

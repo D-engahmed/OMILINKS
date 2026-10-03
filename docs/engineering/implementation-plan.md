@@ -235,21 +235,28 @@ Deferred:
 
 ## 11. Phase 8 — Quality
 
-Implement:
+Current implementation (kernel):
 
-- sampling;
-- scorecards;
-- evaluation;
-- evidence;
-- calibration;
-- remediation;
-- AI quality monitoring.
+- versioned scorecards with immutable published versions and a stored `v1`
+  calculation policy;
+- deterministic sampling rules (MANUAL/RANDOM/HANDOFF_TRIGGERED) with
+  idempotent per-conversation sample decisions;
+- versioned evaluation state machine
+  (QUEUED/ASSIGNED/IN_REVIEW/SUBMITTED/COMPLETED plus RETURNED/CANCELED);
+- criterion findings with conversation-scoped message evidence;
+- reproducible totals recomputed from the stored scorecard version;
+- AI evaluations fenced as non-completable proposals linked via `ai_proposal_id`;
+- finding-linked remediations with guarded status transitions;
+- memory/PostgreSQL parity tests.
 
 Exit criteria:
 
 - every quality score links to conversation evidence;
 - sampling is reproducible;
 - human and AI evaluation are distinguishable.
+
+Deferred until review volume justifies them: calibration records, stratified
+sampling, AI-proposed findings generation, and analytics rollups.
 
 ## 12. Phase 9 — Billing
 

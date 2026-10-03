@@ -630,6 +630,245 @@ async function route(
     )
   }
 
+  if (method === "GET" && url.pathname === "/api/v1/quality/scorecards") {
+    return json({ items: await appApplication.listQualityScorecards(context) })
+  }
+
+  if (method === "POST" && url.pathname === "/api/v1/quality/scorecards/versions") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.createQualityScorecardVersion(context, {
+        name: stringValue(body.name),
+        criteria: Array.isArray(body.criteria) ? body.criteria : [],
+      }),
+      201
+    )
+  }
+
+  const qualityVersionsMatch = url.pathname.match(
+    /^\/api\/v1\/quality\/scorecards\/([^/]+)\/versions$/
+  )
+  if (qualityVersionsMatch && method === "GET") {
+    return json({
+      items: await appApplication.listQualityScorecardVersions(context, qualityVersionsMatch[1]!),
+    })
+  }
+
+  const qualityPublishMatch = url.pathname.match(
+    /^\/api\/v1\/quality\/scorecards\/([^/]+)\/versions\/([^/]+)\/publish$/
+  )
+  if (qualityPublishMatch && method === "POST") {
+    return json(
+      await appApplication.publishQualityScorecardVersion(context, {
+        scorecardId: qualityPublishMatch[1]!,
+        versionId: qualityPublishMatch[2]!,
+      })
+    )
+  }
+
+  if (method === "GET" && url.pathname === "/api/v1/quality/sample-rules") {
+    return json({ items: await appApplication.listQualitySampleRules(context) })
+  }
+
+  if (method === "POST" && url.pathname === "/api/v1/quality/sample-rules") {
+    const body = await readJson(request)
+    const strategy = stringValue(body.strategy)
+    if (strategy !== "MANUAL" && strategy !== "RANDOM" && strategy !== "HANDOFF_TRIGGERED") {
+      throw new AppError(400, "VALIDATION_ERROR", "strategy must be MANUAL, RANDOM, or HANDOFF_TRIGGERED.")
+    }
+    return json(
+      await appApplication.createQualitySampleRule(context, {
+        name: stringValue(body.name),
+        strategy,
+        ratePerMille: Number(body.ratePerMille ?? 1000),
+        seed: typeof body.seed === "string" ? body.seed : "",
+      }),
+      201
+    )
+  }
+
+  const qualitySampleMatch = url.pathname.match(
+    /^\/api\/v1\/quality\/sample-rules\/([^/]+)\/sample$/
+  )
+  if (qualitySampleMatch && method === "POST") {
+    const body = await readJson(request)
+    return json({
+      items: await appApplication.sampleQualityConversations(context, {
+        ruleId: qualitySampleMatch[1]!,
+        conversationIds: Array.isArray(body.conversationIds)
+          ? body.conversationIds.filter((value): value is string => typeof value === "string")
+          : [],
+      }),
+    })
+  }
+
+  const qualitySamplesMatch = url.pathname.match(
+    /^\/api\/v1\/quality\/sample-rules\/([^/]+)\/samples$/
+  )
+  if (qualitySamplesMatch && method === "GET") {
+    return json({
+      items: await appApplication.listQualitySamples(context, qualitySamplesMatch[1]!),
+    })
+  }
+
+  if (method === "GET" && url.pathname === "/api/v1/quality/evaluations") {
+    const conversationId = url.searchParams.get("conversationId") ?? undefined
+    return json({ items: await appApplication.listQualityEvaluations(context, conversationId ?? undefined) })
+  }
+
+  if (method === "POST" && url.pathname === "/api/v1/quality/evaluations") {
+    const body = await readJson(request)
+    const evaluatorType = body.evaluatorType === "AI" ? "AI" : "HUMAN"
+    return json(
+      await appApplication.createQualityEvaluation(context, {
+        conversationId: stringValue(body.conversationId),
+        scorecardVersionId: stringValue(body.scorecardVersionId),
+        sampleId: nullableStringValue(body.sampleId),
+        evaluatorType,
+        aiProposalId: nullableStringValue(body.aiProposalId),
+      }),
+      201
+    )
+  }
+
+  const qualityEvaluationMatch = url.pathname.match(
+    /^\/api\/v1\/quality\/evaluations\/([^/]+)$/
+  )
+  if (qualityEvaluationMatch && method === "GET") {
+    return json(await appApplication.getQualityEvaluation(context, qualityEvaluationMatch[1]!))
+  }
+
+  function qualityVersionOf(body: Record<string, unknown>, request: Request): number {
+    const expected = Number(request.headers.get("If-Match-Version") ?? body.version)
+    if (!Number.isInteger(expected) || expected < 1) {
+      throw new AppError(400, "VALIDATION_ERROR", "If-Match-Version is required.")
+    }
+    return expected
+  }
+
+  const qualityAssignMatch = url.pathname.match(
+    /^\/api\/v1\/quality\/evaluations\/([^/]+)\/assign$/
+  )
+  if (qualityAssignMatch && method === "POST") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.assignQualityEvaluation(context, {
+        evaluationId: qualityAssignMatch[1]!,
+        reviewerMemberId: stringValue(body.reviewerMemberId),
+        expectedVersion: qualityVersionOf(body, request),
+      })
+    )
+  }
+
+  const qualityBeginMatch = url.pathname.match(
+    /^\/api\/v1\/quality\/evaluations\/([^/]+)\/begin$/
+  )
+  if (qualityBeginMatch && method === "POST") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.beginQualityReview(context, {
+        evaluationId: qualityBeginMatch[1]!,
+        expectedVersion: qualityVersionOf(body, request),
+      })
+    )
+  }
+
+  const qualitySubmitMatch = url.pathname.match(
+    /^\/api\/v1\/quality\/evaluations\/([^/]+)\/submit$/
+  )
+  if (qualitySubmitMatch && method === "POST") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.submitQualityFindings(context, {
+        evaluationId: qualitySubmitMatch[1]!,
+        expectedVersion: qualityVersionOf(body, request),
+        findings: Array.isArray(body.findings) ? body.findings : [],
+      })
+    )
+  }
+
+  const qualityReturnMatch = url.pathname.match(
+    /^\/api\/v1\/quality\/evaluations\/([^/]+)\/return$/
+  )
+  if (qualityReturnMatch && method === "POST") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.returnQualityEvaluation(context, {
+        evaluationId: qualityReturnMatch[1]!,
+        expectedVersion: qualityVersionOf(body, request),
+      })
+    )
+  }
+
+  const qualityCompleteMatch = url.pathname.match(
+    /^\/api\/v1\/quality\/evaluations\/([^/]+)\/complete$/
+  )
+  if (qualityCompleteMatch && method === "POST") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.completeQualityEvaluation(context, {
+        evaluationId: qualityCompleteMatch[1]!,
+        expectedVersion: qualityVersionOf(body, request),
+      })
+    )
+  }
+
+  const qualityCancelMatch = url.pathname.match(
+    /^\/api\/v1\/quality\/evaluations\/([^/]+)\/cancel$/
+  )
+  if (qualityCancelMatch && method === "POST") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.cancelQualityEvaluation(context, {
+        evaluationId: qualityCancelMatch[1]!,
+        expectedVersion: qualityVersionOf(body, request),
+      })
+    )
+  }
+
+  if (method === "POST" && url.pathname === "/api/v1/quality/remediations") {
+    const body = await readJson(request)
+    const kinds = ["COACHING", "KNOWLEDGE_UPDATE", "PROMPT_UPDATE", "ROUTING_CHANGE", "GUARDRAIL_UPDATE", "WORKFLOW_FIX", "DEFECT"] as const
+    const kind = stringValue(body.kind)
+    if (!(kinds as readonly string[]).includes(kind)) {
+      throw new AppError(400, "VALIDATION_ERROR", "Invalid remediation kind.")
+    }
+    return json(
+      await appApplication.createQualityRemediation(context, {
+        findingId: stringValue(body.findingId),
+        kind: kind as (typeof kinds)[number],
+        notes: nullableStringValue(body.notes),
+      }),
+      201
+    )
+  }
+
+  const qualityFindingRemediationsMatch = url.pathname.match(
+    /^\/api\/v1\/quality\/findings\/([^/]+)\/remediations$/
+  )
+  if (qualityFindingRemediationsMatch && method === "GET") {
+    return json({
+      items: await appApplication.listQualityRemediations(context, qualityFindingRemediationsMatch[1]!),
+    })
+  }
+
+  const qualityRemediationStatusMatch = url.pathname.match(
+    /^\/api\/v1\/quality\/remediations\/([^/]+)\/status$/
+  )
+  if (qualityRemediationStatusMatch && method === "PUT") {
+    const body = await readJson(request)
+    const status = stringValue(body.status)
+    if (!["OPEN", "IN_PROGRESS", "DONE", "CANCELED"].includes(status)) {
+      throw new AppError(400, "VALIDATION_ERROR", "Invalid remediation status.")
+    }
+    return json(
+      await appApplication.setQualityRemediationStatus(context, {
+        remediationId: qualityRemediationStatusMatch[1]!,
+        status: status as "OPEN" | "IN_PROGRESS" | "DONE" | "CANCELED",
+      })
+    )
+  }
+
   if (method === "GET" && url.pathname === "/api/v1/ai/models") {
     return json({ items: await appApplication.listAiModels(context) })
   }
