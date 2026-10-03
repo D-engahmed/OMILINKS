@@ -377,6 +377,118 @@ const toRoutingCandidate = (row: Row): RoutingCandidate => ({
   createdAt: iso(row.created_at),
 })
 
+const toWorkflowDefinition = (row: Row): WorkflowDefinition => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  name: str(row.name),
+  status: str(row.status) as WorkflowDefinition['status'],
+  createdAt: iso(row.created_at),
+  updatedAt: iso(row.updated_at),
+})
+
+const toWorkflowVersion = (row: Row): WorkflowVersion => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  workflowId: str(row.workflow_id),
+  version: num(row.version),
+  status: str(row.status) as WorkflowVersion['status'],
+  triggerTypes: (row.trigger_types ?? []) as string[],
+  createdAt: iso(row.created_at),
+  publishedAt: isoOrNull(row.published_at),
+})
+
+const toWorkflowStep = (row: Row): WorkflowStep => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  workflowVersionId: str(row.workflow_version_id),
+  stepKey: str(row.step_key),
+  stepType: str(row.step_type) as WorkflowStep['stepType'],
+  config: (row.config ?? {}) as Record<string, unknown>,
+  nextStepKey: strOrNull(row.next_step_key),
+  onFailureStepKey: strOrNull(row.on_failure_step_key),
+  retryMaxAttempts: num(row.retry_max_attempts),
+  retryBackoffSeconds: num(row.retry_backoff_seconds),
+  timeoutSeconds: num(row.timeout_seconds),
+  compensationStepKey: strOrNull(row.compensation_step_key),
+  createdAt: iso(row.created_at),
+})
+
+const toWorkflowTrigger = (row: Row): WorkflowTrigger => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  workflowId: str(row.workflow_id),
+  workflowVersionId: str(row.workflow_version_id),
+  triggerType: str(row.trigger_type),
+  sourceEventId: strOrNull(row.source_event_id),
+  dedupeKey: str(row.dedupe_key),
+  payload: (row.payload ?? {}) as Record<string, unknown>,
+  receivedAt: iso(row.received_at),
+})
+
+const toWorkflowRun = (row: Row): WorkflowRun => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  workflowId: str(row.workflow_id),
+  workflowVersionId: str(row.workflow_version_id),
+  triggerId: str(row.trigger_id),
+  status: str(row.status) as WorkflowRun['status'],
+  context: (row.context ?? {}) as Record<string, unknown>,
+  currentStepKey: strOrNull(row.current_step_key),
+  error: strOrNull(row.error),
+  attempt: num(row.attempt),
+  availableAt: iso(row.available_at),
+  leaseUntil: isoOrNull(row.lease_until),
+  leasedBy: strOrNull(row.leased_by),
+  startedAt: isoOrNull(row.started_at),
+  completedAt: isoOrNull(row.completed_at),
+  createdAt: iso(row.created_at),
+})
+
+const toWorkflowStepRun = (row: Row): WorkflowStepRun => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  workflowRunId: str(row.workflow_run_id),
+  stepId: str(row.step_id),
+  stepKey: str(row.step_key),
+  status: str(row.status) as WorkflowStepRun['status'],
+  attempt: num(row.attempt),
+  input: (row.input ?? {}) as Record<string, unknown>,
+  output: (row.output ?? {}) as Record<string, unknown>,
+  error: strOrNull(row.error),
+  availableAt: iso(row.available_at),
+  startedAt: isoOrNull(row.started_at),
+  completedAt: isoOrNull(row.completed_at),
+  createdAt: iso(row.created_at),
+})
+
+const toWorkflowWait = (row: Row): WorkflowWait => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  workflowRunId: str(row.workflow_run_id),
+  workflowStepRunId: str(row.workflow_step_run_id),
+  wakeAt: iso(row.wake_at),
+  waitReason: str(row.wait_reason),
+  resumeToken: strOrNull(row.resume_token),
+  createdAt: iso(row.created_at),
+  resumedAt: isoOrNull(row.resumed_at),
+})
+
+const toWorkflowApproval = (row: Row): WorkflowApproval => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  workflowRunId: str(row.workflow_run_id),
+  workflowStepRunId: str(row.workflow_step_run_id),
+  actionHash: str(row.action_hash),
+  action: (row.action ?? {}) as Record<string, unknown>,
+  workflowVersionId: str(row.workflow_version_id),
+  requesterUserId: strOrNull(row.requester_user_id),
+  approverScope: str(row.approver_scope),
+  status: str(row.status) as WorkflowApproval['status'],
+  expiresAt: isoOrNull(row.expires_at),
+  decidedByUserId: strOrNull(row.decided_by_user_id),
+  decidedAt: isoOrNull(row.decided_at),
+  createdAt: iso(row.created_at),
+})
 const toAiModel = (row: Row): AiModel => ({
   id: str(row.id),
   organizationId: str(row.organization_id),
