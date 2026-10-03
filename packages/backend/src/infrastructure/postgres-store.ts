@@ -975,7 +975,7 @@ export class PostgresStore implements Store {
 
     return this.tenantTx(input.organizationId, async (client) => {
       const conversation = await client.query(
-        `SELECT control, control_version FROM conversations
+        `SELECT control, control_version, version FROM conversations
           WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
         [input.conversationId, input.organizationId]
       )
@@ -1052,10 +1052,10 @@ export class PostgresStore implements Store {
         causationId: input.run.inboundMessageId,
         payload: {
           conversationId: input.conversationId,
-          previousControl: "ai",
+          previousControl: str(row.control),
           control: "queue",
           controlVersion: num(row.control_version) + 1,
-          version: num(row.control_version) + 1,
+          version: num(row.version) + 1,
         },
       })
 
