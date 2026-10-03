@@ -18,10 +18,12 @@ import type {
   HandoffReason,
   Message,
   RetrievedChunk,
-  type InboundMessage,
+  InboundMessage,
 } from "../domain/types.js"
 import type { Store } from "../infrastructure/store.js"
 import { AppError } from "../shared/errors.js"
+
+export type { InboundMessage } from "../domain/types.js"
 
 export const MAX_INBOUND_CHARS = 4000
 
