@@ -604,6 +604,18 @@ export class Application {
     }
   }
 
+  async setWorkforceMemberStatus(
+    ctx: AuthenticatedContext,
+    input: { workforceMemberId: string; status: "ACTIVE" | "DISABLED" }
+  ) {
+    authorize(ctx.principal.membership, "workforce.manage")
+
+    return await this.store.setWorkforceMemberStatus({
+      organizationId: ctx.organizationId,
+      ...input,
+    })
+  }
+
   async listWorkforceMembers(ctx: AuthenticatedContext) {
     authorize(ctx.principal.membership, "workforce.manage")
     return await this.store.listWorkforceMembers(ctx.organizationId)
