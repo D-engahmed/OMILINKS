@@ -716,6 +716,11 @@ export class Application {
     }
   ) {
     authorize(ctx.principal.membership, "workforce.manage")
+
+    if (!["OFFLINE", "AVAILABLE", "BUSY", "AWAY", "UNKNOWN"].includes(input.state)) {
+      throw new AppError(400, "VALIDATION_ERROR", "Invalid presence state.")
+    }
+
     if (!Number.isInteger(input.ttlSeconds) || input.ttlSeconds < 10 || input.ttlSeconds > 86_400) {
       throw new AppError(400, "VALIDATION_ERROR", "TTL must be between 10 seconds and 24 hours.")
     }
