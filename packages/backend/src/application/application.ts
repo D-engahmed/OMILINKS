@@ -890,6 +890,17 @@ export class Application {
     input: Omit<RouteConversationInput, "policyName"> & { policyName?: string }
   ) {
     authorize(ctx.principal.membership, "conversation.assign")
+
+    if (input.policyName === undefined || input.policyName === "default") {
+      const existingDefault = await this.store.getPublishedRoutingPolicy(
+        ctx.organizationId,
+        "default"
+      )
+      if (!existingDefault) {
+        authorize(ctx.principal.membership, "workforce.manage")
+      }
+    }
+
     const service = new RoutingService(this.store)
     return await service.routeConversation(ctx.organizationId, {
       ...input,
