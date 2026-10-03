@@ -69,7 +69,14 @@ export class RoutingService {
     )
 
     if (!policy && input.policyName === "default") {
-      let queue = (await this.store.listQueues(organizationId))[0] ?? null
+      const queues = await this.store.listQueues(organizationId)
+      let queue =
+        queues.find(
+          (candidate) =>
+            candidate.status === "ACTIVE" &&
+            candidate.name.trim().toLowerCase() === "general"
+        ) ?? null
+
       if (!queue) {
         queue = await this.store.createQueue({
           organizationId,
