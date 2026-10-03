@@ -214,6 +214,43 @@ CREATE TABLE routing_candidates (
     REFERENCES workforce_members(id, organization_id) ON DELETE RESTRICT
 );
 
+ALTER TABLE assignments
+  ADD COLUMN routing_decision_id uuid;
+
+ALTER TABLE assignments
+  ADD CONSTRAINT assignment_routing_decision_owner_fk
+  FOREIGN KEY (routing_decision_id, organization_id)
+  REFERENCES routing_decisions(id, organization_id)
+  ON DELETE RESTRICT;
+
+CREATE INDEX assignments_routing_decision_idx
+  ON assignments (organization_id, routing_decision_id)
+  WHERE routing_decision_id IS NOT NULL;
+
+-- Backfill operational defaults for workforce members that existed before Phase 4.
+INSERT INTO workforce_presence
+  (workforce_member_id, organization_id, state, observed_at, expires_at, source)
+SELECT
+  wm.id,
+  wm.organization_id,
+  'OFFLINE',
+  now(),
+  now(),
+  'migration:0006'
+FROM workforce_members wm
+ON CONFLICT (workforce_member_id) DO NOTHING;
+
+INSERT INTO workforce_capacity
+  (workforce_member_id, organization_id, max_concurrent_work, reserved_work, updated_at)
+SELECT
+  wm.id,
+  wm.organization_id,
+  5,
+  0,
+  now()
+FROM workforce_members wm
+ON CONFLICT (workforce_member_id) DO NOTHING;
+
 CREATE INDEX routing_candidates_decision_idx
   ON routing_candidates (organization_id, routing_decision_id, eligible, score DESC);
 
