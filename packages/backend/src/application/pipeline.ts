@@ -45,6 +45,12 @@ export interface PipelineOptions {
     provider: string
     model: string
   }) => number
+  promptVersion?: string
+  governance?: {
+    agentId: string
+    agentPolicyVersionId: string
+  }
+}
 
 export interface InboundResult {
   customer: Customer
@@ -253,7 +259,7 @@ export class ConversationPipeline {
       organizationId,
       conversationId,
       inboundMessageId,
-      promptVersion: PROMPT_VERSION,
+      promptVersion: this.options.promptVersion ?? PROMPT_VERSION,
       provider: null as string | null,
       model: null as string | null,
       inputTokens: null as number | null,
