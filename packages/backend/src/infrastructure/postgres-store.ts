@@ -1617,6 +1617,24 @@ export class PostgresStore implements Store {
     })
   }
 
+  async setWorkforceMemberStatus(input: {
+    organizationId: string
+    workforceMemberId: string
+    status: WorkforceMember["status"]
+  }): Promise<WorkforceMember> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const result = await client.query(
+        `UPDATE workforce_members
+            SET status = $3, updated_at = now()
+          WHERE id = $1 AND organization_id = $2
+          RETURNING *`,
+        [input.workforceMemberId, input.organizationId, input.status]
+      )
+      if (!result.rows[0]) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+      return toWorkforceMember(result.rows[0])
+    })
+  }
+
   async listWorkforceMembers(organizationId: string): Promise<WorkforceMember[]> {
     return this.tenantTx(organizationId, async (client) => {
       const result = await client.query(
