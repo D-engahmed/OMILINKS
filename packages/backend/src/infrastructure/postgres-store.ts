@@ -2538,6 +2538,20 @@ export class PostgresStore implements Store {
         ]
       )
 
+      await client.query(
+        `INSERT INTO workforce_presence
+           (workforce_member_id, organization_id, state, observed_at, expires_at, source)
+         VALUES ($1,$2,'OFFLINE',now(),now(),'create')`,
+        [result.rows[0].id, input.organizationId]
+      )
+
+      await client.query(
+        `INSERT INTO workforce_capacity
+           (workforce_member_id, organization_id, max_concurrent_work, reserved_work)
+         VALUES ($1,$2,5,0)`,
+        [result.rows[0].id, input.organizationId]
+      )
+
       return toWorkforceMember(result.rows[0])
     })
   }
