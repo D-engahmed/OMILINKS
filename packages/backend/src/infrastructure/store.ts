@@ -307,6 +307,13 @@ export class MemoryStore implements Store {
     )
 
     if (existing) {
+      if (
+        existing.payloadHash !== input.payloadHash ||
+        existing.eventType !== input.eventType
+      ) {
+        throw new Error("INBOUND_EVENT_CONFLICT")
+      }
+
       if (existing.status === "PROCESSED") {
         return { event: clone(existing), claimed: false, inFlight: false }
       }
