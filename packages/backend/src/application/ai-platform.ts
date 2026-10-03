@@ -122,7 +122,7 @@ export class AiPlatformService {
 
   async runAgent(input: AiRunAgentInput): Promise<AiOutcome> {
     const context = await this.store.getAiExecutionContext(input.organizationId, input.agentId)
-    return context ? this.execute(context, input) : this.executeMissing(input)
+    return context ? this.execute(context, input) : this.executeMissing()
   }
 
   async getRun(organizationId: string, aiRunId: string): Promise<AiRun> {
@@ -190,7 +190,7 @@ export class AiPlatformService {
     })
   }
 
-  private async executeMissing(input: AiRunAgentInput): Promise<AiOutcome> {
+  private async executeMissing(): Promise<AiOutcome> {
     throw new AppError(404, "NOT_FOUND", "AI agent configuration not found.")
   }
 
