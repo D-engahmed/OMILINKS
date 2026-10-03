@@ -15,6 +15,8 @@ export type Permission =
   | "workforce.manage"
   | "knowledge.read"
   | "knowledge.manage"
+  | "integration.read"
+  | "integration.manage"
 
 export type ConversationStatus =
   | "OPEN"
