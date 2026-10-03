@@ -1,0 +1,223 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+
+import { createApp } from "./app.js"
+import { WorkerRuntime } from "./infrastructure/event-runtime.js"
+import { createDefaultEventConsumers } from "./infrastructure/event-consumers.js"
+import type { EventConsumer } from "./infrastructure/event-runtime.js"
+import type { Store } from "./infrastructure/store.js"
+import { storeTest } from "./test-support.js"
+
+async function signup(store: Store, name: string, email: string) {
+  const handle = await createApp(store)
+  const response = await handle(
+    new Request("http://localhost/api/v1/auth/signup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        organizationName: name,
+        email,
+        displayName: name + " Owner",
+      }),
+    })
+  )
+  assert.equal(response.status, 201)
+  return (await response.json()) as {
+    organization: { id: string }
+    session: { accessToken: string }
+  }
+}
+
+async function createConversation(store: Store, token: string) {
+  const handle = await createApp(store)
+  const customerResponse = await handle(
+    new Request("http://localhost/api/v1/customers", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer " + token },
+      body: JSON.stringify({
+        displayName: "Runtime Customer",
+        externalIdentity: {
+          provider: "widget",
+          channelAccountId: "runtime",
+          externalId: crypto.randomUUID(),
+        },
+      }),
+    })
+  )
+  assert.equal(customerResponse.status, 201)
+  const customer = (await customerResponse.json()) as { customer: { id: string } }
+  const response = await handle(
+    new Request("http://localhost/api/v1/conversations", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer " + token },
+      body: JSON.stringify({ customerId: customer.customer.id, channel: "widget" }),
+    })
+  )
+  assert.equal(response.status, 201)
+  return (await response.json()) as { id: string; version: number }
+}
+
+function retryConsumer(counter: { value: number }): EventConsumer {
+  return {
+    consumerId: "test-consumer",
+    workerClass: "test",
+    eventTypes: ["conversation.created"],
+    concurrency: 2,
+    leaseSeconds: 30,
+    maxAttempts: 3,
+    retryBackoffSeconds: () => 0,
+    handle: async () => {
+      counter.value += 1
+      if (counter.value < 3) throw new Error("EXPECTED_TEST_FAILURE")
+    },
+  }
+}
+
+storeTest("phase 5: outbox publishing is idempotent and fans out to one inbox row", async (makeStore) => {
+  const store = await makeStore()
+  const owner = await signup(store, "Outbox", "outbox@runtime.example")
+  const conversation = await createConversation(store, owner.session.accessToken)
+  const subscription = { consumerId: "test-consumer", workerClass: "test", eventTypes: ["conversation.created"] }
+
+  const first = await store.publishOutboxBatch({
+    organizationId: owner.organization.id,
+    publisherId: "publisher-1",
+    subscriptions: [subscription],
+    limit: 100,
+  })
+  assert.ok(first.some((event) => event.eventType === "conversation.created"))
+
+  const second = await store.publishOutboxBatch({
+    organizationId: owner.organization.id,
+    publisherId: "publisher-2",
+    subscriptions: [subscription],
+    limit: 100,
+  })
+  assert.equal(second.length, 0)
+
+  const claimed = await store.claimEventInboxBatch({
+    organizationId: owner.organization.id,
+    consumerId: "test-consumer",
+    workerId: "worker-1",
+    limit: 10,
+    leaseSeconds: 30,
+    maxAttempts: 3,
+  })
+  const created = claimed.find((event) => event.payload.conversation)
+  assert.ok(created)
+  assert.equal(created?.status, "PROCESSING")
+  await store.completeEventInbox(owner.organization.id, created!.id, "worker-1")
+
+  const none = await store.claimEventInboxBatch({
+    organizationId: owner.organization.id,
+    consumerId: "test-consumer",
+    workerId: "worker-2",
+    limit: 10,
+    leaseSeconds: 30,
+    maxAttempts: 3,
+  })
+  assert.equal(none.length, 0)
+  assert.equal(conversation.id.length, 36)
+})
+
+storeTest("phase 5: retries reach dead letter and replay resets delivery state", async (makeStore) => {
+  const store = await makeStore()
+  const owner = await signup(store, "Retry", "retry@runtime.example")
+  await createConversation(store, owner.session.accessToken)
+
+  await store.publishOutboxBatch({
+    organizationId: owner.organization.id,
+    publisherId: "publisher",
+    subscriptions: [{ consumerId: "retry-consumer", workerClass: "test", eventTypes: ["conversation.created"] }],
+    limit: 100,
+  })
+
+  let inboxId: string | null = null
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const claimed = await store.claimEventInboxBatch({
+      organizationId: owner.organization.id,
+      consumerId: "retry-consumer",
+      workerId: "retry-worker",
+      limit: 1,
+      leaseSeconds: 30,
+      maxAttempts: 3,
+    })
+    assert.equal(claimed.length, 1)
+    inboxId = claimed[0]!.id
+    const failed = await store.failEventInbox({
+      organizationId: owner.organization.id,
+      inboxId: inboxId,
+      workerId: "retry-worker",
+      error: "boom-" + attempt,
+      retryDelaySeconds: 0,
+      maxAttempts: 3,
+    })
+    if (attempt < 3) assert.equal(failed.status, "PENDING")
+    else assert.equal(failed.status, "DEAD")
+  }
+  assert.ok(inboxId)
+
+  const replayed = await store.replayDeadEventInbox({ organizationId: owner.organization.id, inboxId: inboxId! })
+  assert.equal(replayed.status, "PENDING")
+  assert.equal(replayed.attempts, 0)
+
+  const reclaimed = await store.claimEventInboxBatch({
+    organizationId: owner.organization.id,
+    consumerId: "retry-consumer",
+    workerId: "replay-worker",
+    limit: 1,
+    leaseSeconds: 30,
+    maxAttempts: 3,
+  })
+  assert.equal(reclaimed.length, 1)
+  await store.completeEventInbox(owner.organization.id, reclaimed[0]!.id, "replay-worker")
+})
+
+storeTest("phase 5: generic worker runtime retries a failed handler and then succeeds", async (makeStore) => {
+  const store = await makeStore()
+  const owner = await signup(store, "Runtime", "runtime@runtime.example")
+  await createConversation(store, owner.session.accessToken)
+  const counter = { value: 0 }
+  const runtime = new WorkerRuntime(store, [retryConsumer(counter)])
+
+  const first = await runtime.runOnce()
+  assert.equal(first.retried, 1)
+  assert.equal(counter.value, 1)
+  const second = await runtime.runOnce()
+  assert.equal(second.retried, 1)
+  assert.equal(counter.value, 2)
+  const third = await runtime.runOnce()
+  assert.equal(third.processed, 1)
+  assert.equal(counter.value, 3)
+  await runtime.stop()
+})
+
+storeTest("phase 5: routing worker drains a queue-controlled conversation", async (makeStore) => {
+  const store = await makeStore()
+  const owner = await signup(store, "Drain", "drain@runtime.example")
+  const member = await store.createWorkforceMember({
+    organizationId: owner.organization.id,
+    userId: null,
+    displayName: "Queue Agent",
+    type: "HUMAN",
+  })
+  await store.setWorkforcePresence({
+    organizationId: owner.organization.id,
+    workforceMemberId: member.id,
+    state: "AVAILABLE",
+    source: "test",
+    ttlSeconds: 300,
+    expectedVersion: null,
+  })
+
+  const conversation = await createConversation(store, owner.session.accessToken)
+  const runtime = new WorkerRuntime(store, createDefaultEventConsumers(store))
+  const result = await runtime.runOnce()
+  assert.ok(result.published >= 1)
+  assert.ok(result.processed >= 1)
+
+  const updated = await store.getConversation(owner.organization.id, conversation.id)
+  assert.equal(updated?.control, "human")
+  assert.equal(updated?.status, "ASSIGNED")
+  await runtime.stop()
+})
