@@ -2501,7 +2501,13 @@ export class MemoryStore implements Store {
     const active = [...this.workflowStepRuns.values()]
       .filter((item) => item.organizationId === input.organizationId && item.workflowRunId === input.runId && item.stepKey === input.stepKey && (item.status === "PENDING" || item.status === "RETRYING"))
       .sort((a, b) => b.attempt - a.attempt)[0]
-    if (active) return clone(active)
+    if (active) {
+      if (active.status === "RETRYING") {
+        active.status = "RUNNING"
+        active.startedAt = new Date().toISOString()
+      }
+      return clone(active)
+    }
     const attempts = [...this.workflowStepRuns.values()].filter((item) => item.organizationId === input.organizationId && item.workflowRunId === input.runId && item.stepKey === input.stepKey)
     const stepRun: WorkflowStepRun = {
       id: randomUUID(),
