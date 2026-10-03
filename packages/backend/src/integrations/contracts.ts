@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto"
-
 import type { InboundMessage } from "../domain/types.js"
 import type { ChannelIntegration } from "../domain/types.js"
 
@@ -8,6 +6,7 @@ export interface ChannelInboundRequest {
   body: Record<string, unknown>
   request: Request
   integration: ChannelIntegration
+  providerEventId: string
 }
 
 export interface ChannelVerificationResult {
@@ -50,9 +49,3 @@ export function optionalString(
   return result
 }
 
-export function eventIdFromMessage(
-  integration: ChannelIntegration,
-  clientMessageId: string | null
-): string {
-  return clientMessageId ?? randomUUID() + ":" + integration.publicKey
-}
