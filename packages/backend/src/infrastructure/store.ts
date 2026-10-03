@@ -1405,11 +1405,11 @@ export class MemoryStore implements Store {
       assignedAt: now,
       releasedAt: null,
       reason: input.reason,
+      routingDecisionId: input.routingDecisionId,
       version: 1,
     }
     this.assignments.set(assignment.id, assignment)
     member.status = "ACTIVE"
-    capacity.reservedWork += 1
     capacity.activeWork += 1
     capacity.effectiveCapacity = capacity.maxConcurrentWork - capacity.activeWork - capacity.reservedWork
     this.workforceCapacity.set(member.id, capacity)
@@ -1503,6 +1503,7 @@ export class MemoryStore implements Store {
       assignedAt: now,
       releasedAt: null,
       reason: input.reason.trim() || "manual",
+      routingDecisionId: null,
       version: 1,
     }
 
