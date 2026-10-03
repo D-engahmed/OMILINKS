@@ -166,6 +166,7 @@ CREATE TABLE routing_policy_versions (
   config jsonb NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(organization_id, policy_id, version),
+  UNIQUE(id, organization_id),
   CONSTRAINT policy_version_policy_owner_fk
     FOREIGN KEY (policy_id, organization_id)
     REFERENCES routing_policies(id, organization_id) ON DELETE RESTRICT
