@@ -1907,6 +1907,281 @@ export class PostgresStore implements Store {
     })
   }
 
+  async listWorkflowDefinitions(organizationId: string): Promise<WorkflowDefinition[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM workflow_definitions WHERE organization_id = $1 ORDER BY name ASC, id ASC`,
+        [organizationId]
+      )
+      return result.rows.map(toWorkflowDefinition)
+    })
+  }
+
+  async createWorkflowVersion(input: CreateWorkflowVersionInput) {
+    return this.tenantTx(input.organizationId, async (client) => {
+      let definitionResult = await client.query(
+        `SELECT * FROM workflow_definitions WHERE organization_id = $1 AND name = $2 FOR UPDATE`,
+        [input.organizationId, input.name.trim()]
+      )
+      if (!definitionResult.rows[0]) {
+        definitionResult = await client.query(
+          `INSERT INTO workflow_definitions (organization_id, name) VALUES ($1,$2) RETURNING *`,
+          [input.organizationId, input.name.trim()]
+        )
+      }
+
+      const definition = toWorkflowDefinition(definitionResult.rows[0])
+      const versionResult = await client.query(
+        `SELECT COALESCE(max(version),0)::int AS version FROM workflow_versions WHERE organization_id = $1 AND workflow_id = $2`,
+        [input.organizationId, definition.id]
+      )
+      const createdVersion = await client.query(
+        `INSERT INTO workflow_versions
+           (organization_id, workflow_id, version, status, trigger_types)
+         VALUES ($1,$2,$3,'DRAFT',$4::jsonb)
+         RETURNING *`,
+        [
+          input.organizationId,
+          definition.id,
+          num(versionResult.rows[0].version) + 1,
+          JSON.stringify(input.triggerTypes),
+        ]
+      )
+      const version = toWorkflowVersion(createdVersion.rows[0])
+
+      const steps: WorkflowStep[] = []
+      for (const value of input.steps) {
+        const created = await client.query(
+          `INSERT INTO workflow_steps
+             (organization_id, workflow_version_id, step_key, step_type, config,
+              next_step_key, on_failure_step_key, retry_max_attempts,
+              retry_backoff_seconds, timeout_seconds, compensation_step_key)
+           VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11)
+           RETURNING *`,
+          [
+            input.organizationId,
+            version.id,
+            value.stepKey,
+            value.stepType,
+            JSON.stringify(value.config),
+            value.nextStepKey,
+            value.onFailureStepKey,
+            value.retryMaxAttempts,
+            value.retryBackoffSeconds,
+            value.timeoutSeconds,
+            value.compensationStepKey,
+          ]
+        )
+        steps.push(toWorkflowStep(created.rows[0]))
+      }
+
+      return { definition, version, steps }
+    })
+  }
+
+  async listWorkflowVersions(organizationId: string, workflowId: string) {
+    return this.tenantTx(organizationId, async (client) => {
+      const versions = await client.query(
+        `SELECT * FROM workflow_versions
+          WHERE organization_id = $1 AND workflow_id = $2
+          ORDER BY version DESC`,
+        [organizationId, workflowId]
+      )
+      const steps = await client.query(
+        `SELECT * FROM workflow_steps
+          WHERE organization_id = $1
+          ORDER BY workflow_version_id ASC, step_key ASC`,
+        [organizationId]
+      )
+      return versions.rows.map((row) => ({
+        ...toWorkflowVersion(row),
+        steps: steps.rows.filter((step) => str(step.workflow_version_id) === str(row.id)).map(toWorkflowStep),
+      }))
+    })
+  }
+
+  async publishWorkflowVersion(organizationId: string, workflowVersionId: string) {
+    return this.tenantTx(organizationId, async (client) => {
+      const current = await client.query(
+        `SELECT * FROM workflow_versions WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+        [workflowVersionId, organizationId]
+      )
+      if (!current.rows[0]) throw new Error("WORKFLOW_VERSION_NOT_FOUND")
+      const version = toWorkflowVersion(current.rows[0])
+
+      await client.query(
+        `UPDATE workflow_versions
+            SET status = 'RETIRED'
+          WHERE organization_id = $1 AND workflow_id = $2
+            AND status = 'PUBLISHED' AND id <> $3`,
+        [organizationId, version.workflowId, version.id]
+      )
+      const published = await client.query(
+        `UPDATE workflow_versions
+            SET status = 'PUBLISHED', published_at = now()
+          WHERE id = $1 AND organization_id = $2
+          RETURNING *`,
+        [version.id, organizationId]
+      )
+      const steps = await client.query(
+        `SELECT * FROM workflow_steps WHERE organization_id = $1 AND workflow_version_id = $2 ORDER BY step_key ASC`,
+        [organizationId, version.id]
+      )
+      return { ...toWorkflowVersion(published.rows[0]), steps: steps.rows.map(toWorkflowStep) }
+    })
+  }
+
+  async startWorkflow(input: StartWorkflowInput) {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const versionResult = await client.query(
+        `SELECT * FROM workflow_versions
+          WHERE organization_id = $1 AND workflow_id = $2 AND status = 'PUBLISHED'
+          ORDER BY version DESC LIMIT 1`,
+        [input.organizationId, input.workflowId]
+      )
+      if (!versionResult.rows[0]) throw new Error("WORKFLOW_NOT_PUBLISHED")
+      const version = toWorkflowVersion(versionResult.rows[0])
+      if (!version.triggerTypes.includes("*") && !version.triggerTypes.includes(input.triggerType)) {
+        throw new Error("WORKFLOW_TRIGGER_NOT_ALLOWED")
+      }
+
+      const triggerResult = await client.query(
+        `INSERT INTO workflow_triggers
+           (organization_id, workflow_id, workflow_version_id, trigger_type,
+            source_event_id, dedupe_key, payload)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
+         ON CONFLICT (organization_id, workflow_id, dedupe_key) DO NOTHING
+         RETURNING *`,
+        [
+          input.organizationId,
+          input.workflowId,
+          version.id,
+          input.triggerType,
+          input.sourceEventId,
+          input.dedupeKey,
+          JSON.stringify(input.payload),
+        ]
+      )
+      if (!triggerResult.rows[0]) {
+        const existing = await client.query(
+          `SELECT t.*, r.* FROM workflow_triggers t
+             JOIN workflow_runs r ON r.trigger_id = t.id AND r.organization_id = t.organization_id
+            WHERE t.organization_id = $1 AND t.workflow_id = $2 AND t.dedupe_key = $3`,
+          [input.organizationId, input.workflowId, input.dedupeKey]
+        )
+        if (!existing.rows[0]) throw new Error("WORKFLOW_TRIGGER_CORRUPT")
+        const row = existing.rows[0]
+        return {
+          trigger: {
+            id: str(row.id),
+            organizationId: input.organizationId,
+            workflowId: str(row.workflow_id),
+            workflowVersionId: str(row.workflow_version_id),
+            triggerType: str(row.trigger_type),
+            sourceEventId: strOrNull(row.source_event_id),
+            dedupeKey: str(row.dedupe_key),
+            payload: (row.payload ?? {}) as Record<string, unknown>,
+            receivedAt: iso(row.received_at),
+          },
+          run: {
+            id: str(row.id_1),
+            organizationId: input.organizationId,
+            workflowId: str(row.workflow_id_1),
+            workflowVersionId: str(row.workflow_version_id_1),
+            triggerId: str(row.trigger_id),
+            status: str(row.status) as WorkflowRun["status"],
+            context: (row.context ?? {}) as Record<string, unknown>,
+            currentStepKey: strOrNull(row.current_step_key),
+            error: strOrNull(row.error),
+            attempt: num(row.attempt),
+            availableAt: iso(row.available_at),
+            leaseUntil: isoOrNull(row.lease_until),
+            leasedBy: strOrNull(row.leased_by),
+            startedAt: isoOrNull(row.started_at),
+            completedAt: isoOrNull(row.completed_at),
+            createdAt: iso(row.created_at),
+          },
+          created: false,
+        }
+      }
+
+      const trigger = toWorkflowTrigger(triggerResult.rows[0])
+      const runResult = await client.query(
+        `INSERT INTO workflow_runs
+           (organization_id, workflow_id, workflow_version_id, trigger_id, status, context)
+         VALUES ($1,$2,$3,$4,'PENDING',$5::jsonb)
+         RETURNING *`,
+        [
+          input.organizationId,
+          input.workflowId,
+          version.id,
+          trigger.id,
+          JSON.stringify(input.payload),
+        ]
+      )
+      const run = toWorkflowRun(runResult.rows[0])
+      await insertOutboxEvent(client, {
+        organizationId: input.organizationId,
+        eventType: "workflow.run.requested",
+        aggregateType: "workflow_run",
+        aggregateId: run.id,
+        correlationId: run.id,
+        payload: { runId: run.id, workflowId: run.workflowId },
+      })
+      return { trigger, run, created: true }
+    })
+  }
+
+  async getWorkflowRun(organizationId: string, runId: string): Promise<WorkflowRun | null> {
+    if (!isUuid(runId)) return null
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(`SELECT * FROM workflow_runs WHERE id = $1 AND organization_id = $2`, [runId, organizationId])
+      return result.rows[0] ? toWorkflowRun(result.rows[0]) : null
+    })
+  }
+
+  async listWorkflowStepRuns(organizationId: string, runId: string): Promise<WorkflowStepRun[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(`SELECT * FROM workflow_step_runs WHERE workflow_run_id = $1 AND organization_id = $2 ORDER BY created_at ASC, attempt ASC`, [runId, organizationId])
+      return result.rows.map(toWorkflowStepRun)
+    })
+  }
+
+  async startWorkflowStepRun(input: { organizationId: string; runId: string; stepId: string; stepKey: string; input: Record<string, unknown> }): Promise<WorkflowStepRun> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const existing = await client.query(
+        `SELECT * FROM workflow_step_runs
+          WHERE organization_id = $1 AND workflow_run_id = $2 AND step_key = $3
+            AND status IN ('PENDING','RETRYING','RUNNING')
+          ORDER BY attempt DESC LIMIT 1
+          FOR UPDATE`,
+        [input.organizationId, input.runId, input.stepKey]
+      )
+      if (existing.rows[0]) return toWorkflowStepRun(existing.rows[0])
+      const attempt = await client.query(
+        `SELECT COALESCE(max(attempt),0)::int AS attempt
+           FROM workflow_step_runs
+          WHERE organization_id = $1 AND workflow_run_id = $2 AND step_key = $3`,
+        [input.organizationId, input.runId, input.stepKey]
+      )
+      const result = await client.query(
+        `INSERT INTO workflow_step_runs
+           (organization_id, workflow_run_id, step_id, step_key, status, attempt, input, started_at)
+         VALUES ($1,$2,$3,$4,'RUNNING',$5,$6::jsonb,now())
+         RETURNING *`,
+        [
+          input.organizationId,
+          input.runId,
+          input.stepId,
+          input.stepKey,
+          num(attempt.rows[0].attempt) + 1,
+          JSON.stringify(input.input),
+        ]
+      )
+      return toWorkflowStepRun(result.rows[0])
+    })
+  }
+
   async createAiModel(input: CreateAiModelInput): Promise<AiModel> {
     try {
       return await this.tenantTx(input.organizationId, async (client) => {
