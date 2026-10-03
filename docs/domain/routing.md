@@ -1,6 +1,6 @@
 # Routing Domain — Implementation Specification
 
-> Status: **Target implementation blueprint**
+> Status: **Implemented vertical slice**
 
 ## 1. Responsibility
 
