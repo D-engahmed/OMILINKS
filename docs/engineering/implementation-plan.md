@@ -4,15 +4,9 @@
 
 ## 1. Current Repository Reality
 
-The repository is currently a scaffold:
+The repository is implemented in vertical phases. Phase 0-2 establish the tenant, identity, customer, conversation and initial AI core. Phase 3 establishes the Web Widget channel boundary. Phase 4 establishes workforce and deterministic routing. Phase 5 establishes a PostgreSQL-backed event and worker runtime.
 
-- Next.js web shell;
-- widget shell;
-- thin backend HTTP handler;
-- workspace/tooling configuration;
-- documentation baseline.
-
-The target domains described in these documents are not yet equivalent to implemented production subsystems.
+The later domains remain target architecture until their implementation and tests land.
 
 This distinction is intentional.
 
@@ -159,23 +153,28 @@ Exit criteria:
 
 ## 8. Phase 5 — Event and Worker Runtime
 
-Implement:
-
-- outbox publisher;
-- event consumer;
-- inbox/dedupe;
-- retry queue;
-- dead letters;
-- worker leases;
-- correlation propagation;
-- per-class concurrency pools.
+Current implementation:
+- PostgreSQL-backed outbox publisher;
+- per-consumer event inbox/fan-out;
+- inbox deduplication key;
+- leased work claiming with FOR UPDATE SKIP LOCKED;
+- retry and dead-letter transitions;
+- authorized dead-letter replay;
+- worker-instance leases and heartbeats;
+- correlation/causation propagation;
+- per-class concurrency limits;
+- production worker process entrypoint;
+- first real routing worker for queue-controlled conversations.
 
 Exit criteria:
 
 - duplicate event safe;
-- worker crash recoverable;
+- worker crash recoverable through expired inbox lease;
 - dead letter/replay works;
-- webhook processing is decoupled from expensive work.
+- asynchronous routing can execute outside the HTTP request;
+- PostgreSQL/RLS tests pass in both memory and production adapter paths.
+
+Deferred until justified by scale or topology: Kafka/external broker, cross-region ordering, autoscaling, and additional AI/workflow/delivery worker classes.
 
 ## 9. Phase 6 — AI Platform
 
