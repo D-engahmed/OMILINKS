@@ -1,7 +1,6 @@
 import { ConversationPipeline } from "./pipeline.js"
 import type {
   ChannelInboundEvent,
-  ChannelInboundEventStatus,
   ChannelIntegration,
   InboundMessage,
 } from "../domain/types.js"
@@ -121,14 +120,14 @@ export class ChannelIngressService {
       )
     }
 
-    let claim
+    let claim: Awaited<ReturnType<Store["claimInboundEvent"]>>
     try {
       claim = await this.store.claimInboundEvent({
-      organizationId: integration.organizationId,
-      integrationId: integration.id,
-      providerEventId,
-      eventType,
-      payloadHash: hashRequest(rawBody),
+        organizationId: integration.organizationId,
+        integrationId: integration.id,
+        providerEventId,
+        eventType,
+        payloadHash: hashRequest(rawBody),
         correlationId: providerEventId,
       })
     } catch (error) {
