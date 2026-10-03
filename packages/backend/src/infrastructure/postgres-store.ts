@@ -2667,5 +2667,4 @@ export class PostgresStore implements Store {
       throw error
     }
   }
-  }
 }
