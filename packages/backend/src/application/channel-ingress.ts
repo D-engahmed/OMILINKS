@@ -1,6 +1,7 @@
 import { ConversationPipeline } from "./pipeline.js"
 import type {
   ChannelInboundEvent,
+  ChannelInboundEventStatus,
   ChannelIntegration,
   InboundMessage,
 } from "../domain/types.js"
