@@ -163,9 +163,16 @@ This separates execution, routing, authorization, safety, evaluation and economi
 
 ## 10. Implementation Reality
 
-The repository currently contains a thin backend handler and Next.js application shells. The documentation therefore describes the engineering target toward which implementation should converge.
+Implementation is incremental and phase-gated.
 
-Do not use the documentation itself as evidence that a subsystem is already running in production.
+Current verified runtime slices are:
+- tenancy/identity/customer/conversation/workforce foundation;
+- Phase 2 conversation core and initial governed AI pipeline;
+- Phase 3 Web Widget channel ingress and provider-event ledger.
+
+The rest of the domain architecture remains target until implementation and automated evidence exist.
+
+Do not use documentation alone as evidence that a subsystem is running in production.
 
 ## 11. Change Rule
 
