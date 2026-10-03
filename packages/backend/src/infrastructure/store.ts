@@ -276,6 +276,11 @@ export interface Store {
   ): Promise<Conversation | null>
   appendMessage(input: AppendMessageInput): Promise<{ message: Message; created: boolean }>
   listOutboxEvents(organizationId: string): Promise<OutboxEvent[]>
+  listDeadEventInbox(input: {
+    organizationId: string
+    consumerId?: string
+    limit: number
+  }): Promise<EventInbox[]>
   listOrganizationsForRuntime(): Promise<Organization[]>
   publishOutboxBatch(input: PublishOutboxBatchInput): Promise<OutboxEvent[]>
   claimEventInboxBatch(input: ClaimEventInboxBatchInput): Promise<EventInbox[]>
@@ -1862,6 +1867,27 @@ export class MemoryStore implements Store {
     input: AppendMessageInput
   ): Promise<{ message: Message; created: boolean }> {
     return this.appendMessageSync(input)
+  }
+
+  async listDeadEventInbox(input: {
+    organizationId: string
+    consumerId?: string
+    limit: number
+  }): Promise<EventInbox[]> {
+    const rows = [...this.eventInbox.values()]
+      .filter(
+        (item) =>
+          item.organizationId === input.organizationId &&
+          item.status === "DEAD" &&
+          (input.consumerId === undefined || item.consumerId === input.consumerId)
+      )
+      .sort(
+        (a, b) =>
+          (b.deadAt ?? "").localeCompare(a.deadAt ?? "") ||
+          b.createdAt.localeCompare(a.createdAt)
+      )
+      .slice(0, Math.max(1, Math.min(input.limit, 100)))
+    return clone(rows)
   }
 
   async listOrganizationsForRuntime(): Promise<Organization[]> {
