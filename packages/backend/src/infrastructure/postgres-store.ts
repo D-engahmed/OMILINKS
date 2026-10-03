@@ -2572,29 +2572,23 @@ export class PostgresStore implements Store {
             WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
           [input.conversationId, input.organizationId]
         )
-
         if (!conversation.rows[0]) throw new Error("CONVERSATION_NOT_FOUND")
+
+        if (num(conversation.rows[0].version) !== input.expectedConversationVersion) {
+          throw new Error("STALE_VERSION")
+        }
 
         const member = isUuid(input.workforceMemberId)
           ? await client.query(
               `SELECT * FROM workforce_members
-                WHERE id = $1 AND organization_id = $2`,
+                WHERE id = $1 AND organization_id = $2
+                FOR UPDATE`,
               [input.workforceMemberId, input.organizationId]
             )
           : { rows: [] as Row[] }
 
         if (!member.rows[0]) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
-
-        if (member.rows[0].status !== "ACTIVE") {
-          throw new Error("WORKFORCE_MEMBER_DISABLED")
-        }
-
-        if (
-          num(conversation.rows[0].version) !==
-          input.expectedConversationVersion
-        ) {
-          throw new Error("STALE_VERSION")
-        }
+        if (member.rows[0].status !== "ACTIVE") throw new Error("WORKFORCE_MEMBER_DISABLED")
 
         const active = await client.query(
           `SELECT 1 FROM assignments
@@ -2602,14 +2596,29 @@ export class PostgresStore implements Store {
               AND status = 'ACTIVE'`,
           [input.organizationId, input.conversationId]
         )
-
         if (active.rows[0]) throw new Error("ACTIVE_ASSIGNMENT_EXISTS")
+
+        const capacity = await client.query(
+          `SELECT c.*,
+              (SELECT count(*)::int FROM assignments a
+                WHERE a.organization_id = c.organization_id
+                  AND a.workforce_member_id = c.workforce_member_id
+                  AND a.status = 'ACTIVE') AS active_work
+             FROM workforce_capacity c
+            WHERE c.workforce_member_id = $1 AND c.organization_id = $2
+            FOR UPDATE`,
+          [input.workforceMemberId, input.organizationId]
+        )
+        if (!capacity.rows[0]) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
+        if (toWorkforceCapacity(capacity.rows[0]).effectiveCapacity <= 0) {
+          throw new Error("CAPACITY_EXHAUSTED")
+        }
 
         const assignment = await client.query(
           `INSERT INTO assignments
              (organization_id, conversation_id, workforce_member_id, status,
-              reason)
-           VALUES ($1, $2, $3, 'ACTIVE', $4) RETURNING *`,
+              reason, routing_decision_id)
+           VALUES ($1, $2, $3, 'ACTIVE', $4, NULL) RETURNING *`,
           [
             input.organizationId,
             input.conversationId,
@@ -2620,11 +2629,12 @@ export class PostgresStore implements Store {
 
         await client.query(
           `UPDATE conversations
-              SET status = 'ASSIGNED', control = 'human',
+              SET status = 'ASSIGNED',
+                  control = CASE WHEN $3 = 'AI' THEN 'ai' ELSE 'human' END,
                   control_version = control_version + 1,
                   version = version + 1, updated_at = now()
             WHERE id = $1 AND organization_id = $2`,
-          [input.conversationId, input.organizationId]
+          [input.conversationId, input.organizationId, str(member.rows[0].type)]
         )
 
         await client.query(
@@ -2634,7 +2644,18 @@ export class PostgresStore implements Store {
           [input.organizationId, input.conversationId]
         )
 
-        return toAssignment(assignment.rows[0])
+        const value = toAssignment(assignment.rows[0])
+        await insertOutboxEvent(client, {
+          organizationId: input.organizationId,
+          eventType: "conversation.assignment.changed",
+          aggregateType: "conversation",
+          aggregateId: input.conversationId,
+          correlationId: value.id,
+          causationId: value.id,
+          payload: { assignment: value },
+        })
+
+        return value
       })
     } catch (error) {
       if (
@@ -2643,8 +2664,8 @@ export class PostgresStore implements Store {
       ) {
         throw new Error("ACTIVE_ASSIGNMENT_EXISTS")
       }
-
       throw error
     }
+  }
   }
 }
