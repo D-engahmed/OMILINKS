@@ -393,6 +393,7 @@ const toWorkflowVersion = (row: Row): WorkflowVersion => ({
   version: num(row.version),
   status: str(row.status) as WorkflowVersion['status'],
   triggerTypes: (row.trigger_types ?? []) as string[],
+  entryStepKey: str(row.entry_step_key),
   createdAt: iso(row.created_at),
   publishedAt: isoOrNull(row.published_at),
 })
