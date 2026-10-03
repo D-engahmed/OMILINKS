@@ -1780,7 +1780,463 @@ export class PostgresStore implements Store {
     })
   }
 
-  async listMessages(
+  async createAiModel(input: CreateAiModelInput): Promise<AiModel> {
+    try {
+      return await this.tenantTx(input.organizationId, async (client) => {
+        const result = await client.query(
+          `INSERT INTO ai_models
+             (organization_id, provider, model, display_name, credential_ref, base_url,
+              input_cost_per_million, output_cost_per_million, capabilities)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
+           RETURNING *`,
+          [
+            input.organizationId,
+            input.provider.trim().toLowerCase(),
+            input.model.trim(),
+            input.displayName.trim(),
+            input.credentialRef?.trim() ?? null,
+            input.baseUrl?.trim() ?? null,
+            input.inputCostPerMillion,
+            input.outputCostPerMillion,
+            JSON.stringify(input.capabilities),
+          ]
+        )
+        return toAiModel(result.rows[0])
+      })
+    } catch (error) {
+      if (pgCode(error) === UNIQUE_VIOLATION) throw new Error("AI_MODEL_EXISTS")
+      throw error
+    }
+  }
+
+  async listAiModels(organizationId: string): Promise<AiModel[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM ai_models
+          WHERE organization_id = $1
+          ORDER BY provider ASC, model ASC, id ASC`,
+        [organizationId]
+      )
+      return result.rows.map(toAiModel)
+    })
+  }
+
+  async setAiModelStatus(input: {
+    organizationId: string
+    modelId: string
+    status: AiModel["status"]
+  }): Promise<AiModel> {
+    if (!isUuid(input.modelId)) throw new Error("AI_MODEL_NOT_FOUND")
+    return this.tenantTx(input.organizationId, async (client) => {
+      const result = await client.query(
+        `UPDATE ai_models
+            SET status = $3, updated_at = now()
+          WHERE id = $1 AND organization_id = $2
+          RETURNING *`,
+        [input.modelId, input.organizationId, input.status]
+      )
+      if (!result.rows[0]) throw new Error("AI_MODEL_NOT_FOUND")
+      return toAiModel(result.rows[0])
+    })
+  }
+
+  async createAiModelPolicyVersion(
+    input: CreateAiModelPolicyVersionInput
+  ): Promise<{ policy: AiModelPolicy; version: AiModelPolicyVersion }> {
+    try {
+      return await this.tenantTx(input.organizationId, async (client) => {
+        const existing = await client.query(
+          `SELECT * FROM ai_model_policies
+            WHERE organization_id = $1 AND name = $2
+            FOR UPDATE`,
+          [input.organizationId, input.name.trim()]
+        )
+
+        const policy = existing.rows[0]
+          ? toAiModelPolicy(existing.rows[0])
+          : toAiModelPolicy(
+              (
+                await client.query(
+                  `INSERT INTO ai_model_policies (organization_id, name)
+                   VALUES ($1,$2) RETURNING *`,
+                  [input.organizationId, input.name.trim()]
+                )
+              ).rows[0]
+            )
+
+        const modelCheck = await client.query(
+          `SELECT count(*)::int AS count
+             FROM ai_models
+            WHERE organization_id = $1
+              AND id = ANY($2::uuid[])`,
+          [input.organizationId, input.config.modelIds]
+        )
+        if (num(modelCheck.rows[0].count) !== input.config.modelIds.length) {
+          throw new Error("AI_MODEL_NOT_FOUND")
+        }
+
+        const versionResult = await client.query(
+          `SELECT COALESCE(max(version),0)::int AS version
+             FROM ai_model_policy_versions
+            WHERE organization_id = $1 AND policy_id = $2`,
+          [input.organizationId, policy.id]
+        )
+        await client.query(
+          `UPDATE ai_model_policy_versions
+              SET status = 'RETIRED'
+            WHERE organization_id = $1 AND policy_id = $2
+              AND status = 'PUBLISHED'`,
+          [input.organizationId, policy.id]
+        )
+        const created = await client.query(
+          `INSERT INTO ai_model_policy_versions
+             (organization_id, policy_id, version, status, config)
+           VALUES ($1,$2,$3,'PUBLISHED',$4::jsonb)
+           RETURNING *`,
+          [
+            input.organizationId,
+            policy.id,
+            num(versionResult.rows[0].version) + 1,
+            JSON.stringify(input.config),
+          ]
+        )
+
+        return {
+          policy,
+          version: toAiModelPolicyVersion(created.rows[0]),
+        }
+      })
+    } catch (error) {
+      if (pgCode(error) === UNIQUE_VIOLATION) throw new Error("AI_MODEL_POLICY_EXISTS")
+      throw error
+    }
+  }
+
+  async listAiModelPolicies(
+    organizationId: string
+  ): Promise<Array<AiModelPolicy & { versions: AiModelPolicyVersion[] }>> {
+    return this.tenantTx(organizationId, async (client) => {
+      const policies = await client.query(
+        `SELECT * FROM ai_model_policies
+          WHERE organization_id = $1
+          ORDER BY name ASC, id ASC`,
+        [organizationId]
+      )
+      const versions = await client.query(
+        `SELECT * FROM ai_model_policy_versions
+          WHERE organization_id = $1
+          ORDER BY policy_id ASC, version ASC`,
+        [organizationId]
+      )
+      return policies.rows.map((row) => ({
+        ...toAiModelPolicy(row),
+        versions: versions.rows
+          .filter((version) => str(version.policy_id) === str(row.id))
+          .map(toAiModelPolicyVersion),
+      }))
+    })
+  }
+
+  async getPublishedAiModelPolicy(
+    organizationId: string,
+    name: string
+  ): Promise<{ policy: AiModelPolicy; version: AiModelPolicyVersion } | null> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT p.*,
+                v.id AS version_id,
+                v.policy_id AS version_policy_id,
+                v.version AS version_number,
+                v.status AS version_status,
+                v.config AS version_config,
+                v.created_at AS version_created_at
+           FROM ai_model_policies p
+           JOIN ai_model_policy_versions v
+             ON v.policy_id = p.id AND v.organization_id = p.organization_id
+            AND v.status = 'PUBLISHED'
+          WHERE p.organization_id = $1
+            AND p.name = $2
+            AND p.status = 'ACTIVE'
+          ORDER BY v.version DESC
+          LIMIT 1`,
+        [organizationId, name]
+      )
+      if (!result.rows[0]) return null
+      const row = result.rows[0]
+      return {
+        policy: toAiModelPolicy(row),
+        version: {
+          id: str(row.version_id),
+          organizationId,
+          policyId: str(row.version_policy_id),
+          version: num(row.version_number),
+          status: "PUBLISHED",
+          config: row.version_config as AiModelPolicyVersion["config"],
+          createdAt: iso(row.version_created_at),
+        },
+      }
+    })
+  }
+
+  async createAiAgent(input: CreateAiAgentInput): Promise<AiAgent> {
+    try {
+      return await this.tenantTx(input.organizationId, async (client) => {
+        const member = await client.query(
+          `SELECT id FROM workforce_members
+            WHERE id = $1 AND organization_id = $2 AND type = 'AI'`,
+          [input.workforceMemberId, input.organizationId]
+        )
+        if (!member.rows[0]) throw new Error("AI_WORKFORCE_MEMBER_NOT_FOUND")
+
+        const result = await client.query(
+          `INSERT INTO ai_agents
+             (organization_id, workforce_member_id, name, purpose)
+           VALUES ($1,$2,$3,$4) RETURNING *`,
+          [
+            input.organizationId,
+            input.workforceMemberId,
+            input.name.trim(),
+            input.purpose.trim(),
+          ]
+        )
+        return toAiAgent(result.rows[0])
+      })
+    } catch (error) {
+      if (pgCode(error) === UNIQUE_VIOLATION) throw new Error("AI_AGENT_EXISTS")
+      throw error
+    }
+  }
+
+  async listAiAgents(organizationId: string): Promise<AiAgent[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM ai_agents
+          WHERE organization_id = $1
+          ORDER BY name ASC, id ASC`,
+        [organizationId]
+      )
+      return result.rows.map(toAiAgent)
+    })
+  }
+
+  async createAiAgentPolicyVersion(
+    input: CreateAiAgentPolicyVersionInput
+  ): Promise<AiAgentPolicyVersion> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const agent = await client.query(
+        `SELECT * FROM ai_agents
+          WHERE id = $1 AND organization_id = $2
+          FOR UPDATE`,
+        [input.agentId, input.organizationId]
+      )
+      if (!agent.rows[0]) throw new Error("AI_AGENT_NOT_FOUND")
+
+      const modelPolicy = await client.query(
+        `SELECT 1 FROM ai_model_policies
+          WHERE id = $1 AND organization_id = $2 AND status = 'ACTIVE'`,
+        [input.config.modelPolicyId, input.organizationId]
+      )
+      if (!modelPolicy.rows[0]) throw new Error("AI_MODEL_POLICY_NOT_FOUND")
+
+      const versionResult = await client.query(
+        `SELECT COALESCE(max(version),0)::int AS version
+           FROM ai_agent_policy_versions
+          WHERE organization_id = $1 AND agent_id = $2`,
+        [input.organizationId, input.agentId]
+      )
+      await client.query(
+        `UPDATE ai_agent_policy_versions
+            SET status = 'RETIRED'
+          WHERE organization_id = $1 AND agent_id = $2
+            AND status = 'PUBLISHED'`,
+        [input.organizationId, input.agentId]
+      )
+
+      const created = await client.query(
+        `INSERT INTO ai_agent_policy_versions
+           (organization_id, agent_id, version, status, config)
+         VALUES ($1,$2,$3,'PUBLISHED',$4::jsonb)
+         RETURNING *`,
+        [
+          input.organizationId,
+          input.agentId,
+          num(versionResult.rows[0].version) + 1,
+          JSON.stringify(input.config),
+        ]
+      )
+
+      await client.query(
+        `UPDATE ai_agents
+            SET status = 'PUBLISHED', updated_at = now()
+          WHERE id = $1 AND organization_id = $2`,
+        [input.agentId, input.organizationId]
+      )
+
+      return toAiAgentPolicyVersion(created.rows[0])
+    })
+  }
+
+  async listAiAgentPolicyVersions(
+    organizationId: string,
+    agentId: string
+  ): Promise<AiAgentPolicyVersion[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM ai_agent_policy_versions
+          WHERE organization_id = $1 AND agent_id = $2
+          ORDER BY version ASC`,
+        [organizationId, agentId]
+      )
+      return result.rows.map(toAiAgentPolicyVersion)
+    })
+  }
+
+  async getAiExecutionContext(
+    organizationId: string,
+    agentId: string
+  ): Promise<AiExecutionContext | null> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT
+           a.id AS agent_id, a.organization_id AS agent_org, a.workforce_member_id,
+           a.name AS agent_name, a.purpose, a.status AS agent_status,
+           a.created_at AS agent_created_at, a.updated_at AS agent_updated_at,
+           ap.id AS agent_policy_id, ap.version AS agent_policy_version,
+           ap.status AS agent_policy_status, ap.config AS agent_policy_config,
+           ap.created_at AS agent_policy_created_at,
+           mp.id AS model_policy_id, mp.name AS model_policy_name,
+           mp.status AS model_policy_status,
+           mp.created_at AS model_policy_created_at, mp.updated_at AS model_policy_updated_at,
+           mpv.id AS model_policy_version_id,
+           mpv.version AS model_policy_version,
+           mpv.status AS model_policy_version_status,
+           mpv.config AS model_policy_version_config,
+           mpv.created_at AS model_policy_version_created_at
+          FROM ai_agents a
+          JOIN ai_agent_policy_versions ap
+            ON ap.agent_id = a.id AND ap.organization_id = a.organization_id
+           AND ap.status = 'PUBLISHED'
+          JOIN ai_model_policies mp
+            ON mp.id = (ap.config->>'modelPolicyId')::uuid
+           AND mp.organization_id = a.organization_id AND mp.status = 'ACTIVE'
+          JOIN ai_model_policy_versions mpv
+            ON mpv.policy_id = mp.id AND mpv.organization_id = mp.organization_id
+           AND mpv.status = 'PUBLISHED'
+         WHERE a.organization_id = $1
+           AND a.id = $2
+         ORDER BY ap.version DESC, mpv.version DESC
+         LIMIT 1`,
+        [organizationId, agentId]
+      )
+
+      if (!result.rows[0]) return null
+      const row = result.rows[0]
+
+      const models = await client.query(
+        `SELECT m.* FROM ai_models m
+          WHERE m.organization_id = $1
+            AND m.id = ANY(($2->'modelIds')::jsonb)::uuid[]`,
+        [organizationId, row.model_policy_version_config]
+      )
+
+      return {
+        agent: {
+          id: str(row.agent_id),
+          organizationId,
+          workforceMemberId: str(row.workforce_member_id),
+          name: str(row.agent_name),
+          purpose: str(row.purpose),
+          status: str(row.agent_status) as AiAgent["status"],
+          createdAt: iso(row.agent_created_at),
+          updatedAt: iso(row.agent_updated_at),
+        },
+        agentPolicy: {
+          id: str(row.agent_policy_id),
+          organizationId,
+          agentId,
+          version: num(row.agent_policy_version),
+          status: str(row.agent_policy_status) as AiAgentPolicyVersion["status"],
+          config: row.agent_policy_config as AiAgentPolicyVersion["config"],
+          createdAt: iso(row.agent_policy_created_at),
+        },
+        modelPolicy: {
+          id: str(row.model_policy_id),
+          organizationId,
+          name: str(row.model_policy_name),
+          status: str(row.model_policy_status) as AiModelPolicy["status"],
+          createdAt: iso(row.model_policy_created_at),
+          updatedAt: iso(row.model_policy_updated_at),
+        },
+        modelPolicyVersion: {
+          id: str(row.model_policy_version_id),
+          organizationId,
+          policyId: str(row.model_policy_id),
+          version: num(row.model_policy_version),
+          status: str(row.model_policy_version_status) as AiModelPolicyVersion["status"],
+          config: row.model_policy_version_config as AiModelPolicyVersion["config"],
+          createdAt: iso(row.model_policy_version_created_at),
+        },
+        models: models.rows.map(toAiModel),
+      }
+    })
+  }
+
+  async getAiRun(organizationId: string, aiRunId: string): Promise<AiRun | null> {
+    if (!isUuid(aiRunId)) return null
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM ai_runs
+          WHERE organization_id = $1 AND id = $2`,
+        [organizationId, aiRunId]
+      )
+      return result.rows[0] ? toAiRun(result.rows[0]) : null
+    })
+  }
+
+  async createAiEvaluation(input: CreateAiEvaluationInput): Promise<AiEvaluation> {
+    try {
+      return await this.tenantTx(input.organizationId, async (client) => {
+        const run = await client.query(
+          `SELECT 1 FROM ai_runs WHERE id = $1 AND organization_id = $2`,
+          [input.aiRunId, input.organizationId]
+        )
+        if (!run.rows[0]) throw new Error("AI_RUN_NOT_FOUND")
+        const result = await client.query(
+          `INSERT INTO ai_evaluations
+             (organization_id, ai_run_id, evaluator_type, score, dimensions, notes)
+           VALUES ($1,$2,$3,$4,$5::jsonb,$6)
+           RETURNING *`,
+          [
+            input.organizationId,
+            input.aiRunId,
+            input.evaluatorType,
+            input.score,
+            JSON.stringify(input.dimensions),
+            input.notes,
+          ]
+        )
+        return toAiEvaluation(result.rows[0])
+      })
+    } catch (error) {
+      if (pgCode(error) === FOREIGN_KEY_VIOLATION) throw new Error("AI_RUN_NOT_FOUND")
+      throw error
+    }
+  }
+
+  async listAiEvaluations(
+    organizationId: string,
+    aiRunId: string
+  ): Promise<AiEvaluation[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM ai_evaluations
+          WHERE organization_id = $1 AND ai_run_id = $2
+          ORDER BY created_at ASC, id ASC`,
+        [organizationId, aiRunId]
+      )
+      return result.rows.map(toAiEvaluation)
+    })
+  }  async listMessages(
     organizationId: string,
     conversationId: string,
     limit: number
