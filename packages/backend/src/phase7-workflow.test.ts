@@ -291,7 +291,7 @@ storeTest("phase 7: failed step retries and then fails without losing durable st
     payload: {},
   })
 
-  const runtime = new WorkerRuntime(store, createDefaultEventConsumers(store))
+  const runtime = createRuntime(store)
   await runtime.runOnce()
   let run = await service.getRun(owner.organization.id, started.run.id)
   assert.equal(run.status, "RETRYING")
