@@ -22,6 +22,7 @@ async function signup(store: Store, name: string, email: string) {
   assert.equal(response.status, 201)
   return (await response.json()) as {
     organization: { id: string }
+    user: { id: string }
     session: { accessToken: string }
   }
 }
@@ -272,7 +273,7 @@ storeTest("phase 5: routing worker drains a queue-controlled conversation", asyn
   const owner = await signup(store, "Drain", "drain@runtime.example")
   const member = await store.createWorkforceMember({
     organizationId: owner.organization.id,
-    userId: null,
+    userId: owner.user.id,
     displayName: "Queue Agent",
     type: "HUMAN",
   })
