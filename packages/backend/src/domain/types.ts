@@ -476,6 +476,106 @@ export interface RetrievedChunk {
   cited?: boolean
 }
 
+export type AiModelStatus = "ACTIVE" | "DISABLED"
+export type AiAgentStatus = "DRAFT" | "TESTING" | "PUBLISHED" | "PAUSED" | "RETIRED"
+export type AiPolicyVersionStatus = "DRAFT" | "PUBLISHED" | "RETIRED"
+export type AiAutonomy = "assist" | "copilot" | "autonomous" | "approval-gated" | "disabled"
+
+export interface AiModel {
+  id: string
+  organizationId: string
+  provider: string
+  model: string
+  displayName: string
+  credentialRef: string | null
+  baseUrl: string | null
+  inputCostPerMillion: number
+  outputCostPerMillion: number
+  capabilities: Record<string, unknown>
+  status: AiModelStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AiModelPolicy {
+  id: string
+  organizationId: string
+  name: string
+  status: "ACTIVE" | "DISABLED"
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AiModelPolicyConfig {
+  modelIds: string[]
+  maxFallbacks: number
+}
+
+export interface AiModelPolicyVersion {
+  id: string
+  organizationId: string
+  policyId: string
+  version: number
+  status: AiPolicyVersionStatus
+  config: AiModelPolicyConfig
+  createdAt: string
+}
+
+export interface AiAgent {
+  id: string
+  organizationId: string
+  workforceMemberId: string
+  name: string
+  purpose: string
+  status: AiAgentStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AiAgentPolicyConfig {
+  modelPolicyId: string
+  promptVersion: string
+  autonomy: AiAutonomy
+  maxTokens: number
+  retrievalK: number
+  minCoverage: number
+  maxHistoryMessages: number
+  guardrails: {
+    maxInputChars: number
+    maxOutputChars: number
+    blockedInputPatterns: string[]
+    blockedOutputPatterns: string[]
+  }
+}
+
+export interface AiAgentPolicyVersion {
+  id: string
+  organizationId: string
+  agentId: string
+  version: number
+  status: AiPolicyVersionStatus
+  config: AiAgentPolicyConfig
+  createdAt: string
+}
+
+export interface AiEvaluation {
+  id: string
+  organizationId: string
+  aiRunId: string
+  evaluatorType: "RULE" | "HUMAN" | "MODEL"
+  score: number
+  dimensions: Record<string, unknown>
+  notes: string | null
+  createdAt: string
+}
+
+export interface AiExecutionContext {
+  agent: AiAgent
+  agentPolicy: AiAgentPolicyVersion
+  modelPolicy: AiModelPolicy
+  modelPolicyVersion: AiModelPolicyVersion
+  models: AiModel[]
+}
 export interface AiRunInput {
   organizationId: string
   conversationId: string
@@ -490,6 +590,10 @@ export interface AiRunInput {
   outcome: AiRunOutcome
   reason: HandoffReason | null
   error: string | null
+  agentId?: string | null
+  agentPolicyVersionId?: string | null
+  modelRegistryId?: string | null
+  costUsd?: number | null
 }
 
 export interface AiRun extends AiRunInput {
