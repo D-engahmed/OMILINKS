@@ -204,11 +204,14 @@ async function route(
         request.headers.get("x-widget-message-id") ??
         optionalString(body.clientMessageId)
 
-      if (!providerEventId) {
+      if (
+        !providerEventId ||
+        !/^[A-Za-z0-9._:-]{8,255}$/.test(providerEventId)
+      ) {
         throw new AppError(
           400,
           "VALIDATION_ERROR",
-          "x-widget-message-id or clientMessageId is required."
+          "A stable widget message id of 8-255 safe characters is required."
         )
       }
 
