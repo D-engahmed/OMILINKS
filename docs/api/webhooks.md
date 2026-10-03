@@ -1,8 +1,21 @@
 # Webhook API — Implementation Specification
 
-> Status: **Target implementation blueprint**
+> Status: **Implemented for the Web Widget; provider-specific webhooks remain pending**
 
 ## 1. Webhook Contract
+
+The current Phase 3 public widget ingress is:
+
+~~~text
+GET  /public/v1/widget/{publicKey}/config
+POST /public/v1/widget/{publicKey}/messages
+OPTIONS /public/v1/widget/{publicKey}/messages
+~~~
+
+The widget endpoint resolves tenant ownership from the integration public key and never accepts an organization id from the browser.
+
+For provider webhooks such as WhatsApp and Telegram, the generic verification/normalization contract below remains the target adapter contract.
+
 
 Webhook processing is:
 
