@@ -1,6 +1,11 @@
 import { Application } from "./application/application.js"
+import { ChannelIngressService } from "./application/channel-ingress.js"
+import { ConversationPipeline } from "./application/pipeline.js"
 import { loadConfig } from "./config.js"
-import type { HandoffStatus } from "./domain/types.js"
+import type {
+  ChannelProvider,
+  HandoffStatus,
+} from "./domain/types.js"
 import { DevIdentityProvider, type IdentityProvider } from "./application/identity.js"
 import type { Store } from "./infrastructure/store.js"
 import { AppError } from "./shared/errors.js"
@@ -102,6 +107,7 @@ function slugify(input: string): string {
 export interface AppOptions {
   identity?: IdentityProvider
   sessionTtlSeconds?: number
+  channelIngress?: ChannelIngressService
 }
 
 export async function createApp(
@@ -112,17 +118,55 @@ export async function createApp(
     identity: options.identity ?? new DevIdentityProvider(config.environment),
     sessionTtlSeconds: options.sessionTtlSeconds ?? config.sessionTtlSeconds,
   })
+  const channelIngress =
+    options.channelIngress ??
+    new ChannelIngressService(
+      store,
+      new ConversationPipeline(store, { gateway: null })
+    )
 
   return async (request: Request): Promise<Response> => {
     const requestId = getRequestId(request)
 
+    const isWidgetRoute = /^\/public\/v1\/widget\/[^/]+(?:\/.*)?$/.test(
+      new URL(request.url).pathname
+    )
+
     try {
-      const response = await route(request, appApplication, requestId, store)
+      const response = await route(
+        request,
+        appApplication,
+        requestId,
+        store,
+        channelIngress
+      )
       response.headers.set("x-request-id", requestId)
+      if (isWidgetRoute) {
+        response.headers.set("access-control-allow-origin", "*")
+        response.headers.set(
+          "access-control-allow-methods",
+          "GET,POST,OPTIONS"
+        )
+        response.headers.set(
+          "access-control-allow-headers",
+          "content-type,x-request-id,x-widget-message-id"
+        )
+      }
       return response
     } catch (error) {
       const response = errorResponse(error, requestId)
       response.headers.set("x-request-id", requestId)
+      if (isWidgetRoute) {
+        response.headers.set("access-control-allow-origin", "*")
+        response.headers.set(
+          "access-control-allow-methods",
+          "GET,POST,OPTIONS"
+        )
+        response.headers.set(
+          "access-control-allow-headers",
+          "content-type,x-request-id,x-widget-message-id"
+        )
+      }
       return response
     }
   }
@@ -132,12 +176,67 @@ async function route(
   request: Request,
   appApplication: Application,
   requestId: string,
-  store: Store
+  store: Store,
+  channelIngress: ChannelIngressService
 ): Promise<Response> {
   const url = new URL(request.url)
   const method = request.method.toUpperCase()
 
-  if (method === "GET" && url.pathname === "/health") {
+  const widgetMatch = url.pathname.match(
+    /^\/public\/v1\/widget\/([^/]+)(?:\/(config|messages))?$/
+  )
+
+  if (widgetMatch) {
+    const publicKey = widgetMatch[1]!
+    const action = widgetMatch[2] ?? "config"
+
+    if (method === "OPTIONS") {
+      return new Response(null, { status: 204 })
+    }
+
+    if (method === "GET" && action === "config") {
+      return json(await channelIngress.getPublicConfig(publicKey))
+    }
+
+    if (method === "POST" && action === "messages") {
+      const body = await readJson(request)
+      const providerEventId =
+        request.headers.get("x-widget-message-id") ??
+        optionalString(body.clientMessageId)
+
+      if (!providerEventId) {
+        throw new AppError(
+          400,
+          "VALIDATION_ERROR",
+          "x-widget-message-id or clientMessageId is required."
+        )
+      }
+
+      const result = await channelIngress.ingest(
+        publicKey,
+        providerEventId,
+        "message.received",
+        JSON.stringify(body),
+        body,
+        request
+      )
+
+      return json(
+        {
+          accepted: result.accepted,
+          duplicate: result.duplicate,
+          inFlight: result.inFlight,
+          eventId: result.event.id,
+          messageId: result.message?.id ?? null,
+          conversationId: result.conversation?.id ?? null,
+          customerId: result.customer?.id ?? null,
+        },
+        202
+      )
+    }
+  }
+
+    if (method === "GET" && url.pathname === "/health") {
     return json({
       status: "ok",
       service: config.serviceName,
@@ -223,10 +322,39 @@ async function route(
     })
   }
 
+  if (method === "GET" && url.pathname === "/api/v1/channels") {
+    const context = await appApplication.authenticate(
+      bearer(request),
+      request.headers.get("x-organization-id")
+    )
+    return json({
+      items: await appApplication.listChannelIntegrations(context),
+    })
+  }
+
   const context = await appApplication.authenticate(
     bearer(request),
     request.headers.get("x-organization-id")
   )
+
+  if (method === "POST" && url.pathname === "/api/v1/channels") {
+    const body = await readJson(request)
+    const provider = stringValue(body.provider) as ChannelProvider
+
+    return json(
+      await appApplication.createChannelIntegration(context, {
+        provider,
+        providerAccountId: stringValue(body.providerAccountId),
+        displayName: stringValue(body.displayName),
+        allowedOrigins: Array.isArray(body.allowedOrigins)
+          ? body.allowedOrigins.filter(
+              (value): value is string => typeof value === "string"
+            )
+          : [],
+      }),
+      201
+    )
+  }
 
   if (method === "POST" && url.pathname === "/api/v1/auth/logout") {
     await appApplication.logout(context)
