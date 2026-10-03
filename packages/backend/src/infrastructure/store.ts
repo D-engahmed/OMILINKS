@@ -46,6 +46,14 @@ import type {
   AiAgentPolicyConfig,
   AiEvaluation,
   AiExecutionContext,
+  WorkflowDefinition,
+  WorkflowVersion,
+  WorkflowStep,
+  WorkflowTrigger,
+  WorkflowRun,
+  WorkflowStepRun,
+  WorkflowWait,
+  WorkflowApproval,
 } from "../domain/types.js"
 
 import { hashRequest, hashToken, normalizeEmail } from "./common.js"
@@ -177,6 +185,68 @@ export interface CreateAiEvaluationInput {
   score: number
   dimensions: Record<string, unknown>
   notes: string | null
+}
+export interface CreateWorkflowVersionInput {
+  organizationId: string
+  name: string
+  triggerTypes: string[]
+  steps: Array<{
+    stepKey: string
+    stepType: WorkflowStep["stepType"]
+    config: Record<string, unknown>
+    nextStepKey: string | null
+    onFailureStepKey: string | null
+    retryMaxAttempts: number
+    retryBackoffSeconds: number
+    timeoutSeconds: number
+    compensationStepKey: string | null
+  }>
+}
+export interface StartWorkflowInput {
+  organizationId: string
+  workflowId: string
+  triggerType: string
+  sourceEventId: string | null
+  dedupeKey: string
+  payload: Record<string, unknown>
+}
+export interface ClaimWorkflowRunsInput {
+  organizationId: string
+  workerId: string
+  limit: number
+  leaseSeconds: number
+}
+export interface CompleteWorkflowStepInput {
+  organizationId: string
+  runId: string
+  stepRunId: string
+  workerId: string
+  output: Record<string, unknown>
+}
+export interface FailWorkflowStepInput {
+  organizationId: string
+  runId: string
+  stepRunId: string
+  workerId: string
+  error: string
+  retryDelaySeconds: number
+}
+export interface CreateWorkflowApprovalInput {
+  organizationId: string
+  runId: string
+  stepRunId: string
+  workflowVersionId: string
+  actionHash: string
+  action: Record<string, unknown>
+  requesterUserId: string | null
+  approverScope: string
+  expiresAt: string | null
+}
+export interface ResolveWorkflowApprovalInput {
+  organizationId: string
+  approvalId: string
+  userId: string
+  decision: "APPROVED" | "REJECTED"
 }
 export interface PublishOutboxBatchInput {
   organizationId: string
@@ -338,6 +408,23 @@ export interface Store {
   acquireWorkerLease(input: AcquireWorkerLeaseInput): Promise<WorkerLease>
   heartbeatWorkerLease(workerId: string, leaseSeconds: number): Promise<WorkerLease>
   releaseWorkerLease(workerId: string): Promise<void>
+
+  listWorkflowDefinitions(organizationId: string): Promise<WorkflowDefinition[]>
+    createWorkflowVersion(input: CreateWorkflowVersionInput): Promise<{ definition: WorkflowDefinition; version: WorkflowVersion; steps: WorkflowStep[] }>
+    listWorkflowVersions(organizationId: string, workflowId: string): Promise<Array<WorkflowVersion & { steps: WorkflowStep[] }>>
+    publishWorkflowVersion(organizationId: string, workflowVersionId: string): Promise<WorkflowVersion & { steps: WorkflowStep[] }>
+    startWorkflow(input: StartWorkflowInput): Promise<{ trigger: WorkflowTrigger; run: WorkflowRun; created: boolean }>
+    getWorkflowRun(organizationId: string, runId: string): Promise<WorkflowRun | null>
+    listWorkflowStepRuns(organizationId: string, runId: string): Promise<WorkflowStepRun[]>
+    claimWorkflowRuns(input: ClaimWorkflowRunsInput): Promise<WorkflowRun[]>
+    completeWorkflowStep(input: CompleteWorkflowStepInput): Promise<WorkflowRun>
+    failWorkflowStep(input: FailWorkflowStepInput): Promise<WorkflowRun>
+    createWorkflowWait(input: { organizationId: string; runId: string; stepRunId: string; wakeAt: string; waitReason: string; resumeToken: string | null }): Promise<WorkflowWait>
+    resumeWorkflowWait(organizationId: string, waitId: string): Promise<WorkflowRun>
+    createWorkflowApproval(input: CreateWorkflowApprovalInput): Promise<WorkflowApproval>
+    resolveWorkflowApproval(input: ResolveWorkflowApprovalInput): Promise<WorkflowRun>
+    listWorkflowApprovals(organizationId: string, runId?: string): Promise<WorkflowApproval[]>
+    cancelWorkflowRun(organizationId: string, runId: string): Promise<WorkflowRun>
 
   createAiModel(input: CreateAiModelInput): Promise<AiModel>
   listAiModels(organizationId: string): Promise<AiModel[]>
