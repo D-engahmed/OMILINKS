@@ -2348,6 +2348,7 @@ export class MemoryStore implements Store {
       version: Math.max(0, ...existingVersions.map((item) => item.version)) + 1,
       status: "DRAFT",
       triggerTypes: [...input.triggerTypes],
+      entryStepKey: input.entryStepKey,
       createdAt: now,
       publishedAt: null,
     }
