@@ -593,6 +593,7 @@ storeTest("phase 4: HTTP route endpoint returns a durable assignment decision", 
   assert.equal(response.status, 200)
   const body = (await response.json()) as {
     decision: {
+      id: string
       outcome: string
       selectedWorkforceMemberId: string | null
     }
@@ -606,5 +607,5 @@ storeTest("phase 4: HTTP route endpoint returns a durable assignment decision", 
   assert.equal(body.decision.outcome, "ASSIGNED")
   assert.equal(body.decision.selectedWorkforceMemberId, member.id)
   assert.equal(body.assignment?.workforceMemberId, member.id)
-  assert.equal(body.assignment?.routingDecisionId, body.decision === undefined ? null : body.assignment?.routingDecisionId)
+  assert.equal(body.assignment?.routingDecisionId, body.decision.id)
 })
