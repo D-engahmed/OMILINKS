@@ -757,6 +757,29 @@ async function route(
     )
   }
 
+  const releaseAssignmentMatch = url.pathname.match(
+    /^\/api\/v1\/workforce\/assignments\/([^/]+)\/release$/
+  )
+
+  if (releaseAssignmentMatch && method === "POST") {
+    const body = await readJson(request)
+    const expectedVersion = Number(
+      request.headers.get("If-Match-Version") ?? body.version
+    )
+    return json(
+      await appApplication.releaseAssignment(context, {
+        assignmentId: releaseAssignmentMatch[1]!,
+        expectedVersion,
+        status:
+          body.status === "COMPLETED" ||
+          body.status === "TRANSFERRED" ||
+          body.status === "CANCELED"
+            ? body.status
+            : "RELEASED",
+      })
+    )
+  }
+
   if (
     method === "POST" &&
     url.pathname === "/api/v1/workforce/assignments"
