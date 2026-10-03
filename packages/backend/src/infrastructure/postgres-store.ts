@@ -2375,6 +2375,124 @@ export class PostgresStore implements Store {
     })
   }
 
+  async createWorkflowApproval(input: CreateWorkflowApprovalInput): Promise<WorkflowApproval> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const existing = await client.query(
+        `SELECT * FROM workflow_approvals
+          WHERE organization_id=$1 AND workflow_step_run_id=$2`,
+        [input.organizationId, input.stepRunId]
+      )
+      if (existing.rows[0]) return toWorkflowApproval(existing.rows[0])
+
+      const result = await client.query(
+        `INSERT INTO workflow_approvals
+          (organization_id,workflow_run_id,workflow_step_run_id,action_hash,action,
+           workflow_version_id,requester_user_id,approver_scope,expires_at)
+         VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9)
+         RETURNING *`,
+        [
+          input.organizationId,
+          input.runId,
+          input.stepRunId,
+          input.actionHash,
+          JSON.stringify(input.action),
+          input.workflowVersionId,
+          input.requesterUserId,
+          input.approverScope,
+          input.expiresAt,
+        ]
+      )
+      return toWorkflowApproval(result.rows[0])
+    })
+  }
+
+  async resolveWorkflowApproval(input: ResolveWorkflowApprovalInput): Promise<WorkflowRun> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const locked=await client.query(
+        `SELECT * FROM workflow_approvals
+          WHERE id=$1 AND organization_id=$2
+          FOR UPDATE`,
+        [input.approvalId,input.organizationId]
+      )
+      if(!locked.rows[0]) throw new Error("WORKFLOW_APPROVAL_NOT_FOUND")
+      const approval=toWorkflowApproval(locked.rows[0])
+      if(approval.status!=="PENDING") throw new Error("WORKFLOW_APPROVAL_NOT_PENDING")
+      if(approval.expiresAt && new Date(approval.expiresAt).getTime()<=Date.now()) {
+        await client.query(`UPDATE workflow_approvals SET status='EXPIRED',decided_at=now() WHERE id=$1 AND organization_id=$2`,[approval.id,input.organizationId])
+        throw new Error("WORKFLOW_APPROVAL_EXPIRED")
+      }
+      await client.query(
+        `UPDATE workflow_approvals SET status=$3,decided_by_user_id=$4,decided_at=now()
+          WHERE id=$1 AND organization_id=$2`,
+        [approval.id,input.organizationId,input.decision,input.userId]
+      )
+      const info=await client.query(
+        `SELECT r.*, sr.step_id, s.next_step_key
+           FROM workflow_runs r
+           JOIN workflow_step_runs sr ON sr.workflow_run_id=r.id AND sr.organization_id=r.organization_id
+           JOIN workflow_steps s ON s.id=sr.step_id AND s.organization_id=sr.organization_id
+          WHERE r.id=$1 AND r.organization_id=$2 AND sr.id=$3
+          FOR UPDATE`,
+        [approval.workflowRunId,input.organizationId,approval.workflowStepRunId]
+      )
+      if(!info.rows[0]) throw new Error("WORKFLOW_RUN_NOT_FOUND")
+      if(input.decision==="APPROVED") {
+        const next=strOrNull(info.rows[0].next_step_key)
+        await client.query(`UPDATE workflow_step_runs SET status='SUCCEEDED',completed_at=now() WHERE id=$1 AND organization_id=$2`,[approval.workflowStepRunId,input.organizationId])
+        const run=await client.query(`UPDATE workflow_runs SET current_step_key=$3,status=$4,available_at=now(),lease_until=NULL,leased_by=NULL,completed_at=CASE WHEN $4='SUCCEEDED' THEN now() ELSE NULL END,error=NULL WHERE id=$1 AND organization_id=$2 RETURNING *`,[approval.workflowRunId,input.organizationId,next,next?"PENDING":"SUCCEEDED"])
+        return toWorkflowRun(run.rows[0])
+      }
+      await client.query(`UPDATE workflow_step_runs SET status='FAILED',error='APPROVAL_REJECTED',completed_at=now() WHERE id=$1 AND organization_id=$2`,[approval.workflowStepRunId,input.organizationId])
+      const run=await client.query(`UPDATE workflow_runs SET status='FAILED',error='APPROVAL_REJECTED',completed_at=now(),lease_until=NULL,leased_by=NULL WHERE id=$1 AND organization_id=$2 RETURNING *`,[approval.workflowRunId,input.organizationId])
+      return toWorkflowRun(run.rows[0])
+    })
+  }
+
+  async expireWorkflowApprovals(organizationId: string, limit: number): Promise<WorkflowApproval[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const rows=await client.query(
+        `SELECT * FROM workflow_approvals
+          WHERE organization_id=$1 AND status='PENDING' AND expires_at IS NOT NULL AND expires_at <= now()
+          ORDER BY expires_at ASC,id ASC
+          LIMIT $2 FOR UPDATE SKIP LOCKED`,
+        [organizationId,limit]
+      )
+      const expired:WorkflowApproval[]=[]
+      for(const row of rows.rows){
+        const approval=toWorkflowApproval(row)
+        await client.query(`UPDATE workflow_approvals SET status='EXPIRED',decided_at=now() WHERE id=$1 AND organization_id=$2`,[approval.id,organizationId])
+        await client.query(`UPDATE workflow_step_runs SET status='FAILED',error='APPROVAL_EXPIRED',completed_at=now() WHERE id=$1 AND organization_id=$2 AND status='WAITING'`,[approval.workflowStepRunId,organizationId])
+        await client.query(`UPDATE workflow_runs SET status='FAILED',error='APPROVAL_EXPIRED',completed_at=now(),lease_until=NULL,leased_by=NULL WHERE id=$1 AND organization_id=$2 AND status='WAITING'`,[approval.workflowRunId,organizationId])
+        expired.push({...approval,status:"EXPIRED",decidedAt:new Date().toISOString()})
+      }
+      return expired
+    })
+  }
+
+  async listWorkflowApprovals(organizationId: string, runId?: string): Promise<WorkflowApproval[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result=await client.query(
+        runId
+          ? `SELECT * FROM workflow_approvals WHERE organization_id=$1 AND workflow_run_id=$2 ORDER BY created_at DESC,id DESC`
+          : `SELECT * FROM workflow_approvals WHERE organization_id=$1 ORDER BY created_at DESC,id DESC`,
+        runId ? [organizationId,runId] : [organizationId]
+      )
+      return result.rows.map(toWorkflowApproval)
+    })
+  }
+
+  async cancelWorkflowRun(organizationId: string, runId: string): Promise<WorkflowRun> {
+    return this.tenantTx(organizationId, async (client) => {
+      const locked=await client.query(`SELECT * FROM workflow_runs WHERE id=$1 AND organization_id=$2 FOR UPDATE`,[runId,organizationId])
+      if(!locked.rows[0]) throw new Error("WORKFLOW_RUN_NOT_FOUND")
+      const run=toWorkflowRun(locked.rows[0])
+      if(["SUCCEEDED","FAILED","DEAD_LETTERED","CANCELED"].includes(run.status)) return run
+      await client.query(`UPDATE workflow_step_runs SET status='CANCELED',completed_at=now() WHERE workflow_run_id=$1 AND organization_id=$2 AND status IN ('PENDING','RUNNING','WAITING','RETRYING')`,[runId,organizationId])
+      const result=await client.query(`UPDATE workflow_runs SET status='CANCELED',completed_at=now(),lease_until=NULL,leased_by=NULL WHERE id=$1 AND organization_id=$2 RETURNING *`,[runId,organizationId])
+      return toWorkflowRun(result.rows[0])
+    })
+  }
+
   async createAiModel(input: CreateAiModelInput): Promise<AiModel> {
     try {
       return await this.tenantTx(input.organizationId, async (client) => {
