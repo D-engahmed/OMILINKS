@@ -266,8 +266,8 @@ export class ConversationPipeline {
       outputTokens: null as number | null,
       latencyMs: null as number | null,
       error: null as string | null,
-      agentId: null,
-      agentPolicyVersionId: null,
+      agentId: this.options.governance?.agentId ?? null,
+      agentPolicyVersionId: this.options.governance?.agentPolicyVersionId ?? null,
       modelRegistryId: null,
       costUsd: null,
     }
