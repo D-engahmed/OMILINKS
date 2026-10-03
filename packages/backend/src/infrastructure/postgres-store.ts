@@ -2410,6 +2410,25 @@ export class PostgresStore implements Store {
     })
   }
 
+  async getActiveQueueItem(
+    organizationId: string,
+    conversationId: string
+  ): Promise<QueueItem | null> {
+    if (!isUuid(conversationId)) return null
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM queue_items
+          WHERE organization_id = $1
+            AND conversation_id = $2
+            AND status IN ('QUEUED','CLAIMED')
+          ORDER BY enqueued_at DESC, id DESC
+          LIMIT 1`,
+        [organizationId, conversationId]
+      )
+      return result.rows[0] ? toQueueItem(result.rows[0]) : null
+    })
+  }
+
   async enqueueConversation(input: {
     organizationId: string
     queueId: string
