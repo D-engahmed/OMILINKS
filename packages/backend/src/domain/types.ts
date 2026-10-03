@@ -18,6 +18,8 @@ export type Permission =
   | "integration.read"
   | "integration.manage"
   | "ai.manage"
+  | "workflow.manage"
+  | "workflow.approve"
 
 export type ConversationStatus =
   | "OPEN"
