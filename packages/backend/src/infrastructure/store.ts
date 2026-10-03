@@ -1227,7 +1227,7 @@ export class MemoryStore implements Store {
       const member = this.workforce.get(memberId)
       if (!member || member.organizationId !== input.organizationId) throw new Error("WORKFORCE_MEMBER_NOT_FOUND")
     }
-    for (const [key, memberId] of this.teamMembers.entries()) {
+    for (const [key] of this.teamMembers.entries()) {
       if (key.startsWith(input.teamId + ":")) this.teamMembers.delete(key)
     }
     for (const memberId of input.workforceMemberIds) this.teamMembers.set(input.teamId + ":" + memberId, memberId)
