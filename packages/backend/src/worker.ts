@@ -4,6 +4,7 @@ import { loadConfig } from "./config.js"
 import { PostgresStore } from "./infrastructure/postgres-store.js"
 import { WorkerRuntime } from "./infrastructure/event-runtime.js"
 import { createDefaultEventConsumers } from "./infrastructure/event-consumers.js"
+import { createWorkflowRuntimeOptions } from "./infrastructure/workflow-consumer.js"
 
 const config = loadConfig()
 
@@ -13,9 +14,11 @@ if (!config.databaseUrl) {
 
 const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 10 })
 const store = new PostgresStore(pool)
+const workflowOptions = createWorkflowRuntimeOptions(store)
 const runtime = new WorkerRuntime(store, createDefaultEventConsumers(store), {
   publishBatchSize: 100,
-  classConcurrency: { routing: 4 },
+  classConcurrency: { routing: 4, ...(workflowOptions.classConcurrency ?? {}) },
+  tickers: workflowOptions.tickers,
 })
 
 const stop = async (): Promise<void> => {
