@@ -21,7 +21,7 @@ CREATE TABLE workflow_versions (
   version integer NOT NULL CHECK (version > 0),
   status text NOT NULL CHECK (status IN ('DRAFT','VALIDATING','TESTING','PUBLISHED','DISABLED','RETIRED')),
   trigger_types jsonb NOT NULL DEFAULT '[]'::jsonb,
-  entry_step_key text,
+  entry_step_key text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   published_at timestamptz,
   UNIQUE(id, organization_id),
