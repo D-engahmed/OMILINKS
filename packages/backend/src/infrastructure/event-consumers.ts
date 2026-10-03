@@ -14,29 +14,45 @@ async function routeQueuedConversation(store: Store, context: WorkerEventContext
   const conversationId = eventConversationId(context.event)
   if (!conversationId) throw new Error("EVENT_PAYLOAD_INVALID")
 
-  const conversation = await store.getConversation(context.organizationId, conversationId)
+  const conversation = await store.getConversation(
+    context.organizationId,
+    conversationId
+  )
   if (!conversation) throw new Error("CONVERSATION_NOT_FOUND")
 
-  if (conversation.control !== "queue" || !["OPEN", "REOPENED"].includes(conversation.status)) {
+  if (
+    conversation.control !== "queue" ||
+    !["OPEN", "REOPENED"].includes(conversation.status)
+  ) {
     return
   }
 
-  const result = await new RoutingService(store).routeConversation(
+  const queueItem = await store.getActiveQueueItem(
+    context.organizationId,
+    conversationId
+  )
+  if (!queueItem) {
+    return
+  }
+
+  const queues = await store.listQueues(context.organizationId)
+  const queue = queues.find((candidate) => candidate.id === queueItem.queueId)
+  if (!queue || queue.status !== "ACTIVE") {
+    throw new Error("QUEUE_NOT_FOUND")
+  }
+
+  await new RoutingService(store).routeConversation(
     context.organizationId,
     {
       conversationId,
-      requiredSkills: [],
+      requiredSkills: queue.requiredSkillCodes,
       teamId: null,
       requestedWorkerTypes: ["HUMAN"],
       policyName: "default",
-      reason: `worker:${context.consumerId}` ,
+      reason: "worker:" + context.consumerId,
       commit: true,
     }
   )
-
-  if (!result.assignment && result.decision.outcome === "NO_MATCH") {
-    return
-  }
 }
 
 export function createDefaultEventConsumers(store: Store): EventConsumer[] {
