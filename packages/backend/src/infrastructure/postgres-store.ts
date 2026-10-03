@@ -18,6 +18,7 @@ import type {
   Membership,
   Message,
   Organization,
+  OutboxEvent,
   Principal,
   Session,
   User,
@@ -209,6 +210,24 @@ const toHandoff = (row: Row): Handoff => ({
   updatedAt: iso(row.updated_at),
 })
 
+const toOutboxEvent = (row: Row): OutboxEvent => ({
+  id: str(row.id),
+  organizationId: str(row.organization_id),
+  eventType: str(row.event_type),
+  version: num(row.version),
+  aggregateType: str(row.aggregate_type),
+  aggregateId: str(row.aggregate_id),
+  occurredAt: iso(row.occurred_at),
+  correlationId: str(row.correlation_id),
+  causationId: strOrNull(row.causation_id),
+  payload: row.payload as Record<string, unknown>,
+  status: str(row.status) as OutboxEvent["status"],
+  attempts: num(row.attempts),
+  lastError: strOrNull(row.last_error),
+  publishedAt: isoOrNull(row.published_at),
+  createdAt: iso(row.created_at),
+})
+
 const toKnowledgeDocument = (row: Row): KnowledgeDocument => ({
   id: str(row.id),
   organizationId: str(row.organization_id),
@@ -224,6 +243,37 @@ const KNOWLEDGE_DOCUMENT_SELECT = `
   SELECT d.*, (SELECT count(*)::int FROM knowledge_chunks c
                 WHERE c.document_id = d.id) AS chunk_count
     FROM knowledge_documents d`
+
+async function insertOutboxEvent(
+  client: pg.PoolClient,
+  input: {
+    organizationId: string
+    eventType: string
+    aggregateType: string
+    aggregateId: string
+    correlationId: string
+    causationId?: string | null
+    payload: Record<string, unknown>
+  }
+): Promise<OutboxEvent> {
+  const result = await client.query(
+    `INSERT INTO outbox_events
+       (organization_id, event_type, version, aggregate_type, aggregate_id,
+        correlation_id, causation_id, payload)
+     VALUES ($1,$2,1,$3,$4,$5,$6,$7::jsonb)
+     RETURNING *`,
+    [
+      input.organizationId,
+      input.eventType,
+      input.aggregateType,
+      input.aggregateId,
+      input.correlationId,
+      input.causationId ?? null,
+      JSON.stringify(input.payload),
+    ]
+  )
+  return toOutboxEvent(result.rows[0])
+}
 
 async function insertRun(
   client: pg.PoolClient,
@@ -256,7 +306,17 @@ async function insertRun(
         links.handoffId,
       ]
     )
-    return toAiRun(result.rows[0])
+    const run = toAiRun(result.rows[0])
+    await insertOutboxEvent(client, {
+      organizationId: run.organizationId,
+      eventType: "ai.run.completed",
+      aggregateType: "ai_run",
+      aggregateId: run.id,
+      correlationId: run.id,
+      causationId: run.inboundMessageId,
+      payload: { run },
+    })
+    return run
   } catch (error) {
     if (pgCode(error) === UNIQUE_VIOLATION) throw new Error("AI_RUN_EXISTS")
     throw error
@@ -820,7 +880,17 @@ export class PostgresStore implements Store {
     )
 
     if (inserted.rows[0]) {
-      return { message: toMessage(inserted.rows[0]), created: true }
+      const message = toMessage(inserted.rows[0])
+      await insertOutboxEvent(client, {
+        organizationId: message.organizationId,
+        eventType: "conversation.message.created",
+        aggregateType: "conversation",
+        aggregateId: message.conversationId,
+        correlationId: message.id,
+        causationId: message.providerMessageId ?? message.clientMessageId,
+        payload: { message },
+      })
+      return { message, created: true }
     }
 
     const existing = await client.query(
@@ -859,6 +929,18 @@ export class PostgresStore implements Store {
       if (!conversation.rows[0]) throw new Error("CONVERSATION_NOT_FOUND")
 
       return this.insertMessage(client, input)
+    })
+  }
+
+  async listOutboxEvents(organizationId: string): Promise<OutboxEvent[]> {
+    return this.tenantTx(organizationId, async (client) => {
+      const result = await client.query(
+        `SELECT * FROM outbox_events
+          WHERE organization_id = $1
+          ORDER BY created_at ASC, id ASC`,
+        [organizationId]
+      )
+      return result.rows.map(toOutboxEvent)
     })
   }
 
@@ -961,6 +1043,22 @@ export class PostgresStore implements Store {
         [input.conversationId, input.organizationId]
       )
 
+      await insertOutboxEvent(client, {
+        organizationId: input.organizationId,
+        eventType: "conversation.control.changed",
+        aggregateType: "conversation",
+        aggregateId: input.conversationId,
+        correlationId: input.run.inboundMessageId,
+        causationId: input.run.inboundMessageId,
+        payload: {
+          conversationId: input.conversationId,
+          previousControl: "ai",
+          control: "queue",
+          controlVersion: num(row.control_version) + 1,
+          version: num(row.control_version) + 1,
+        },
+      })
+
       const handoff = await client.query(
         `INSERT INTO handoffs (organization_id, conversation_id, reason, summary)
          VALUES ($1, $2, $3, $4) RETURNING *`,
@@ -978,6 +1076,17 @@ export class PostgresStore implements Store {
       const run = await insertRun(client, input.run, {
         replyMessageId: null,
         handoffId: str(handoff.rows[0].id),
+      })
+
+      const handoffValue = toHandoff(handoff.rows[0])
+      await insertOutboxEvent(client, {
+        organizationId: handoffValue.organizationId,
+        eventType: "conversation.handoff.created",
+        aggregateType: "conversation",
+        aggregateId: handoffValue.conversationId,
+        correlationId: input.run.inboundMessageId,
+        causationId: input.run.inboundMessageId,
+        payload: { handoff: handoffValue },
       })
 
       return {
