@@ -1109,7 +1109,10 @@ export class PostgresStore implements Store {
       const message = toMessage(inserted.rows[0])
       await insertOutboxEvent(client, {
         organizationId: message.organizationId,
-        eventType: "conversation.message.created",
+        eventType:
+          message.direction === "INBOUND"
+            ? "conversation.message.received"
+            : "conversation.message.sent",
         aggregateType: "conversation",
         aggregateId: message.conversationId,
         correlationId: message.id,
