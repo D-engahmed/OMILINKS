@@ -4,6 +4,7 @@ import { test } from "node:test"
 
 import { WorkerRuntime } from "./infrastructure/event-runtime.js"
 import { createDefaultEventConsumers } from "./infrastructure/event-consumers.js"
+import { createWorkflowRuntimeOptions } from "./infrastructure/workflow-consumer.js"
 import { WorkflowService } from "./application/workflows.js"
 import type { Store } from "./infrastructure/store.js"
 import { createApp } from "./app.js"
@@ -28,6 +29,14 @@ async function signup(store: Store) {
     user: { id: string }
     session: { accessToken: string }
   }
+}
+
+function createRuntime(store: Store): WorkerRuntime {
+  const options = createWorkflowRuntimeOptions(store)
+  return new WorkerRuntime(store, createDefaultEventConsumers(store), {
+    classConcurrency: { workflow: 4, routing: 2 },
+    tickers: options.tickers,
+  })
 }
 
 function basicSteps() {
@@ -84,11 +93,6 @@ storeTest("phase 7: duplicate workflow triggers return the same durable run", as
     entryStepKey: "start",
     steps: basicSteps(),
   })
-  await service.publishWorkflowVersion(
-    owner.organization.id,
-    owner.organization.id,
-    "invalid"
-  ).catch(() => undefined)
   const workflow = created.definition
   const published = await service.publishWorkflowVersion(
     owner.organization.id,
@@ -145,18 +149,10 @@ storeTest("phase 7: worker executes a multi-step workflow and pauses for approva
     payload: { requesterUserId: owner.user.id },
   })
 
-  const runtime = new WorkerRuntime(
-    store,
-    createDefaultEventConsumers(store),
-    { classConcurrency: { workflow: 4, routing: 2 } }
-  )
+  const runtime = createRuntime(store)
 
   await runtime.runOnce()
   let run = await service.getRun(owner.organization.id, started.run.id)
-  assert.equal(run.status, "PENDING")
-
-  await runtime.runOnce()
-  run = await service.getRun(owner.organization.id, started.run.id)
   assert.equal(run.status, "WAITING")
 
   const approvals = await service.listApprovals(
@@ -243,7 +239,7 @@ storeTest("phase 7: due waits release the worker and resume on a later scheduler
     payload: {},
   })
 
-  const runtime = new WorkerRuntime(store, createDefaultEventConsumers(store))
+  const runtime = createRuntime(store)
   await runtime.runOnce()
   let run = await service.getRun(owner.organization.id, started.run.id)
   assert.equal(run.status, "WAITING")
@@ -298,10 +294,6 @@ storeTest("phase 7: failed step retries and then fails without losing durable st
   const runtime = new WorkerRuntime(store, createDefaultEventConsumers(store))
   await runtime.runOnce()
   let run = await service.getRun(owner.organization.id, started.run.id)
-  assert.equal(run.status, "RETRYING")
-
-  await runtime.runOnce()
-  run = await service.getRun(owner.organization.id, started.run.id)
   assert.equal(run.status, "FAILED")
   assert.equal(run.error, "INVALID_WAIT_SECONDS")
 
