@@ -2064,42 +2064,54 @@ export class PostgresStore implements Store {
       )
       if (!triggerResult.rows[0]) {
         const existing = await client.query(
-          `SELECT t.*, r.* FROM workflow_triggers t
-             JOIN workflow_runs r ON r.trigger_id = t.id AND r.organization_id = t.organization_id
-            WHERE t.organization_id = $1 AND t.workflow_id = $2 AND t.dedupe_key = $3`,
+          `SELECT
+             t.id AS trigger_id, t.organization_id AS trigger_org, t.workflow_id AS trigger_workflow_id,
+             t.workflow_version_id AS trigger_version_id, t.trigger_type AS trigger_type,
+             t.source_event_id AS trigger_source_event_id, t.dedupe_key AS trigger_dedupe_key,
+             t.payload AS trigger_payload, t.received_at AS trigger_received_at,
+             r.id AS run_id, r.workflow_id AS run_workflow_id,
+             r.workflow_version_id AS run_version_id, r.trigger_id AS run_trigger_id,
+             r.status AS run_status, r.context AS run_context, r.current_step_key AS run_current_step_key,
+             r.error AS run_error, r.attempt AS run_attempt, r.available_at AS run_available_at,
+             r.lease_until AS run_lease_until, r.leased_by AS run_leased_by,
+             r.started_at AS run_started_at, r.completed_at AS run_completed_at,
+             r.created_at AS run_created_at
+           FROM workflow_triggers t
+           JOIN workflow_runs r ON r.trigger_id = t.id AND r.organization_id = t.organization_id
+          WHERE t.organization_id = $1 AND t.workflow_id = $2 AND t.dedupe_key = $3`,
           [input.organizationId, input.workflowId, input.dedupeKey]
         )
         if (!existing.rows[0]) throw new Error("WORKFLOW_TRIGGER_CORRUPT")
         const row = existing.rows[0]
         return {
           trigger: {
-            id: str(row.id),
+            id: str(row.trigger_id),
             organizationId: input.organizationId,
-            workflowId: str(row.workflow_id),
-            workflowVersionId: str(row.workflow_version_id),
+            workflowId: str(row.trigger_workflow_id),
+            workflowVersionId: str(row.trigger_version_id),
             triggerType: str(row.trigger_type),
-            sourceEventId: strOrNull(row.source_event_id),
-            dedupeKey: str(row.dedupe_key),
-            payload: (row.payload ?? {}) as Record<string, unknown>,
-            receivedAt: iso(row.received_at),
+            sourceEventId: strOrNull(row.trigger_source_event_id),
+            dedupeKey: str(row.trigger_dedupe_key),
+            payload: (row.trigger_payload ?? {}) as Record<string, unknown>,
+            receivedAt: iso(row.trigger_received_at),
           },
           run: {
-            id: str(row.id_1),
+            id: str(row.run_id),
             organizationId: input.organizationId,
-            workflowId: str(row.workflow_id_1),
-            workflowVersionId: str(row.workflow_version_id_1),
-            triggerId: str(row.trigger_id),
-            status: str(row.status) as WorkflowRun["status"],
-            context: (row.context ?? {}) as Record<string, unknown>,
-            currentStepKey: strOrNull(row.current_step_key),
-            error: strOrNull(row.error),
-            attempt: num(row.attempt),
-            availableAt: iso(row.available_at),
-            leaseUntil: isoOrNull(row.lease_until),
-            leasedBy: strOrNull(row.leased_by),
-            startedAt: isoOrNull(row.started_at),
-            completedAt: isoOrNull(row.completed_at),
-            createdAt: iso(row.created_at),
+            workflowId: str(row.run_workflow_id),
+            workflowVersionId: str(row.run_version_id),
+            triggerId: str(row.run_trigger_id),
+            status: str(row.run_status) as WorkflowRun["status"],
+            context: (row.run_context ?? {}) as Record<string, unknown>,
+            currentStepKey: strOrNull(row.run_current_step_key),
+            error: strOrNull(row.run_error),
+            attempt: num(row.run_attempt),
+            availableAt: iso(row.run_available_at),
+            leaseUntil: isoOrNull(row.run_lease_until),
+            leasedBy: strOrNull(row.run_leased_by),
+            startedAt: isoOrNull(row.run_started_at),
+            completedAt: isoOrNull(row.run_completed_at),
+            createdAt: iso(row.run_created_at),
           },
           created: false,
         }
