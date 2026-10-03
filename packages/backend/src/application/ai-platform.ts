@@ -1,5 +1,6 @@
 import { FailoverModelGateway, type AiModelGatewayResolver } from "../ai/model-router.js"
 import { inspectInput, inspectOutput, validateGuardrailConfig } from "../ai/guardrails.js"
+import { evaluateAiRun } from "../ai/evaluation.js"
 import { ConversationPipeline, type AiOutcome } from "./pipeline.js"
 import { AppError } from "../shared/errors.js"
 import type {
@@ -128,6 +129,26 @@ export class AiPlatformService {
     const run = await this.store.getAiRun(organizationId, aiRunId)
     if (!run) throw new AppError(404, "NOT_FOUND", "AI run not found.")
     return run
+  }
+
+  async evaluateRun(
+    organizationId: string,
+    aiRunId: string
+  ): Promise<AiEvaluation> {
+    const run = await this.store.getAiRun(organizationId, aiRunId)
+    if (!run) {
+      throw new AppError(404, "NOT_FOUND", "AI run not found.")
+    }
+
+    const result = evaluateAiRun(run)
+    return await this.store.createAiEvaluation({
+      organizationId,
+      aiRunId,
+      evaluatorType: "RULE",
+      score: result.score,
+      dimensions: result.dimensions,
+      notes: "Deterministic evidence-based rule evaluation; not a factual truth judgment.",
+    })
   }
 
   async createEvaluation(input: {
