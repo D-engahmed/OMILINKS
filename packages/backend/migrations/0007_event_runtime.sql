@@ -15,6 +15,9 @@
 
 BEGIN;
 
+ALTER TABLE outbox_events
+  ADD CONSTRAINT outbox_event_owner_key UNIQUE (id, organization_id);
+
 CREATE TABLE event_inbox (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
