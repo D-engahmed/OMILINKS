@@ -38,6 +38,14 @@ import type {
   RoutingEvaluationCandidate,
   EventInbox,
   WorkerLease,
+  AiModel,
+  AiModelPolicy,
+  AiModelPolicyVersion,
+  AiAgent,
+  AiAgentPolicyVersion,
+  AiAgentPolicyConfig,
+  AiEvaluation,
+  AiExecutionContext,
 } from "../domain/types.js"
 
 import { hashRequest, hashToken, normalizeEmail } from "./common.js"
@@ -135,6 +143,41 @@ export interface CommitRoutingAssignmentInput {
   reason: string
 }
 
+export interface CreateAiModelInput {
+  organizationId: string
+  provider: string
+  model: string
+  displayName: string
+  credentialRef: string | null
+  baseUrl: string | null
+  inputCostPerMillion: number
+  outputCostPerMillion: number
+  capabilities: Record<string, unknown>
+}
+export interface CreateAiModelPolicyVersionInput {
+  organizationId: string
+  name: string
+  config: import("../domain/types.js").AiModelPolicyConfig
+}
+export interface CreateAiAgentInput {
+  organizationId: string
+  workforceMemberId: string
+  name: string
+  purpose: string
+}
+export interface CreateAiAgentPolicyVersionInput {
+  organizationId: string
+  agentId: string
+  config: AiAgentPolicyConfig
+}
+export interface CreateAiEvaluationInput {
+  organizationId: string
+  aiRunId: string
+  evaluatorType: AiEvaluation["evaluatorType"]
+  score: number
+  dimensions: Record<string, unknown>
+  notes: string | null
+}
 export interface PublishOutboxBatchInput {
   organizationId: string
   publisherId: string
@@ -295,6 +338,21 @@ export interface Store {
   acquireWorkerLease(input: AcquireWorkerLeaseInput): Promise<WorkerLease>
   heartbeatWorkerLease(workerId: string, leaseSeconds: number): Promise<WorkerLease>
   releaseWorkerLease(workerId: string): Promise<void>
+
+  createAiModel(input: CreateAiModelInput): Promise<AiModel>
+  listAiModels(organizationId: string): Promise<AiModel[]>
+  setAiModelStatus(input: { organizationId: string; modelId: string; status: AiModel["status"] }): Promise<AiModel>
+  createAiModelPolicyVersion(input: CreateAiModelPolicyVersionInput): Promise<{ policy: AiModelPolicy; version: AiModelPolicyVersion }>
+  listAiModelPolicies(organizationId: string): Promise<Array<AiModelPolicy & { versions: AiModelPolicyVersion[] }>>
+  getPublishedAiModelPolicy(organizationId: string, name: string): Promise<{ policy: AiModelPolicy; version: AiModelPolicyVersion } | null>
+  createAiAgent(input: CreateAiAgentInput): Promise<AiAgent>
+  listAiAgents(organizationId: string): Promise<AiAgent[]>
+  createAiAgentPolicyVersion(input: CreateAiAgentPolicyVersionInput): Promise<AiAgentPolicyVersion>
+  listAiAgentPolicyVersions(organizationId: string, agentId: string): Promise<AiAgentPolicyVersion[]>
+  getAiExecutionContext(organizationId: string, agentId: string): Promise<AiExecutionContext | null>
+  getAiRun(organizationId: string, aiRunId: string): Promise<AiRun | null>
+  createAiEvaluation(input: CreateAiEvaluationInput): Promise<AiEvaluation>
+  listAiEvaluations(organizationId: string, aiRunId: string): Promise<AiEvaluation[]>
 
   listMessages(
     organizationId: string,
