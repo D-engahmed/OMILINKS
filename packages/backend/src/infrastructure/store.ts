@@ -410,21 +410,31 @@ export interface Store {
   releaseWorkerLease(workerId: string): Promise<void>
 
   listWorkflowDefinitions(organizationId: string): Promise<WorkflowDefinition[]>
-    createWorkflowVersion(input: CreateWorkflowVersionInput): Promise<{ definition: WorkflowDefinition; version: WorkflowVersion; steps: WorkflowStep[] }>
-    listWorkflowVersions(organizationId: string, workflowId: string): Promise<Array<WorkflowVersion & { steps: WorkflowStep[] }>>
-    publishWorkflowVersion(organizationId: string, workflowVersionId: string): Promise<WorkflowVersion & { steps: WorkflowStep[] }>
-    startWorkflow(input: StartWorkflowInput): Promise<{ trigger: WorkflowTrigger; run: WorkflowRun; created: boolean }>
-    getWorkflowRun(organizationId: string, runId: string): Promise<WorkflowRun | null>
-    listWorkflowStepRuns(organizationId: string, runId: string): Promise<WorkflowStepRun[]>
-    claimWorkflowRuns(input: ClaimWorkflowRunsInput): Promise<WorkflowRun[]>
-    completeWorkflowStep(input: CompleteWorkflowStepInput): Promise<WorkflowRun>
-    failWorkflowStep(input: FailWorkflowStepInput): Promise<WorkflowRun>
-    createWorkflowWait(input: { organizationId: string; runId: string; stepRunId: string; wakeAt: string; waitReason: string; resumeToken: string | null }): Promise<WorkflowWait>
-    resumeWorkflowWait(organizationId: string, waitId: string): Promise<WorkflowRun>
-    createWorkflowApproval(input: CreateWorkflowApprovalInput): Promise<WorkflowApproval>
-    resolveWorkflowApproval(input: ResolveWorkflowApprovalInput): Promise<WorkflowRun>
-    listWorkflowApprovals(organizationId: string, runId?: string): Promise<WorkflowApproval[]>
-    cancelWorkflowRun(organizationId: string, runId: string): Promise<WorkflowRun>
+  createWorkflowVersion(input: CreateWorkflowVersionInput): Promise<{ definition: WorkflowDefinition; version: WorkflowVersion; steps: WorkflowStep[] }>
+  listWorkflowVersions(organizationId: string, workflowId: string): Promise<Array<WorkflowVersion & { steps: WorkflowStep[] }>>
+  publishWorkflowVersion(organizationId: string, workflowVersionId: string): Promise<WorkflowVersion & { steps: WorkflowStep[] }>
+  startWorkflow(input: StartWorkflowInput): Promise<{ trigger: WorkflowTrigger; run: WorkflowRun; created: boolean }>
+  getWorkflowRun(organizationId: string, runId: string): Promise<WorkflowRun | null>
+  listWorkflowStepRuns(organizationId: string, runId: string): Promise<WorkflowStepRun[]>
+  startWorkflowStepRun(input: {
+    organizationId: string
+    runId: string
+    stepId: string
+    stepKey: string
+    input: Record<string, unknown>
+  }): Promise<WorkflowStepRun>
+  claimWorkflowRuns(input: ClaimWorkflowRunsInput): Promise<WorkflowRun[]>
+  completeWorkflowStep(input: CompleteWorkflowStepInput): Promise<WorkflowRun>
+  failWorkflowStep(input: FailWorkflowStepInput): Promise<WorkflowRun>
+  putWorkflowStepWaiting(input: { organizationId: string; runId: string; stepRunId: string; workerId: string }): Promise<WorkflowRun>
+  createWorkflowWait(input: { organizationId: string; runId: string; stepRunId: string; wakeAt: string; waitReason: string; resumeToken: string | null }): Promise<WorkflowWait>
+  resumeWorkflowWait(organizationId: string, waitId: string): Promise<WorkflowRun>
+  resumeDueWorkflowWaits(organizationId: string, limit: number): Promise<WorkflowRun[]>
+  createWorkflowApproval(input: CreateWorkflowApprovalInput): Promise<WorkflowApproval>
+  resolveWorkflowApproval(input: ResolveWorkflowApprovalInput): Promise<WorkflowRun>
+  expireWorkflowApprovals(organizationId: string, limit: number): Promise<WorkflowApproval[]>
+  listWorkflowApprovals(organizationId: string, runId?: string): Promise<WorkflowApproval[]>
+  cancelWorkflowRun(organizationId: string, runId: string): Promise<WorkflowRun>
 
   createAiModel(input: CreateAiModelInput): Promise<AiModel>
   listAiModels(organizationId: string): Promise<AiModel[]>
