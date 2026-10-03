@@ -1256,17 +1256,7 @@ export class PostgresStore implements Store {
           ]
         )
 
-        const conversation = toConversation(result.rows[0])
-        await insertOutboxEvent(client, {
-          organizationId: input.organizationId,
-          eventType: "conversation.created",
-          aggregateType: "conversation",
-          aggregateId: conversation.id,
-          correlationId: conversation.id,
-          payload: { conversation },
-        })
-
-        return conversation
+        return toConversation(result.rows[0])
       })
     } catch (error) {
       if (
