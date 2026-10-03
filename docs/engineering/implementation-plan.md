@@ -178,26 +178,29 @@ Deferred until justified by scale or topology: Kafka/external broker, cross-regi
 
 ## 9. Phase 6 — AI Platform
 
-Implement:
-
-- AIAgent;
-- versioned policy;
-- context builder;
-- model registry;
-- model router;
-- guardrails;
-- tool runtime;
-- AI run state;
-- cost metering;
-- evaluation harness;
-- embeddings/vector retrieval when evidence justifies the change.
+Current implementation:
+- AI model registry with secret references and pricing metadata;
+- ordered versioned model policies with deterministic failover;
+- versioned AI agents backed by AI workforce members;
+- agent execution policy with autonomy, retrieval, history, budget, and guardrail controls;
+- deterministic input/output guardrails;
+- durable AI run traceability for agent, policy, model, usage, and cost;
+- rule-based AI run evaluation;
+- authenticated AI configuration, execution, and evaluation APIs;
+- PostgreSQL RLS and memory/PostgreSQL parity tests.
 
 Exit criteria:
 
 - provider failure has deterministic fallback;
-- model output cannot bypass authorization;
+- model output cannot bypass the existing conversation authorization boundary;
 - AI execution is durable and observable;
-- retrieval quality is measured before being trusted.
+- evaluation measures evidence characteristics before quality claims are made.
+
+Deferred:
+- tool runtime;
+- multi-agent orchestration;
+- embedding provider registry;
+- advanced quality-based model routing.
 
 ## 10. Phase 7 — Workflows
 
