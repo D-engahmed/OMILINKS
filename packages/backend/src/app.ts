@@ -637,6 +637,20 @@ async function route(
     /^\/api\/v1\/ai-runs\/([^/]+)\/evaluations$/
   )
 
+  const aiRunEvaluateMatch = url.pathname.match(
+    /^\/api\/v1\/ai-runs\/([^/]+)\/evaluate$/
+  )
+
+  if (aiRunEvaluateMatch && method === "POST") {
+    return json(
+      await appApplication.evaluateAiRun(
+        context,
+        aiRunEvaluateMatch[1]!
+      ),
+      201
+    )
+  }
+
   if (aiRunEvaluationsMatch && method === "GET") {
     return json({
       items: await appApplication.listAiEvaluations(
