@@ -1,10 +1,6 @@
-import type { ChannelIntegration, InboundMessage } from "../domain/types.js"
-import type {
-  ChannelInboundRequest,
-  ChannelAdapter,
-  requireString,
-  optionalString,
-} from "./contracts.js"
+import type { InboundMessage } from "../domain/types.js"
+import type { ChannelInboundRequest, ChannelAdapter } from "./contracts.js"
+import { requireString, optionalString } from "./contracts.js"
 
 const MAX_NAME = 120
 const MAX_MESSAGE_ID = 255
