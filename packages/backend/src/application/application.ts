@@ -659,6 +659,11 @@ export class Application {
     input: { agentId: string; conversationId: string; inboundMessageId: string }
   ) {
     authorize(ctx.principal.membership, "conversation.send")
+
+    if (!isUuid(input.agentId) || !isUuid(input.conversationId) || !isUuid(input.inboundMessageId)) {
+      throw new AppError(400, "VALIDATION_ERROR", "agentId, conversationId and inboundMessageId must be valid ids.")
+    }
+
     return await this.aiPlatform().runAgent({
       organizationId: ctx.organizationId,
       ...input,
