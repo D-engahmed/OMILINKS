@@ -912,6 +912,39 @@ export class Application {
     }
   }
 
+  async releaseAssignment(
+    ctx: AuthenticatedContext,
+    input: {
+      assignmentId: string
+      expectedVersion: number
+      status: "RELEASED" | "COMPLETED" | "TRANSFERRED" | "CANCELED"
+    }
+  ) {
+    authorize(ctx.principal.membership, "conversation.assign")
+
+    if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1) {
+      throw new AppError(400, "VALIDATION_ERROR", "Assignment version is required.")
+    }
+
+    try {
+      return await this.store.releaseAssignment({
+        organizationId: ctx.organizationId,
+        ...input,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message === "ASSIGNMENT_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Assignment not found.")
+      }
+      if (error instanceof Error && error.message === "ASSIGNMENT_NOT_ACTIVE") {
+        throw new AppError(409, "CONFLICT", "Assignment is not active.")
+      }
+      if (error instanceof Error && error.message === "STALE_ASSIGNMENT_VERSION") {
+        throw new AppError(409, "STALE_VERSION", "Assignment changed before release.")
+      }
+      throw error
+    }
+  }
+
   async createAssignment(
     ctx: AuthenticatedContext,
     input: {
