@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto"
 
 import type { EventInbox, OutboxEvent } from "../domain/types.js"
 import type {
-  EventSubscription,
   ClaimEventInboxBatchInput,
   FailEventInboxInput,
   PublishOutboxBatchInput,
