@@ -501,6 +501,7 @@ export interface WorkflowVersion {
   version: number
   status: WorkflowVersionStatus
   triggerTypes: string[]
+  entryStepKey: string
   createdAt: string
   publishedAt: string | null
 }
