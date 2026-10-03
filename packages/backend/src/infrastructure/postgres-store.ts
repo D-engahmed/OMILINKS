@@ -49,7 +49,10 @@ import {
 import type {
   AiReplyResult,
   AppendMessageInput,
+  CommitRoutingAssignmentInput,
+  CreateRoutingDecisionInput,
   EscalationResult,
+  RoutingCandidateQuery,
   Store,
 } from "./store.js"
 
@@ -2117,7 +2120,6 @@ export class PostgresStore implements Store {
           FOR UPDATE`,
         [input.organizationId, input.name.trim()]
       )
-      const now = new Date().toISOString()
       let policy: RoutingPolicy
       if (existing.rows[0]) {
         policy = toRoutingPolicy(existing.rows[0])
