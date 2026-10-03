@@ -1,8 +1,7 @@
 import assert from "node:assert/strict"
-import test from "node:test"
 
 import { createApp } from "./app.js"
-import { MemoryStore } from "./infrastructure/store.js"
+import { storeTest } from "./test-support.js"
 
 type SignupResponse = {
   organization: { id: string }
@@ -67,8 +66,8 @@ async function createCustomer(
   }>
 }
 
-test("health is explicit and request-correlated", async () => {
-  const handle = await createApp(new MemoryStore())
+storeTest("health is explicit and request-correlated", async (makeStore) => {
+  const handle = await createApp(await makeStore())
 
   const response = await handle(
     new Request("http://localhost/health", {
@@ -87,8 +86,8 @@ test("health is explicit and request-correlated", async () => {
   })
 })
 
-test("signup provisions one owner and is idempotent", async () => {
-  const handle = await createApp(new MemoryStore())
+storeTest("signup provisions one owner and is idempotent", async (makeStore) => {
+  const handle = await createApp(await makeStore())
 
   const first = await signup(
     handle,
@@ -119,12 +118,23 @@ test("signup provisions one owner and is idempotent", async () => {
   assert.equal(second.organization.id, first.organization.id)
   assert.equal(second.user.id, first.user.id)
   assert.equal(second.membership.role, "OWNER")
-  assert.equal(second.session.accessToken, first.session.accessToken)
+  // A replay mints a fresh session instead of returning the original bearer
+  // token, so no plaintext token has to be stored for idempotency.
+  assert.notEqual(second.session.accessToken, first.session.accessToken)
   assert.equal(second.replayed, true)
+
+  for (const token of [first.session.accessToken, second.session.accessToken]) {
+    const me = await handle(
+      new Request("http://localhost/api/v1/organizations/me", {
+        headers: { authorization: "Bearer " + token },
+      })
+    )
+    assert.equal(me.status, 200)
+  }
 })
 
-test("organization context returns the authenticated tenant", async () => {
-  const handle = await createApp(new MemoryStore())
+storeTest("organization context returns the authenticated tenant", async (makeStore) => {
+  const handle = await createApp(await makeStore())
   const result = await signup(
     handle,
     "Alpha",
@@ -148,8 +158,8 @@ test("organization context returns the authenticated tenant", async () => {
   assert.equal(body.membership.role, "OWNER")
 })
 
-test("cross-tenant customer access returns safe not-found", async () => {
-  const handle = await createApp(new MemoryStore())
+storeTest("cross-tenant customer access returns safe not-found", async (makeStore) => {
+  const handle = await createApp(await makeStore())
 
   const alpha = await signup(
     handle,
@@ -190,8 +200,8 @@ test("cross-tenant customer access returns safe not-found", async () => {
   assert.equal(payload.error.message, "Customer not found.")
 })
 
-test("same provider identity is deduplicated inside one tenant", async () => {
-  const handle = await createApp(new MemoryStore())
+storeTest("same provider identity is deduplicated inside one tenant", async (makeStore) => {
+  const handle = await createApp(await makeStore())
 
   const owner = await signup(
     handle,
@@ -235,8 +245,8 @@ test("same provider identity is deduplicated inside one tenant", async () => {
   assert.equal(secondBody.created, false)
 })
 
-test("customer updates reject stale versions", async () => {
-  const handle = await createApp(new MemoryStore())
+storeTest("customer updates reject stale versions", async (makeStore) => {
+  const handle = await createApp(await makeStore())
 
   const owner = await signup(
     handle,
@@ -287,8 +297,8 @@ test("customer updates reject stale versions", async () => {
   assert.equal((await stale.json()).error.code, "STALE_VERSION")
 })
 
-test("assignment changes conversation control and version", async () => {
-  const handle = await createApp(new MemoryStore())
+storeTest("assignment changes conversation control and version", async (makeStore) => {
+  const handle = await createApp(await makeStore())
 
   const owner = await signup(
     handle,
@@ -393,8 +403,8 @@ test("assignment changes conversation control and version", async () => {
   assert.equal((await staleAssignment.json()).error.code, "STALE_VERSION")
 })
 
-test("unauthenticated protected routes are rejected", async () => {
-  const handle = await createApp(new MemoryStore())
+storeTest("unauthenticated protected routes are rejected", async (makeStore) => {
+  const handle = await createApp(await makeStore())
 
   const response = await handle(
     new Request("http://localhost/api/v1/customers", { method: "GET" })
@@ -407,8 +417,8 @@ test("unauthenticated protected routes are rejected", async () => {
   )
 })
 
-test("unauthenticated requests are rejected before route discovery", async () => {
-  const handle = await createApp(new MemoryStore())
+storeTest("unauthenticated requests are rejected before route discovery", async (makeStore) => {
+  const handle = await createApp(await makeStore())
 
   const response = await handle(
     new Request("http://localhost/does-not-exist", { method: "GET" })

@@ -10,14 +10,19 @@
     "lint": "eslint .",
     "format": "prettier --write \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit",
-    "test": "tsc && node --test dist/app.test.js"
+    "test": "tsc && node --test --test-concurrency=1 dist/*.test.js",
+    "migrate": "tsc && node dist/migrate-cli.js"
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/pg": "^8.23.1",
     "@workspace/eslint-config": "workspace:*",
     "@workspace/typescript-config": "workspace:*",
     "eslint": "^9",
     "prettier": "^3.8.3",
     "typescript": "^5"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
   }
 }

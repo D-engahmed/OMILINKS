@@ -1,22 +1,74 @@
 import { authorize } from "../domain/authorization.js"
 import type { Principal } from "../domain/types.js"
 import { AppError } from "../shared/errors.js"
+import { chunkText } from "../ai/text.js"
+import type { HandoffStatus } from "../domain/types.js"
+import { isUuid } from "../infrastructure/common.js"
 import type { Store } from "../infrastructure/store.js"
+import type { IdentityProvider } from "./identity.js"
 
 export interface AuthenticatedContext {
   principal: Principal
   organizationId: string
+  sessionId: string
+}
+
+export interface ApplicationOptions {
+  identity: IdentityProvider
+  sessionTtlSeconds: number
+}
+
+function unauthenticated(): AppError {
+  return new AppError(401, "AUTHENTICATION_REQUIRED", "Authentication required.")
 }
 
 export class Application {
-  constructor(private readonly store: Store) {}
+  constructor(
+    private readonly store: Store,
+    private readonly options: ApplicationOptions
+  ) {}
 
-  signup(input: {
+  get sessionTtlSeconds(): number {
+    return this.options.sessionTtlSeconds
+  }
+
+  async login(input: { email: string; credential: string | null }) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) {
+      throw new AppError(400, "VALIDATION_ERROR", "A valid email is required.")
+    }
+
+    const verified = await this.options.identity.verify(input)
+    const user = verified ? await this.store.findUserByEmail(verified.email) : null
+
+    // Same response for "bad proof" and "unknown user" so accounts cannot be
+    // enumerated through this endpoint.
+    if (!user || user.status !== "ACTIVE") {
+      throw new AppError(401, "INVALID_CREDENTIALS", "Invalid credentials.")
+    }
+
+    const memberships = await this.store.listMemberships(user.id)
+
+    return {
+      user,
+      memberships,
+      sessionToken: await this.store.createSession(
+        user.id,
+        this.options.sessionTtlSeconds
+      ),
+    }
+  }
+
+  async logout(ctx: AuthenticatedContext): Promise<void> {
+    await this.store.revokeSession(ctx.sessionId)
+  }
+
+  async signup(input: {
     organizationName: string
     ownerEmail: string
     ownerDisplayName: string
     slug: string
     idempotencyKey: string | null
+    credential: string | null
   }) {
     if (input.organizationName.trim().length < 2) {
       throw new AppError(400, "VALIDATION_ERROR", "Organization name is required.")
@@ -38,8 +90,26 @@ export class Application {
       )
     }
 
+    // The owner email comes from the identity provider, never straight from
+    // the request body.
+    const verified = await this.options.identity.verify({
+      email: input.ownerEmail,
+      credential: input.credential,
+    })
+
+    if (!verified) {
+      throw new AppError(401, "INVALID_CREDENTIALS", "Invalid credentials.")
+    }
+
     try {
-      return this.store.provisionOrganization(input)
+      return await this.store.provisionOrganization({
+        organizationName: input.organizationName,
+        ownerEmail: verified.email,
+        ownerDisplayName: input.ownerDisplayName,
+        slug: input.slug,
+        idempotencyKey: input.idempotencyKey,
+        sessionTtlSeconds: this.options.sessionTtlSeconds,
+      })
     } catch (error) {
       if (error instanceof Error && error.message === "OWNER_EMAIL_ALREADY_EXISTS") {
         throw new AppError(
@@ -49,46 +119,77 @@ export class Application {
         )
       }
 
+      if (error instanceof Error && error.message === "SLUG_ALREADY_EXISTS") {
+        throw new AppError(
+          409,
+          "CONFLICT",
+          "This organization slug is already taken."
+        )
+      }
+
+      if (error instanceof Error && error.message === "IDEMPOTENCY_KEY_REUSED") {
+        throw new AppError(
+          422,
+          "IDEMPOTENCY_KEY_REUSED",
+          "Idempotency key was already used with a different request."
+        )
+      }
+
       throw error
     }
   }
 
-  authenticate(token: string): AuthenticatedContext {
-    const session = this.store.getSessionByToken(token)
+  async authenticate(
+    token: string,
+    requestedOrganizationId: string | null
+  ): Promise<AuthenticatedContext> {
+    const session = await this.store.getSessionByToken(token)
 
-    if (!session) {
-      throw new AppError(
-        401,
-        "AUTHENTICATION_REQUIRED",
-        "Authentication required."
-      )
-    }
+    if (!session) throw unauthenticated()
 
-    const user = this.store.getUser(session.userId)
+    const user = await this.store.getUser(session.userId)
 
-    if (!user || user.status !== "ACTIVE") {
-      throw new AppError(
-        401,
-        "AUTHENTICATION_REQUIRED",
-        "Authentication required."
-      )
-    }
+    if (!user || user.status !== "ACTIVE") throw unauthenticated()
 
-    const memberships = this.store.listMemberships(user.id)
-    const membership = memberships[0]
+    const memberships = await this.store.listMemberships(user.id)
 
-    if (!membership) {
+    if (memberships.length === 0) {
       throw new AppError(403, "FORBIDDEN", "No active organization membership.")
+    }
+
+    let membership = memberships[0]!
+
+    if (requestedOrganizationId !== null) {
+      const requested = memberships.find(
+        (candidate) => candidate.organizationId === requestedOrganizationId
+      )
+
+      if (!requested) {
+        throw new AppError(
+          403,
+          "FORBIDDEN",
+          "Not a member of the requested organization."
+        )
+      }
+
+      membership = requested
+    } else if (memberships.length > 1) {
+      throw new AppError(
+        400,
+        "ORGANIZATION_REQUIRED",
+        "This user belongs to several organizations; send the X-Organization-Id header."
+      )
     }
 
     return {
       principal: { user, membership },
       organizationId: membership.organizationId,
+      sessionId: session.id,
     }
   }
 
-  getOrganizationContext(ctx: AuthenticatedContext) {
-    const organization = this.store.getOrganization(ctx.organizationId)
+  async getOrganizationContext(ctx: AuthenticatedContext) {
+    const organization = await this.store.getOrganization(ctx.organizationId)
 
     if (!organization) {
       throw new AppError(404, "NOT_FOUND", "Organization not found.")
@@ -107,7 +208,7 @@ export class Application {
         role: ctx.principal.membership.role,
         status: ctx.principal.membership.status,
       },
-      memberships: this.store.listMemberships(ctx.principal.user.id).map(
+      memberships: (await this.store.listMemberships(ctx.principal.user.id)).map(
         (membership) => ({
           organizationId: membership.organizationId,
           role: membership.role,
@@ -117,12 +218,12 @@ export class Application {
     }
   }
 
-  listCustomers(ctx: AuthenticatedContext) {
+  async listCustomers(ctx: AuthenticatedContext) {
     authorize(ctx.principal.membership, "customer.read")
-    return this.store.listCustomers(ctx.organizationId)
+    return await this.store.listCustomers(ctx.organizationId)
   }
 
-  createCustomer(
+  async createCustomer(
     ctx: AuthenticatedContext,
     input: {
       displayName: string
@@ -145,7 +246,7 @@ export class Application {
       throw new AppError(400, "VALIDATION_ERROR", "Customer identity is incomplete.")
     }
 
-    const existing = this.store.findCustomerByIdentity(
+    const existing = await this.store.findCustomerByIdentity(
       ctx.organizationId,
       input.provider,
       input.providerAccountId,
@@ -158,7 +259,7 @@ export class Application {
 
     try {
       return {
-        customer: this.store.createCustomer({
+        customer: await this.store.createCustomer({
           organizationId: ctx.organizationId,
           ...input,
         }),
@@ -169,7 +270,7 @@ export class Application {
         error instanceof Error &&
         error.message === "CUSTOMER_IDENTITY_EXISTS"
       ) {
-        const customer = this.store.findCustomerByIdentity(
+        const customer = await this.store.findCustomerByIdentity(
           ctx.organizationId,
           input.provider,
           input.providerAccountId,
@@ -183,10 +284,10 @@ export class Application {
     }
   }
 
-  getCustomer(ctx: AuthenticatedContext, customerId: string) {
+  async getCustomer(ctx: AuthenticatedContext, customerId: string) {
     authorize(ctx.principal.membership, "customer.read")
 
-    const customer = this.store.getCustomer(
+    const customer = await this.store.getCustomer(
       ctx.organizationId,
       customerId
     )
@@ -198,7 +299,7 @@ export class Application {
     return customer
   }
 
-  updateCustomer(
+  async updateCustomer(
     ctx: AuthenticatedContext,
     customerId: string,
     expectedVersion: number,
@@ -211,7 +312,7 @@ export class Application {
     }
 
     try {
-      return this.store.updateCustomer(
+      return await this.store.updateCustomer(
         ctx.organizationId,
         customerId,
         expectedVersion,
@@ -234,18 +335,18 @@ export class Application {
     }
   }
 
-  listConversations(ctx: AuthenticatedContext) {
+  async listConversations(ctx: AuthenticatedContext) {
     authorize(ctx.principal.membership, "conversation.read")
-    return this.store.listConversations(ctx.organizationId)
+    return await this.store.listConversations(ctx.organizationId)
   }
 
-  getConversation(
+  async getConversation(
     ctx: AuthenticatedContext,
     conversationId: string
   ) {
     authorize(ctx.principal.membership, "conversation.read")
 
-    const conversation = this.store.getConversation(
+    const conversation = await this.store.getConversation(
       ctx.organizationId,
       conversationId
     )
@@ -257,7 +358,7 @@ export class Application {
     return conversation
   }
 
-  createConversation(
+  async createConversation(
     ctx: AuthenticatedContext,
     input: { customerId: string; channel: string }
   ) {
@@ -272,7 +373,7 @@ export class Application {
     }
 
     try {
-      return this.store.createConversation({
+      return await this.store.createConversation({
         organizationId: ctx.organizationId,
         ...input,
       })
@@ -281,11 +382,22 @@ export class Application {
         throw new AppError(404, "NOT_FOUND", "Customer not found.")
       }
 
+      if (
+        error instanceof Error &&
+        error.message === "ACTIVE_CONVERSATION_EXISTS"
+      ) {
+        throw new AppError(
+          409,
+          "CONFLICT",
+          "This customer already has an active conversation on this channel."
+        )
+      }
+
       throw error
     }
   }
 
-  createMessage(
+  async createMessage(
     ctx: AuthenticatedContext,
     conversationId: string,
     input: { content: string; clientMessageId: string | null }
@@ -297,9 +409,11 @@ export class Application {
     }
 
     try {
-      return this.store.createMessage({
+      return await this.store.appendMessage({
         organizationId: ctx.organizationId,
         conversationId,
+        direction: "OUTBOUND",
+        authorType: "HUMAN",
         content: input.content,
         clientMessageId: input.clientMessageId,
       })
@@ -312,7 +426,75 @@ export class Application {
     }
   }
 
-  createWorkforceMember(
+  async listMessages(
+    ctx: AuthenticatedContext,
+    conversationId: string,
+    limit: number
+  ) {
+    authorize(ctx.principal.membership, "conversation.read")
+
+    if (!(await this.store.getConversation(ctx.organizationId, conversationId))) {
+      throw new AppError(404, "NOT_FOUND", "Conversation not found.")
+    }
+
+    return await this.store.listMessages(ctx.organizationId, conversationId, limit)
+  }
+
+  async listHandoffs(ctx: AuthenticatedContext, status: HandoffStatus | undefined) {
+    authorize(ctx.principal.membership, "conversation.read")
+    return await this.store.listHandoffs(ctx.organizationId, status)
+  }
+
+  async createKnowledgeDocument(
+    ctx: AuthenticatedContext,
+    input: { title: string; content: string }
+  ) {
+    authorize(ctx.principal.membership, "knowledge.manage")
+
+    const title = input.title.trim()
+
+    if (title.length < 2 || title.length > 200) {
+      throw new AppError(400, "VALIDATION_ERROR", "Title must be 2 to 200 characters.")
+    }
+
+    if (input.content.length > 200_000) {
+      throw new AppError(400, "VALIDATION_ERROR", "Content is too large.")
+    }
+
+    const chunks = chunkText(input.content)
+
+    if (chunks.length === 0) {
+      throw new AppError(400, "VALIDATION_ERROR", "Content is required.")
+    }
+
+    return await this.store.createKnowledgeDocument({
+      organizationId: ctx.organizationId,
+      title,
+      source: "manual",
+      chunks,
+    })
+  }
+
+  async listKnowledgeDocuments(ctx: AuthenticatedContext) {
+    authorize(ctx.principal.membership, "knowledge.read")
+    return await this.store.listKnowledgeDocuments(ctx.organizationId)
+  }
+
+  async archiveKnowledgeDocument(ctx: AuthenticatedContext, documentId: string) {
+    authorize(ctx.principal.membership, "knowledge.manage")
+
+    try {
+      return await this.store.archiveKnowledgeDocument(ctx.organizationId, documentId)
+    } catch (error) {
+      if (error instanceof Error && error.message === "NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Document not found.")
+      }
+
+      throw error
+    }
+  }
+
+  async createWorkforceMember(
     ctx: AuthenticatedContext,
     input: {
       displayName: string
@@ -326,13 +508,25 @@ export class Application {
       throw new AppError(400, "VALIDATION_ERROR", "Display name is required.")
     }
 
-    return this.store.createWorkforceMember({
-      organizationId: ctx.organizationId,
-      ...input,
-    })
+    if (input.userId !== null && !isUuid(input.userId)) {
+      throw new AppError(400, "VALIDATION_ERROR", "userId must be a valid id.")
+    }
+
+    try {
+      return await this.store.createWorkforceMember({
+        organizationId: ctx.organizationId,
+        ...input,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message === "USER_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "User not found in this organization.")
+      }
+
+      throw error
+    }
   }
 
-  createAssignment(
+  async createAssignment(
     ctx: AuthenticatedContext,
     input: {
       conversationId: string
@@ -344,7 +538,7 @@ export class Application {
     authorize(ctx.principal.membership, "conversation.assign")
 
     try {
-      return this.store.createAssignment({
+      return await this.store.createAssignment({
         organizationId: ctx.organizationId,
         ...input,
       })

@@ -12,6 +12,8 @@ const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "conversation.send",
     "conversation.assign",
     "workforce.manage",
+    "knowledge.read",
+    "knowledge.manage",
   ],
   ADMIN: [
     "organization.manage",
@@ -23,6 +25,8 @@ const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "conversation.send",
     "conversation.assign",
     "workforce.manage",
+    "knowledge.read",
+    "knowledge.manage",
   ],
   SUPERVISOR: [
     "customer.read",
@@ -32,6 +36,8 @@ const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "conversation.send",
     "conversation.assign",
     "workforce.manage",
+    "knowledge.read",
+    "knowledge.manage",
   ],
   AGENT: [
     "customer.read",
@@ -39,6 +45,7 @@ const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "conversation.read",
     "conversation.write",
     "conversation.send",
+    "knowledge.read",
   ],
 }
 
