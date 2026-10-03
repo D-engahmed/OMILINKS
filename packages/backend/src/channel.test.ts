@@ -233,7 +233,49 @@ storeTest("phase 3: provider event dedupe happens before business mutation", asy
   assert.equal((await store.listConversations(owner.organization.id)).length, 1)
 })
 
-storeTest("phase 3: failed inbound normalization can be retried with the same provider event id", async (makeStore) => {
+storeTest("phase 3: failed inbound event claims can be reclaimed after the lease", async (makeStore) => {
+  const store = await makeStore()
+  const owner = await signup(
+    await createApp(store),
+    "Alpha",
+    "owner@alpha.example"
+  )
+  const integration = await store.createChannelIntegration({
+    organizationId: owner.organization.id,
+    provider: "widget",
+    providerAccountId: "site-1",
+    displayName: "Website chat",
+    allowedOrigins: ["https://shop.example"],
+    capabilities: {
+      inbound_text: true,
+      outbound_text: false,
+    },
+    credentialRef: null,
+  })
+
+  const input = {
+    organizationId: owner.organization.id,
+    integrationId: integration.id,
+    providerEventId: "retryable-event",
+    eventType: "message.received",
+    payloadHash: "same-payload",
+    correlationId: "retryable-event",
+  }
+
+  const first = await store.claimInboundEvent(input)
+  assert.equal(first.claimed, true)
+  assert.equal(first.event.attempts, 1)
+
+  await store.failInboundEvent(owner.organization.id, first.event.id, "temporary failure")
+
+  const second = await store.claimInboundEvent(input)
+  assert.equal(second.claimed, true)
+  assert.equal(second.inFlight, false)
+  assert.equal(second.event.attempts, 2)
+  assert.equal(second.event.lastError, null)
+})
+
+storeTest("phase 3: reusing a provider event id with a different payload is a conflict", async (makeStore) => {
   const store = await makeStore()
   const handle = await createApp(store)
   const owner = await signup(handle, "Alpha", "owner@alpha.example")
@@ -241,39 +283,38 @@ storeTest("phase 3: failed inbound normalization can be retried with the same pr
 
   const path = "/public/v1/widget/" + integration.publicKey + "/messages"
 
-  const failed = await call(handle, "POST", path, {
+  const first = await call(handle, "POST", path, {
     origin: "https://shop.example",
-    widgetMessageId: "retryable-event",
+    widgetMessageId: "conflicting-event",
     body: {
       visitorId: "visitor-1",
-      content: "",
+      content: "hello",
+    },
+  })
+  assert.equal(first.status, 202)
+
+  const conflicting = await call(handle, "POST", path, {
+    origin: "https://shop.example",
+    widgetMessageId: "conflicting-event",
+    body: {
+      visitorId: "visitor-1",
+      content: "different payload",
     },
   })
 
-  assert.equal(failed.status, 400)
-  assert.equal((await store.listCustomers(owner.organization.id)).length, 0)
-
-  const retried = await call(handle, "POST", path, {
-    origin: "https://shop.example",
-    widgetMessageId: "retryable-event",
-    body: {
-      visitorId: "visitor-1",
-      content: "hello after retry",
-    },
-  })
-
-  assert.equal(retried.status, 202)
-  const body = (await retried.json()) as {
-    duplicate: boolean
-    messageId: string | null
-  }
-  assert.equal(body.duplicate, false)
-  assert.ok(body.messageId)
-  assert.equal((await store.listCustomers(owner.organization.id)).length, 1)
-
-  const events = await store.listOutboxEvents(owner.organization.id)
+  assert.equal(conflicting.status, 409)
   assert.equal(
-    events.filter((event) => event.eventType === "conversation.message.received").length,
+    (await conflicting.json()).error.code,
+    "INBOUND_EVENT_CONFLICT"
+  )
+  assert.equal((await store.listCustomers(owner.organization.id)).length, 1)
+  assert.equal((await store.listConversations(owner.organization.id)).length, 1)
+  assert.equal(
+    (await store.listMessages(
+      owner.organization.id,
+      (await first.json()).conversationId,
+      100
+    )).length,
     1
   )
 })
