@@ -1,4 +1,4 @@
-import type { Conversation, EventInbox } from "../domain/types.js"
+import type { EventInbox } from "../domain/types.js"
 import { RoutingService } from "../application/routing.js"
 import type { Store } from "./store.js"
 import type { EventConsumer, WorkerEventContext } from "./event-runtime.js"
