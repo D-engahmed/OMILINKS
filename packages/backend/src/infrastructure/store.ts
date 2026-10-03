@@ -501,6 +501,12 @@ export class MemoryStore implements Store {
   private readonly outboxEvents = new Map<string, OutboxEvent>()
   private readonly eventInbox = new Map<string, EventInbox>()
   private readonly workerLeases = new Map<string, WorkerLease>()
+  private readonly aiModels = new Map<string, AiModel>()
+  private readonly aiModelPolicies = new Map<string, AiModelPolicy>()
+  private readonly aiModelPolicyVersions = new Map<string, AiModelPolicyVersion>()
+  private readonly aiAgents = new Map<string, AiAgent>()
+  private readonly aiAgentPolicyVersions = new Map<string, AiAgentPolicyVersion>()
+  private readonly aiEvaluations = new Map<string, AiEvaluation>()
 
   private readonly idempotency = new Map<
     string,
@@ -2205,6 +2211,73 @@ export class MemoryStore implements Store {
     )
   }
 
+  async createAiModel(input: CreateAiModelInput): Promise<AiModel> {
+    const provider = input.provider.trim().toLowerCase()
+    const modelName = input.model.trim()
+    if ([...this.aiModels.values()].some((item) => item.organizationId === input.organizationId && item.provider === provider && item.model === modelName)) {
+      throw new Error('AI_MODEL_EXISTS')
+    }
+    const now = new Date().toISOString()
+    const model: AiModel = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      provider,
+      model: modelName,
+      displayName: input.displayName.trim(),
+      credentialRef: input.credentialRef?.trim() || null,
+      baseUrl: input.baseUrl?.trim() || null,
+      inputCostPerMillion: input.inputCostPerMillion,
+      outputCostPerMillion: input.outputCostPerMillion,
+      capabilities: clone(input.capabilities),
+      status: 'ACTIVE',
+      createdAt: now,
+      updatedAt: now,
+    }
+    this.aiModels.set(model.id, model)
+    return clone(model)
+  }
+
+  async listAiModels(organizationId: string): Promise<AiModel[]> {
+    return clone([...this.aiModels.values()].filter((item) => item.organizationId === organizationId).sort((a, b) => a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model)))
+  }
+
+  async setAiModelStatus(input: { organizationId: string; modelId: string; status: AiModel['status'] }): Promise<AiModel> {
+    const model = this.aiModels.get(input.modelId)
+    if (!model || model.organizationId !== input.organizationId) throw new Error('AI_MODEL_NOT_FOUND')
+    model.status = input.status
+    model.updatedAt = new Date().toISOString()
+    return clone(model)
+  }
+
+  async createAiModelPolicyVersion(input: CreateAiModelPolicyVersionInput) {
+    let policy = [...this.aiModelPolicies.values()].find((item) => item.organizationId === input.organizationId && item.name === input.name.trim())
+    const now = new Date().toISOString()
+    if (!policy) {
+      policy = { id: randomUUID(), organizationId: input.organizationId, name: input.name.trim(), status: 'ACTIVE', createdAt: now, updatedAt: now }
+      this.aiModelPolicies.set(policy.id, policy)
+    }
+    for (const modelId of input.config.modelIds) {
+      const model = this.aiModels.get(modelId)
+      if (!model || model.organizationId !== input.organizationId) throw new Error('AI_MODEL_NOT_FOUND')
+    }
+    const versions = [...this.aiModelPolicyVersions.values()].filter((item) => item.organizationId === input.organizationId && item.policyId === policy.id)
+    const version: AiModelPolicyVersion = { id: randomUUID(), organizationId: input.organizationId, policyId: policy.id, version: Math.max(0, ...versions.map((item) => item.version)) + 1, status: 'PUBLISHED', config: clone(input.config), createdAt: now }
+    for (const item of versions) if (item.status === 'PUBLISHED') item.status = 'RETIRED'
+    this.aiModelPolicyVersions.set(version.id, version)
+    policy.updatedAt = now
+    return { policy: clone(policy), version: clone(version) }
+  }
+
+  async listAiModelPolicies(organizationId: string) {
+    return clone([...this.aiModelPolicies.values()].filter((item) => item.organizationId === organizationId).map((policy) => ({ ...policy, versions: [...this.aiModelPolicyVersions.values()].filter((item) => item.policyId === policy.id).sort((a, b) => a.version - b.version) })))
+  }
+
+  async getPublishedAiModelPolicy(organizationId: string, name: string) {
+    const policy = [...this.aiModelPolicies.values()].find((item) => item.organizationId === organizationId && item.name === name && item.status === 'ACTIVE')
+    if (!policy) return null
+    const version = [...this.aiModelPolicyVersions.values()].filter((item) => item.policyId === policy.id && item.status === 'PUBLISHED').sort((a, b) => b.version - a.version)[0]
+    return version ? { policy: clone(policy), version: clone(version) } : null
+  }
   async listMessages(
     organizationId: string,
     conversationId: string,
