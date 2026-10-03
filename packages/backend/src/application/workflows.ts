@@ -55,7 +55,7 @@ export class WorkflowService {
     try {
       return await this.store.startWorkflow(input)
     } catch (error) {
-      return this.translate(error)
+      throw this.translate(error)
     }
   }
 
