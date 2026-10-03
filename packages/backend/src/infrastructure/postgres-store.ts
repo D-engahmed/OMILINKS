@@ -1626,17 +1626,6 @@ export class PostgresStore implements Store {
 
   async acquireWorkerLease(input: AcquireWorkerLeaseInput): Promise<WorkerLease> {
     return this.tx(async (client) => {
-      const current = await client.query(
-        `SELECT * FROM worker_leases WHERE worker_id = $1 FOR UPDATE`,
-        [input.workerId]
-      )
-      if (
-        current.rows[0] &&
-        new Date(current.rows[0].lease_until).getTime() > Date.now()
-      ) {
-        throw new Error("WORKER_LEASE_HELD")
-      }
-
       const result = await client.query(
         `INSERT INTO worker_leases
           (worker_id, worker_class, lease_until, heartbeat_at, metadata)
@@ -1647,6 +1636,7 @@ export class PostgresStore implements Store {
            lease_until = EXCLUDED.lease_until,
            heartbeat_at = EXCLUDED.heartbeat_at,
            metadata = EXCLUDED.metadata
+         WHERE worker_leases.lease_until <= now()
          RETURNING *`,
         [
           input.workerId,
@@ -1655,6 +1645,11 @@ export class PostgresStore implements Store {
           JSON.stringify(input.metadata),
         ]
       )
+
+      if (!result.rows[0]) {
+        throw new Error("WORKER_LEASE_HELD")
+      }
+
       return toWorkerLease(result.rows[0])
     })
   }
