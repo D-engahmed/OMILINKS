@@ -1,6 +1,6 @@
 # Workforce Domain — Implementation Specification
 
-> Status: **Target implementation blueprint**
+> Status: **Implemented vertical slice**
 
 ## 1. Aggregate Responsibilities
 
@@ -266,6 +266,12 @@ Metrics:
 - AI/human handoff race;
 - queue recovery.
 
-## 18. Acceptance
+## 18. Current Runtime Evidence
+
+Phase 4 now implements workforce members, tenant-scoped skills, presence with TTL, capacity state, teams, queues, assignment release, and routing decision persistence.
+
+The remaining workforce features such as scheduling/calendar availability and automatic queue draining are future work.
+
+## 19. Acceptance
 
 Workforce is complete when assignment concurrency, queue durability, worker lifecycle, presence freshness and handoff control are proven independently.
