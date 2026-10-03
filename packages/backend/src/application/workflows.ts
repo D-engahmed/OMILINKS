@@ -295,14 +295,12 @@ export class WorkflowService {
     workerId: string,
     error: string
   ) {
-    await this.store.failWorkflowStep({
+    await this.store.failWorkflowRun({
       organizationId: run.organizationId,
       runId: run.id,
-      stepRunId: "",
       workerId,
       error,
-      retryDelaySeconds: 0,
-    }).catch(() => undefined)
+    })
   }
 
   private outputConfig(step: WorkflowStep): Record<string, unknown> {
