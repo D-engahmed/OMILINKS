@@ -87,3 +87,25 @@ Common contract tests:
 ## 8. Acceptance
 
 A provider integration is complete only when it satisfies the shared adapter contract and provider-specific failure semantics are documented.
+
+
+## Current implementation status
+
+Phase 3 currently activates the **Web Widget** adapter.
+
+Implemented runtime boundary:
+
+~~~text
+browser
+ -> public widget endpoint
+ -> WebWidgetAdapter
+ -> ChannelIngressService
+ -> ConversationPipeline.receiveInbound()
+ -> PostgreSQL + transactional outbox
+~~~
+
+The adapter contract is implemented in `src/integrations/contracts.ts`.
+
+The current widget adapter is implemented in `src/integrations/web-widget.ts`.
+
+WhatsApp, Telegram, SMS, Facebook and Instagram remain future adapters. Their provider-specific secrets, webhooks and delivery workers are not claimed as implemented.
