@@ -507,6 +507,162 @@ async function route(
     })
   }
 
+  if (method === "GET" && url.pathname === "/api/v1/ai/models") {
+    return json({ items: await appApplication.listAiModels(context) })
+  }
+
+  if (method === "POST" && url.pathname === "/api/v1/ai/models") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.createAiModel(context, {
+        provider: stringValue(body.provider),
+        model: stringValue(body.model),
+        displayName: stringValue(body.displayName),
+        credentialRef: nullableStringValue(body.credentialRef),
+        baseUrl: nullableStringValue(body.baseUrl),
+        inputCostPerMillion: Number(body.inputCostPerMillion ?? 0),
+        outputCostPerMillion: Number(body.outputCostPerMillion ?? 0),
+        capabilities:
+          body.capabilities &&
+          typeof body.capabilities === "object" &&
+          !Array.isArray(body.capabilities)
+            ? body.capabilities as Record<string, unknown>
+            : {},
+      }),
+      201
+    )
+  }
+
+  const aiModelStatusMatch = url.pathname.match(
+    /^\/api\/v1\/ai\/models\/([^/]+)\/status$/
+  )
+
+  if (aiModelStatusMatch && method === "PUT") {
+    const body = await readJson(request)
+    if (body.status !== "ACTIVE" && body.status !== "DISABLED") {
+      throw new AppError(400, "VALIDATION_ERROR", "status must be ACTIVE or DISABLED.")
+    }
+    return json(
+      await appApplication.setAiModelStatus(context, {
+        modelId: aiModelStatusMatch[1]!,
+        status: body.status,
+      })
+    )
+  }
+
+  if (method === "GET" && url.pathname === "/api/v1/ai/model-policies") {
+    return json({ items: await appApplication.listAiModelPolicies(context) })
+  }
+
+  if (method === "POST" && url.pathname === "/api/v1/ai/model-policies") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.createAiModelPolicy(context, {
+        name: stringValue(body.name),
+        config: body.config as AiModelPolicyConfig,
+      }),
+      201
+    )
+  }
+
+  if (method === "GET" && url.pathname === "/api/v1/ai/agents") {
+    return json({ items: await appApplication.listAiAgents(context) })
+  }
+
+  if (method === "POST" && url.pathname === "/api/v1/ai/agents") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.createAiAgent(context, {
+        workforceMemberId: stringValue(body.workforceMemberId),
+        name: stringValue(body.name),
+        purpose: stringValue(body.purpose),
+      }),
+      201
+    )
+  }
+
+  const aiAgentPolicyMatch = url.pathname.match(
+    /^\/api\/v1\/ai\/agents\/([^/]+)\/policies$/
+  )
+
+  if (aiAgentPolicyMatch && method === "GET") {
+    return json({
+      items: await appApplication.listAiAgentPolicies(
+        context,
+        aiAgentPolicyMatch[1]!
+      ),
+    })
+  }
+
+  if (aiAgentPolicyMatch && method === "POST") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.createAiAgentPolicy(
+        context,
+        aiAgentPolicyMatch[1]!,
+        body.config as AiAgentPolicyConfig
+      ),
+      201
+    )
+  }
+
+  const aiAgentRunMatch = url.pathname.match(
+    /^\/api\/v1\/ai\/agents\/([^/]+)\/run$/
+  )
+
+  if (aiAgentRunMatch && method === "POST") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.runAiAgent(context, {
+        agentId: aiAgentRunMatch[1]!,
+        conversationId: stringValue(body.conversationId),
+        inboundMessageId: stringValue(body.inboundMessageId),
+      })
+    )
+  }
+
+  const aiRunByIdMatch = url.pathname.match(
+    /^\/api\/v1\/ai-runs\/([^/]+)$/
+  )
+
+  if (aiRunByIdMatch && method === "GET") {
+    return json(
+      await appApplication.getAiRun(context, aiRunByIdMatch[1]!)
+    )
+  }
+
+  const aiRunEvaluationsMatch = url.pathname.match(
+    /^\/api\/v1\/ai-runs\/([^/]+)\/evaluations$/
+  )
+
+  if (aiRunEvaluationsMatch && method === "GET") {
+    return json({
+      items: await appApplication.listAiEvaluations(
+        context,
+        aiRunEvaluationsMatch[1]!
+      ),
+    })
+  }
+
+  if (aiRunEvaluationsMatch && method === "POST") {
+    const body = await readJson(request)
+    return json(
+      await appApplication.createAiEvaluation(context, {
+        aiRunId: aiRunEvaluationsMatch[1]!,
+        evaluatorType: body.evaluatorType as "RULE" | "HUMAN" | "MODEL",
+        score: Number(body.score),
+        dimensions:
+          body.dimensions &&
+          typeof body.dimensions === "object" &&
+          !Array.isArray(body.dimensions)
+            ? body.dimensions as Record<string, unknown>
+            : {},
+        notes: nullableStringValue(body.notes),
+      }),
+      201
+    )
+  }
+
   const aiRunsMatch = url.pathname.match(
     /^\/api\/v1\/conversations\/([^/]+)\/ai-runs$/
   )
