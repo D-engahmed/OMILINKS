@@ -39,7 +39,7 @@ export interface WorkerRuntimeOptions {
   publishBatchSize?: number
   classConcurrency?: Record<string, number>
   onError?: (error: unknown) => void
-  tickers?: readonly Array<() => Promise<void>>
+  tickers?: ReadonlyArray<() => Promise<void>>
 }
 
 export const BACKOFF = {
@@ -95,7 +95,7 @@ export class WorkerRuntime {
   private readonly classConcurrency: Record<string, number>
   private readonly onError: (error: unknown) => void
   private readonly states = new Map<string, WorkerState>()
-  private readonly tickers: readonly Array<() => Promise<void>>
+  private readonly tickers: ReadonlyArray<() => Promise<void>>
   private stopRequested = false
   private loopPromise: Promise<void> | null = null
 
