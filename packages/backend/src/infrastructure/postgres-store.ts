@@ -38,6 +38,8 @@ import type {
   RoutingDecision,
   RoutingCandidate,
   RoutingEvaluationCandidate,
+  EventInbox,
+  WorkerLease,
 } from "../domain/types.js"
 
 import {
@@ -53,6 +55,11 @@ import type {
   CreateRoutingDecisionInput,
   EscalationResult,
   RoutingCandidateQuery,
+  PublishOutboxBatchInput,
+  ClaimEventInboxBatchInput,
+  FailEventInboxInput,
+  ReplayEventInboxInput,
+  AcquireWorkerLeaseInput,
   Store,
 } from "./store.js"
 
