@@ -17,6 +17,8 @@ import type {
   Message,
   Organization,
   OutboxEvent,
+  ChannelInboundEvent,
+  ChannelIntegration,
   Principal,
   Session,
   User,
@@ -27,6 +29,31 @@ import { hashRequest, hashToken, normalizeEmail } from "./common.js"
 
 function clone<T>(value: T): T {
   return structuredClone(value)
+}
+
+export interface CreateChannelIntegrationInput {
+  organizationId: string
+  provider: ChannelIntegration["provider"]
+  providerAccountId: string
+  displayName: string
+  allowedOrigins: string[]
+  capabilities: Record<string, boolean>
+  credentialRef: string | null
+}
+
+export interface ClaimInboundEventInput {
+  organizationId: string
+  integrationId: string
+  providerEventId: string
+  eventType: string
+  payloadHash: string
+  correlationId: string
+}
+
+export interface ClaimInboundEventResult {
+  event: ChannelInboundEvent
+  claimed: boolean
+  inFlight: boolean
 }
 
 export interface AppendMessageInput {
@@ -57,7 +84,30 @@ export const ACTIVE_CONVERSATION_STATUSES = [
   "REOPENED",
 ] as const
 
-export interface Store {
+export interface Store { 
+  createChannelIntegration(
+    input: CreateChannelIntegrationInput
+  ): Promise<ChannelIntegration>
+  listChannelIntegrations(
+    organizationId: string
+  ): Promise<ChannelIntegration[]>
+  getPublicChannelIntegration(
+    publicKey: string
+  ): Promise<ChannelIntegration | null>
+  claimInboundEvent(
+    input: ClaimInboundEventInput
+  ): Promise<ClaimInboundEventResult>
+  completeInboundEvent(
+    organizationId: string,
+    eventId: string,
+    messageId: string
+  ): Promise<void>
+  failInboundEvent(
+    organizationId: string,
+    eventId: string,
+    error: string
+  ): Promise<void>
+
   findActiveConversation(
     organizationId: string,
     customerId: string,
@@ -186,12 +236,150 @@ export class MemoryStore implements Store {
   private readonly knowledgeDocuments = new Map<string, KnowledgeDocument>()
   private readonly knowledgeChunks = new Map<string, KnowledgeChunk>()
   private readonly aiRuns = new Map<string, AiRun>()
+  private readonly channelIntegrations = new Map<string, ChannelIntegration>()
+  private readonly channelIntegrationsByPublicKey = new Map<string, string>()
+  private readonly channelInboundEvents = new Map<string, ChannelInboundEvent>()
   private readonly handoffs = new Map<string, Handoff>()
   private readonly outboxEvents = new Map<string, OutboxEvent>()
   private readonly idempotency = new Map<
     string,
     { requestHash: string; userId: string }
   >()
+
+  async createChannelIntegration(
+    input: CreateChannelIntegrationInput
+  ): Promise<ChannelIntegration> {
+    const existing = [...this.channelIntegrations.values()].find(
+      (integration) =>
+        integration.organizationId === input.organizationId &&
+        integration.provider === input.provider &&
+        integration.providerAccountId === input.providerAccountId
+    )
+
+    if (existing) throw new Error("CHANNEL_INTEGRATION_EXISTS")
+
+    const now = new Date().toISOString()
+    const integration: ChannelIntegration = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      provider: input.provider,
+      providerAccountId: input.providerAccountId,
+      displayName: input.displayName.trim(),
+      publicKey: "wk_" + randomBytes(24).toString("base64url"),
+      status: "ACTIVE",
+      capabilities: clone(input.capabilities),
+      allowedOrigins: [...input.allowedOrigins],
+      credentialRef: input.credentialRef,
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    this.channelIntegrations.set(integration.id, integration)
+    this.channelIntegrationsByPublicKey.set(integration.publicKey, integration.id)
+    return clone(integration)
+  }
+
+  async listChannelIntegrations(
+    organizationId: string
+  ): Promise<ChannelIntegration[]> {
+    return clone(
+      [...this.channelIntegrations.values()].filter(
+        (integration) => integration.organizationId === organizationId
+      )
+    )
+  }
+
+  async getPublicChannelIntegration(
+    publicKey: string
+  ): Promise<ChannelIntegration | null> {
+    const id = this.channelIntegrationsByPublicKey.get(publicKey)
+    const integration = id ? this.channelIntegrations.get(id) : undefined
+    return integration ? clone(integration) : null
+  }
+
+  async claimInboundEvent(
+    input: ClaimInboundEventInput
+  ): Promise<ClaimInboundEventResult> {
+    const existing = [...this.channelInboundEvents.values()].find(
+      (event) =>
+        event.integrationId === input.integrationId &&
+        event.providerEventId === input.providerEventId
+    )
+
+    if (existing) {
+      if (existing.status === "PROCESSED") {
+        return { event: clone(existing), claimed: false, inFlight: false }
+      }
+
+      if (
+        existing.status === "PROCESSING" &&
+        existing.leaseUntil &&
+        new Date(existing.leaseUntil).getTime() > Date.now()
+      ) {
+        return { event: clone(existing), claimed: false, inFlight: true }
+      }
+
+      existing.status = "PROCESSING"
+      existing.attempts += 1
+      existing.leaseUntil = new Date(Date.now() + 60_000).toISOString()
+      existing.lastError = null
+      return { event: clone(existing), claimed: true, inFlight: false }
+    }
+
+    const now = new Date().toISOString()
+    const event: ChannelInboundEvent = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      integrationId: input.integrationId,
+      providerEventId: input.providerEventId,
+      eventType: input.eventType,
+      payloadHash: input.payloadHash,
+      status: "PROCESSING",
+      attempts: 1,
+      leaseUntil: new Date(Date.now() + 60_000).toISOString(),
+      messageId: null,
+      correlationId: input.correlationId,
+      lastError: null,
+      receivedAt: now,
+      processedAt: null,
+      createdAt: now,
+    }
+
+    this.channelInboundEvents.set(event.id, event)
+    return { event: clone(event), claimed: true, inFlight: false }
+  }
+
+  async completeInboundEvent(
+    organizationId: string,
+    eventId: string,
+    messageId: string
+  ): Promise<void> {
+    const event = this.channelInboundEvents.get(eventId)
+    if (!event || event.organizationId !== organizationId) {
+      throw new Error("INBOUND_EVENT_NOT_FOUND")
+    }
+
+    event.status = "PROCESSED"
+    event.messageId = messageId
+    event.leaseUntil = null
+    event.processedAt = new Date().toISOString()
+    event.lastError = null
+  }
+
+  async failInboundEvent(
+    organizationId: string,
+    eventId: string,
+    error: string
+  ): Promise<void> {
+    const event = this.channelInboundEvents.get(eventId)
+    if (!event || event.organizationId !== organizationId) {
+      throw new Error("INBOUND_EVENT_NOT_FOUND")
+    }
+
+    event.status = "FAILED"
+    event.leaseUntil = null
+    event.lastError = error.slice(0, 500)
+  }
 
   async ping(): Promise<void> {}
 
