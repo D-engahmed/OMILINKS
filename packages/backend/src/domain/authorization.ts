@@ -17,6 +17,8 @@ const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "integration.read",
     "integration.manage",
     "ai.manage",
+    "workflow.manage",
+    "workflow.approve",
   ],
   ADMIN: [
     "organization.manage",
@@ -33,6 +35,8 @@ const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "integration.read",
     "integration.manage",
     "ai.manage",
+    "workflow.manage",
+    "workflow.approve",
   ],
   SUPERVISOR: [
     "customer.read",
@@ -46,6 +50,8 @@ const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "knowledge.manage",
     "integration.read",
     "ai.manage",
+    "workflow.manage",
+    "workflow.approve",
   ],
   AGENT: [
     "customer.read",
