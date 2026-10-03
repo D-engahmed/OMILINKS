@@ -7,11 +7,7 @@ function eventConversationId(event: EventInbox): string | null {
   const raw = event.payload["conversation"] ?? event.payload["message"] ?? event.payload["queueItem"]
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null
   const value = raw as Record<string, unknown>
-  return typeof value["conversationId"] === "string"
-    ? value["conversationId"]
-    : typeof value["id"] === "string" && event.eventType === "conversation.created"
-      ? value["id"]
-      : null
+  return typeof value["conversationId"] === "string" ? value["conversationId"] : null
 }
 
 async function routeQueuedConversation(store: Store, context: WorkerEventContext): Promise<void> {
@@ -49,7 +45,6 @@ export function createDefaultEventConsumers(store: Store): EventConsumer[] {
       consumerId: "routing-worker",
       workerClass: "routing",
       eventTypes: [
-        "conversation.created",
         "conversation.message.received",
         "conversation.queue.entered",
       ],
