@@ -880,6 +880,44 @@ export class Application {
     })
   }
 
+  async listDeadEventInbox(
+    ctx: AuthenticatedContext,
+    input: { consumerId?: string; limit: number }
+  ) {
+    authorize(ctx.principal.membership, "workforce.manage")
+
+    if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) {
+      throw new AppError(400, "VALIDATION_ERROR", "limit must be between 1 and 100.")
+    }
+
+    return await this.store.listDeadEventInbox({
+      organizationId: ctx.organizationId,
+      ...input,
+    })
+  }
+
+  async replayDeadEvent(
+    ctx: AuthenticatedContext,
+    inboxId: string
+  ) {
+    authorize(ctx.principal.membership, "workforce.manage")
+
+    try {
+      return await this.store.replayDeadEventInbox({
+        organizationId: ctx.organizationId,
+        inboxId,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message === "EVENT_INBOX_NOT_DEAD") {
+        throw new AppError(409, "CONFLICT", "Event delivery is not in the dead-letter state.")
+      }
+      if (error instanceof Error && error.message === "EVENT_INBOX_NOT_FOUND") {
+        throw new AppError(404, "NOT_FOUND", "Event delivery not found.")
+      }
+      throw error
+    }
+  }
+
   async listRoutingPolicies(ctx: AuthenticatedContext) {
     authorize(ctx.principal.membership, "workforce.manage")
     return await this.store.listRoutingPolicies(ctx.organizationId)
