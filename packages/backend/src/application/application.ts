@@ -2,7 +2,6 @@ import { authorize } from "../domain/authorization.js"
 import type {
   ChannelIntegration,
   ChannelProvider,
-  Conversation,
   Principal,
   RoutingPolicyConfig,
   PresenceState,
