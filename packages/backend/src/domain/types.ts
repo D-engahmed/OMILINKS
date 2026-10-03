@@ -115,6 +115,26 @@ export interface Message {
   createdAt: string
 }
 
+export type OutboxEventStatus = "PENDING" | "PUBLISHED" | "DEAD"
+
+export interface OutboxEvent {
+  id: string
+  organizationId: string
+  eventType: string
+  version: number
+  aggregateType: string
+  aggregateId: string
+  occurredAt: string
+  correlationId: string
+  causationId: string | null
+  payload: Record<string, unknown>
+  status: OutboxEventStatus
+  attempts: number
+  lastError: string | null
+  publishedAt: string | null
+  createdAt: string
+}
+
 export interface WorkforceMember {
   id: string
   organizationId: string

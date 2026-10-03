@@ -374,6 +374,16 @@ async function route(
     })
   }
 
+  const aiRunsMatch = url.pathname.match(
+    /^\/api\/v1\/conversations\/([^/]+)\/ai-runs$/
+  )
+
+  if (aiRunsMatch && method === "GET") {
+    return json({
+      items: await appApplication.listAiRuns(context, aiRunsMatch[1]!),
+    })
+  }
+
   if (url.pathname === "/api/v1/knowledge/documents") {
     if (method === "GET") {
       return json({ items: await appApplication.listKnowledgeDocuments(context) })

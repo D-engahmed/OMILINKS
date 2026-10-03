@@ -16,6 +16,7 @@ import type {
   Membership,
   Message,
   Organization,
+  OutboxEvent,
   Principal,
   Session,
   User,
@@ -63,6 +64,7 @@ export interface Store {
     channel: string
   ): Promise<Conversation | null>
   appendMessage(input: AppendMessageInput): Promise<{ message: Message; created: boolean }>
+  listOutboxEvents(organizationId: string): Promise<OutboxEvent[]>
   listMessages(
     organizationId: string,
     conversationId: string,
@@ -185,6 +187,7 @@ export class MemoryStore implements Store {
   private readonly knowledgeChunks = new Map<string, KnowledgeChunk>()
   private readonly aiRuns = new Map<string, AiRun>()
   private readonly handoffs = new Map<string, Handoff>()
+  private readonly outboxEvents = new Map<string, OutboxEvent>()
   private readonly idempotency = new Map<
     string,
     { requestHash: string; userId: string }
@@ -746,6 +749,38 @@ export class MemoryStore implements Store {
     return clone(assignment)
   }
 
+  private emitOutbox(input: {
+    organizationId: string
+    eventType: string
+    aggregateType: string
+    aggregateId: string
+    correlationId: string
+    causationId?: string | null
+    payload: Record<string, unknown>
+  }): OutboxEvent {
+    const now = new Date().toISOString()
+    const event: OutboxEvent = {
+      id: randomUUID(),
+      organizationId: input.organizationId,
+      eventType: input.eventType,
+      version: 1,
+      aggregateType: input.aggregateType,
+      aggregateId: input.aggregateId,
+      occurredAt: now,
+      correlationId: input.correlationId,
+      causationId: input.causationId ?? null,
+      payload: clone(input.payload),
+      status: "PENDING",
+      attempts: 0,
+      lastError: null,
+      publishedAt: null,
+      createdAt: now,
+    }
+
+    this.outboxEvents.set(event.id, event)
+    return clone(event)
+  }
+
   private appendMessageSync(input: AppendMessageInput): {
     message: Message
     created: boolean
@@ -787,6 +822,15 @@ export class MemoryStore implements Store {
     }
 
     this.messages.set(message.id, message)
+    this.emitOutbox({
+      organizationId: message.organizationId,
+      eventType: "conversation.message.created",
+      aggregateType: "conversation",
+      aggregateId: message.conversationId,
+      correlationId: message.id,
+      causationId: message.providerMessageId ?? message.clientMessageId,
+      payload: { message },
+    })
     return { message: clone(message), created: true }
   }
 
@@ -794,6 +838,14 @@ export class MemoryStore implements Store {
     input: AppendMessageInput
   ): Promise<{ message: Message; created: boolean }> {
     return this.appendMessageSync(input)
+  }
+
+  async listOutboxEvents(organizationId: string): Promise<OutboxEvent[]> {
+    return clone(
+      [...this.outboxEvents.values()]
+        .filter((event) => event.organizationId === organizationId)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    )
   }
 
   async listMessages(
@@ -833,6 +885,15 @@ export class MemoryStore implements Store {
     }
 
     this.aiRuns.set(run.id, run)
+    this.emitOutbox({
+      organizationId: run.organizationId,
+      eventType: "ai.run.completed",
+      aggregateType: "ai_run",
+      aggregateId: run.id,
+      correlationId: run.id,
+      causationId: run.inboundMessageId,
+      payload: { run },
+    })
     return clone(run)
   }
 
@@ -933,6 +994,30 @@ export class MemoryStore implements Store {
       updatedAt: now,
     }
     this.handoffs.set(handoff.id, handoff)
+    this.emitOutbox({
+      organizationId: handoff.organizationId,
+      eventType: "conversation.control.changed",
+      aggregateType: "conversation",
+      aggregateId: conversation.id,
+      correlationId: handoff.id,
+      causationId: input.run.inboundMessageId,
+      payload: {
+        conversationId: conversation.id,
+        previousControl: "ai",
+        control: "queue",
+        controlVersion: conversation.controlVersion,
+        version: conversation.version,
+      },
+    })
+    this.emitOutbox({
+      organizationId: handoff.organizationId,
+      eventType: "conversation.handoff.created",
+      aggregateType: "conversation",
+      aggregateId: conversation.id,
+      correlationId: handoff.id,
+      causationId: input.run.inboundMessageId,
+      payload: { handoff },
+    })
 
     this.appendMessageSync({
       organizationId: input.organizationId,
