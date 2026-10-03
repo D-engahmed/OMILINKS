@@ -445,6 +445,21 @@ export class Application {
     return await this.store.listHandoffs(ctx.organizationId, status)
   }
 
+  async listAiRuns(ctx: AuthenticatedContext, conversationId: string) {
+    authorize(ctx.principal.membership, "conversation.read")
+
+    const conversation = await this.store.getConversation(
+      ctx.organizationId,
+      conversationId
+    )
+
+    if (!conversation) {
+      throw new AppError(404, "NOT_FOUND", "Conversation not found.")
+    }
+
+    return await this.store.listAiRuns(ctx.organizationId, conversationId)
+  }
+
   async createKnowledgeDocument(
     ctx: AuthenticatedContext,
     input: { title: string; content: string }
