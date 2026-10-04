@@ -57,7 +57,7 @@ export function WidgetChat() {
     }
 
     fetch(
-      apiUrl.replace(//$/, "") +
+      apiUrl.replace(/\/$/, "") +
         "/public/v1/widget/" +
         encodeURIComponent(publicKey) +
         "/config"
