@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { FailoverModelGateway } from "./ai/model-router.js"
-import { inspectInput, inspectOutput } from "./ai/guardrails.js"
+import { inspectInput, inspectOutput, validateGuardrailConfig } from "./ai/guardrails.js"
 import { ScriptedGateway, storeTest } from "./test-support.js"
 import { AiPlatformService } from "./application/ai-platform.js"
 import { createApp } from "./app.js"
@@ -39,6 +39,18 @@ test("AI guardrails deterministically block configured input and output", () => 
   assert.equal(inspectInput("x".repeat(21), config).code, "INPUT_TOO_LARGE")
   assert.equal(inspectOutput("the secret is x", config).code, "BLOCKED_OUTPUT")
   assert.equal(inspectOutput("x".repeat(21), config).code, "OUTPUT_TOO_LARGE")
+})
+
+test("AI guardrail validation rejects missing or malformed runtime config", () => {
+  assert.equal(validateGuardrailConfig(undefined), false)
+  assert.equal(validateGuardrailConfig(null), false)
+  assert.equal(validateGuardrailConfig({}), false)
+  assert.equal(validateGuardrailConfig({
+    maxInputChars: 4000,
+    maxOutputChars: 1000,
+    blockedInputPatterns: ["["],
+    blockedOutputPatterns: [],
+  }), false)
 })
 
 test("model failover preserves the registered model id and computes registry cost", async () => {
