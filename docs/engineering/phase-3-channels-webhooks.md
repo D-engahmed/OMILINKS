@@ -44,7 +44,7 @@ Changing WhatsApp parsing must not change Customer or Conversation rules.
 - shared channel adapter contract;
 - Web Widget adapter;
 - public widget configuration endpoint;
-- public widget message endpoint;
+- public widget message endpoint for inbound send and tenant-safe conversation readback;
 - inbound provider-event ledger;
 - provider-event deduplication before business mutation;
 - retryable ingress state with a lease;
@@ -111,6 +111,12 @@ DB-->>P: commit
 P-->>API: canonical ids
 API-->>W: 202 accepted
 W-->>C: show accepted
+loop conversation sync
+  W->>API: GET /public/v1/widget/{publicKey}/messages?visitorId=...
+  API->>DB: resolve integration + visitor conversation
+  DB-->>API: canonical messages
+  API-->>W: inbound/outbound conversation messages
+end
 ```
 
 AI inference is intentionally not executed by the public channel endpoint. Phase 3 proves channel acceptance and canonicalization. Durable asynchronous processing is a later event/worker phase.
@@ -264,6 +270,7 @@ Public widget:
 
 ```text
 GET  /public/v1/widget/{publicKey}/config
+GET  /public/v1/widget/{publicKey}/messages?visitorId={visitorId}
 POST /public/v1/widget/{publicKey}/messages
 OPTIONS /public/v1/widget/{publicKey}/messages
 ```
@@ -319,6 +326,7 @@ Phase 3 tests cover:
 - origin rejection;
 - mandatory stable message identity;
 - CORS preflight;
+- tenant-safe widget conversation readback for AI/human replies;
 - tenant isolation through the existing store test harness.
 
 CI also runs PostgreSQL migrations and the full backend test/build gate.
@@ -331,7 +339,7 @@ Telegram live credentials
 Facebook live credentials
 Instagram live credentials
 SMS provider credentials
-outbound sending workers
+outbound provider sending workers
 delivery reconciliation
 general retry queues
 dead letters
@@ -354,6 +362,7 @@ Those belong to later phases. This separation is intentional: channel transport 
 [✓] canonical message persistence
 [✓] canonical received event
 [✓] widget client
+[✓] tenant-safe widget conversation readback
 [✓] authenticated channel management
 [✓] negative-path tests
 [✓] PostgreSQL migration support
