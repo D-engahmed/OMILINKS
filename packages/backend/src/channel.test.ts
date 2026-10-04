@@ -85,7 +85,7 @@ storeTest("phase 3: tenant can create and inspect a widget integration", async (
   assert.equal(integration.provider, "widget")
   assert.match(integration.publicKey, /^wk_[A-Za-z0-9_-]+$/)
   assert.equal(integration.capabilities.inbound_text, true)
-  assert.equal(integration.capabilities.outbound_text, false)
+  assert.equal(integration.capabilities.outbound_text, true)
 
   const listed = await call(handle, "GET", "/api/v1/channels", {
     token: owner.session.accessToken,
