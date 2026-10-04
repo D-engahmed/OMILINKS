@@ -177,6 +177,66 @@ storeTest("phase 3: widget ingress binds tenant from integration and persists ca
   assert.equal(events.filter((event) => event.eventType === "conversation.message.received").length, 1)
 })
 
+storeTest("phase 3: widget readback returns only the visitor conversation", async (makeStore) => {
+  const store = await makeStore()
+  const handle = await createApp(store)
+  const owner = await signup(handle, "Alpha", "owner@alpha.example")
+  const integration = await createWidget(handle, owner.session.accessToken)
+
+  const inbound = await call(
+    handle,
+    "POST",
+    "/public/v1/widget/" + integration.publicKey + "/messages",
+    {
+      origin: "https://shop.example",
+      widgetMessageId: "widget-readback-001",
+      body: {
+        visitorId: "visitor-readback",
+        content: "Where is my order?",
+      },
+    }
+  )
+  assert.equal(inbound.status, 202)
+  const inboundBody = (await inbound.json()) as { conversationId: string }
+
+  await store.appendMessage({
+    organizationId: owner.organization.id,
+    conversationId: inboundBody.conversationId,
+    direction: "OUTBOUND",
+    authorType: "AI",
+    content: "Your order is on the way.",
+    clientMessageId: "reply-001",
+  })
+
+  const response = await call(
+    handle,
+    "GET",
+    "/public/v1/widget/" + integration.publicKey + "/messages?visitorId=visitor-readback"
+  )
+  assert.equal(response.status, 200)
+
+  const body = (await response.json()) as {
+    conversationId: string
+    items: Array<{ direction: string; authorType: string; content: string }>
+  }
+  assert.equal(body.conversationId, inboundBody.conversationId)
+  assert.deepEqual(
+    body.items.map((item) => [item.direction, item.authorType, item.content]),
+    [
+      ["INBOUND", "CUSTOMER", "Where is my order?"],
+      ["OUTBOUND", "AI", "Your order is on the way."],
+    ]
+  )
+
+  const otherVisitor = await call(
+    handle,
+    "GET",
+    "/public/v1/widget/" + integration.publicKey + "/messages?visitorId=other-visitor"
+  )
+  assert.equal(otherVisitor.status, 200)
+  assert.deepEqual((await otherVisitor.json()).items, [])
+})
+
 storeTest("phase 3: provider event dedupe happens before business mutation", async (makeStore) => {
   const store = await makeStore()
   const handle = await createApp(store)
