@@ -78,7 +78,7 @@ export function WidgetChat() {
 
   const endpoint = useMemo(
     () =>
-      apiUrl.replace(//$/, "") +
+      apiUrl.replace(/\/$/, "") +
       "/public/v1/widget/" +
       encodeURIComponent(publicKey) +
       "/messages",
