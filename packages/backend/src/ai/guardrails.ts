@@ -27,12 +27,13 @@ export function validateGuardrailConfig(config: unknown): config is GuardrailCon
   if (!config || typeof config !== "object") return false
 
   const candidate = config as Partial<GuardrailConfig>
-  if (!Number.isInteger(candidate.maxInputChars) || candidate.maxInputChars < 1 || candidate.maxInputChars > 100_000) return false
-  if (!Number.isInteger(candidate.maxOutputChars) || candidate.maxOutputChars < 1 || candidate.maxOutputChars > 100_000) return false
-  if (!Array.isArray(candidate.blockedInputPatterns) || candidate.blockedInputPatterns.length > 100) return false
-  if (!Array.isArray(candidate.blockedOutputPatterns) || candidate.blockedOutputPatterns.length > 100) return false
+  const { maxInputChars, maxOutputChars, blockedInputPatterns, blockedOutputPatterns } = candidate
+  if (!Number.isInteger(maxInputChars) || maxInputChars < 1 || maxInputChars > 100_000) return false
+  if (!Number.isInteger(maxOutputChars) || maxOutputChars < 1 || maxOutputChars > 100_000) return false
+  if (!Array.isArray(blockedInputPatterns) || blockedInputPatterns.length > 100) return false
+  if (!Array.isArray(blockedOutputPatterns) || blockedOutputPatterns.length > 100) return false
 
-  for (const pattern of [...candidate.blockedInputPatterns, ...candidate.blockedOutputPatterns]) {
+  for (const pattern of [...blockedInputPatterns, ...blockedOutputPatterns]) {
     if (typeof pattern !== "string" || pattern.length === 0 || pattern.length > 500) return false
     try {
       new RegExp(pattern, "iu")
