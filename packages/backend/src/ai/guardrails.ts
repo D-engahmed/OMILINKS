@@ -28,8 +28,8 @@ export function validateGuardrailConfig(config: unknown): config is GuardrailCon
 
   const candidate = config as Partial<GuardrailConfig>
   const { maxInputChars, maxOutputChars, blockedInputPatterns, blockedOutputPatterns } = candidate
-  if (!Number.isInteger(maxInputChars) || maxInputChars < 1 || maxInputChars > 100_000) return false
-  if (!Number.isInteger(maxOutputChars) || maxOutputChars < 1 || maxOutputChars > 100_000) return false
+  if (typeof maxInputChars !== "number" || !Number.isInteger(maxInputChars) || maxInputChars < 1 || maxInputChars > 100_000) return false
+  if (typeof maxOutputChars !== "number" || !Number.isInteger(maxOutputChars) || maxOutputChars < 1 || maxOutputChars > 100_000) return false
   if (!Array.isArray(blockedInputPatterns) || blockedInputPatterns.length > 100) return false
   if (!Array.isArray(blockedOutputPatterns) || blockedOutputPatterns.length > 100) return false
 
