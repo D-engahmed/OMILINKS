@@ -163,6 +163,7 @@ test("migration runner is idempotent", options, async () => {
       "0007_event_runtime.sql",
       "0008_ai_platform.sql",
       "0009_workflows.sql",
+      "0010_quality.sql",
     ]
   )
 })
