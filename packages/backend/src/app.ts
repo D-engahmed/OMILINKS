@@ -202,6 +202,52 @@ async function route(
       return json(await channelIngress.getPublicConfig(publicKey))
     }
 
+    if (method === "GET" && action === "messages") {
+      const visitorId = new URL(request.url).searchParams.get("visitorId")?.trim() ?? ""
+      if (!/^[A-Za-z0-9._:-]{1,255}$/.test(visitorId)) {
+        throw new AppError(400, "VALIDATION_ERROR", "A valid visitorId is required.")
+      }
+
+      const integration = await store.getPublicChannelIntegration(publicKey)
+      if (!integration || integration.status === "DISABLED") {
+        throw new AppError(404, "CHANNEL_NOT_FOUND", "Channel integration not found.")
+      }
+
+      const customer = await store.findCustomerByIdentity(
+        integration.organizationId,
+        "widget",
+        integration.providerAccountId,
+        visitorId
+      )
+      if (!customer) return json({ items: [] })
+
+      const conversation = await store.findActiveConversation(
+        integration.organizationId,
+        customer.id,
+        "widget"
+      )
+      if (!conversation) return json({ items: [] })
+
+      const messages = await store.listMessages(
+        integration.organizationId,
+        conversation.id,
+        100
+      )
+
+      return json({
+        conversationId: conversation.id,
+        items: messages
+          .filter((message) => message.direction === "INBOUND" || message.direction === "OUTBOUND")
+          .map((message) => ({
+            id: message.id,
+            direction: message.direction,
+            authorType: message.authorType,
+            content: message.content,
+            occurredAt: message.occurredAt,
+          })),
+      })
+    }
+
     if (method === "POST" && action === "messages") {
       const body = await readJson(request)
       const providerEventId =

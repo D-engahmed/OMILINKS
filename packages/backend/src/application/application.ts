@@ -310,7 +310,7 @@ export class Application {
         allowedOrigins,
         capabilities: {
           inbound_text: true,
-          outbound_text: false,
+          outbound_text: true,
           media: false,
           realtime: false,
         },
