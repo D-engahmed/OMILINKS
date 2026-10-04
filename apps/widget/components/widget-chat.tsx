@@ -12,8 +12,11 @@ type WidgetConfig = {
 
 type ChatMessage = {
   id: string
+  direction: "INBOUND" | "OUTBOUND"
+  authorType: "CUSTOMER" | "HUMAN" | "AI" | "SYSTEM"
   content: string
-  status: "sending" | "accepted"
+  occurredAt: string
+  status?: "sending" | "accepted"
 }
 
 function getOrCreateVisitorId(): string {
@@ -54,7 +57,7 @@ export function WidgetChat() {
     }
 
     fetch(
-      apiUrl.replace(/\/$/, "") +
+      apiUrl.replace(//$/, "") +
         "/public/v1/widget/" +
         encodeURIComponent(publicKey) +
         "/config"
@@ -75,12 +78,53 @@ export function WidgetChat() {
 
   const endpoint = useMemo(
     () =>
-      apiUrl.replace(/\/$/, "") +
+      apiUrl.replace(//$/, "") +
       "/public/v1/widget/" +
       encodeURIComponent(publicKey) +
       "/messages",
     [apiUrl, publicKey]
   )
+
+  useEffect(() => {
+    if (state !== "ready" || !visitorId || !publicKey) return
+
+    let active = true
+
+    const syncMessages = async () => {
+      try {
+        const response = await fetch(
+          endpoint + "?visitorId=" + encodeURIComponent(visitorId),
+          { cache: "no-store" }
+        )
+        if (!response.ok) throw new Error("Conversation sync failed.")
+
+        const body = (await response.json()) as {
+          items: ChatMessage[]
+        }
+
+        if (active) {
+          setMessages((current) => {
+            const pending = current.filter(
+              (message) =>
+                message.status === "sending" &&
+                !body.items.some((item) => item.id === message.id)
+            )
+            return [...body.items.map((item) => ({ ...item, status: "accepted" as const })), ...pending]
+          })
+        }
+      } catch {
+        // Polling is best-effort; the send path remains authoritative.
+      }
+    }
+
+    void syncMessages()
+    const timer = window.setInterval(() => void syncMessages(), 1500)
+
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [endpoint, publicKey, state, visitorId])
 
   async function send() {
     const trimmed = content.trim()
@@ -93,7 +137,14 @@ export function WidgetChat() {
 
     setMessages((current) => [
       ...current,
-      { id, content: trimmed, status: "sending" },
+      {
+        id,
+        direction: "INBOUND",
+        authorType: "CUSTOMER",
+        content: trimmed,
+        occurredAt: new Date().toISOString(),
+        status: "sending",
+      },
     ])
     setContent("")
 
@@ -124,6 +175,7 @@ export function WidgetChat() {
           message.id === id ? { ...message, status: "accepted" } : message
         )
       )
+      setError("")
     } catch (cause: unknown) {
       setMessages((current) => current.filter((message) => message.id !== id))
       setError(cause instanceof Error ? cause.message : "Message failed.")
@@ -142,30 +194,47 @@ export function WidgetChat() {
           </h1>
           <p className="mt-1 text-xs text-white/50">
             {state === "ready"
-              ? "Messages are durably accepted by the platform."
+              ? "Connected to your conversation."
               : state === "loading"
                 ? "Connecting…"
                 : "Channel configuration error"}
           </p>
         </header>
 
-        <div className="min-h-72 space-y-3 p-5">
+        <div className="min-h-72 space-y-3 overflow-y-auto p-5">
           {messages.length === 0 ? (
             <div className="rounded-xl border border-dashed border-white/10 p-4 text-sm text-white/50">
               Send a message to create or resume your conversation.
             </div>
           ) : (
-            messages.map((message) => (
-              <div
-                key={message.id}
-                className="ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-white px-4 py-3 text-sm text-neutral-950"
-              >
-                <div>{message.content}</div>
-                <div className="mt-1 text-[10px] uppercase tracking-wide text-neutral-500">
-                  {message.status}
+            messages.map((message) => {
+              const outbound = message.direction === "OUTBOUND"
+              return (
+                <div
+                  key={message.id}
+                  className={
+                    "max-w-[85%] rounded-2xl px-4 py-3 text-sm " +
+                    (outbound
+                      ? "mr-auto rounded-bl-md bg-white/10 text-white"
+                      : "ml-auto rounded-br-md bg-white text-neutral-950")
+                  }
+                >
+                  <div>{message.content}</div>
+                  <div
+                    className={
+                      "mt-1 text-[10px] uppercase tracking-wide " +
+                      (outbound ? "text-white/40" : "text-neutral-500")
+                    }
+                  >
+                    {message.status === "sending"
+                      ? "sending"
+                      : outbound
+                        ? message.authorType.toLowerCase()
+                        : "you"}
+                  </div>
                 </div>
-              </div>
-            ))
+              )
+            })
           )}
 
           {error ? (
