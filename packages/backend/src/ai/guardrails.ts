@@ -23,15 +23,25 @@ function compilePatterns(patterns: string[]): RegExp[] {
   return compiled
 }
 
-export function validateGuardrailConfig(config: GuardrailConfig): boolean {
-  if (!Number.isInteger(config.maxInputChars) || config.maxInputChars < 1 || config.maxInputChars > 100_000) return false
-  if (!Number.isInteger(config.maxOutputChars) || config.maxOutputChars < 1 || config.maxOutputChars > 100_000) return false
-  if (!Array.isArray(config.blockedInputPatterns) || config.blockedInputPatterns.length > 100) return false
-  if (!Array.isArray(config.blockedOutputPatterns) || config.blockedOutputPatterns.length > 100) return false
-  for (const pattern of [...config.blockedInputPatterns, ...config.blockedOutputPatterns]) {
+export function validateGuardrailConfig(config: unknown): config is GuardrailConfig {
+  if (!config || typeof config !== "object") return false
+
+  const candidate = config as Partial<GuardrailConfig>
+  const { maxInputChars, maxOutputChars, blockedInputPatterns, blockedOutputPatterns } = candidate
+  if (typeof maxInputChars !== "number" || !Number.isInteger(maxInputChars) || maxInputChars < 1 || maxInputChars > 100_000) return false
+  if (typeof maxOutputChars !== "number" || !Number.isInteger(maxOutputChars) || maxOutputChars < 1 || maxOutputChars > 100_000) return false
+  if (!Array.isArray(blockedInputPatterns) || blockedInputPatterns.length > 100) return false
+  if (!Array.isArray(blockedOutputPatterns) || blockedOutputPatterns.length > 100) return false
+
+  for (const pattern of [...blockedInputPatterns, ...blockedOutputPatterns]) {
     if (typeof pattern !== "string" || pattern.length === 0 || pattern.length > 500) return false
-    try { new RegExp(pattern, "iu") } catch { return false }
+    try {
+      new RegExp(pattern, "iu")
+    } catch {
+      return false
+    }
   }
+
   return true
 }
 
