@@ -11,6 +11,8 @@ import type {
   KnowledgeDocument,
   Assignment,
   Conversation,
+  ConversationStatus,
+  InboxRow,
   Customer,
   CustomerIdentity,
   Membership,
@@ -304,6 +306,13 @@ export interface CreateQualityRemediationInput {
   kind: QualityRemediation["kind"]
   notes: string | null
 }
+export interface GetInboxViewInput {
+  organizationId: string
+  statuses: ConversationStatus[]
+  controls: ControlOwner[]
+  assigned: "any" | "assigned" | "unassigned"
+  limit: number
+}
 export interface PublishOutboxBatchInput {
   organizationId: string
   publisherId: string
@@ -558,7 +567,7 @@ export interface Store {
     inboundMessageId: string
   ): Promise<AiRun | null>
   listAiRuns(organizationId: string, conversationId: string): Promise<AiRun[]>
-  listHandoffs(organizationId: string, status?: HandoffStatus): Promise<Handoff[]>
+  listHandoffs(organizationId: string, status?: HandoffStatus, conversationId?: string): Promise<Handoff[]>
   createKnowledgeDocument(input: {
     organizationId: string
     title: string
@@ -616,6 +625,7 @@ export interface Store {
   ): Promise<Customer>
   listConversations(organizationId: string): Promise<Conversation[]>
   getConversation(organizationId: string, conversationId: string): Promise<Conversation | null>
+  getInboxView(input: GetInboxViewInput): Promise<InboxRow[]>
   createConversation(input: {
     organizationId: string
     customerId: string
@@ -3530,15 +3540,69 @@ export class MemoryStore implements Store {
 
   async listHandoffs(
     organizationId: string,
-    status?: HandoffStatus
+    status?: HandoffStatus,
+    conversationId?: string
   ): Promise<Handoff[]> {
     return clone(
       [...this.handoffs.values()].filter(
         (handoff) =>
           handoff.organizationId === organizationId &&
-          (status === undefined || handoff.status === status)
+          (status === undefined || handoff.status === status) &&
+          (conversationId === undefined || handoff.conversationId === conversationId)
       )
     )
+  }
+
+  async getInboxView(input: GetInboxViewInput): Promise<InboxRow[]> {
+    const statusSet = new Set(input.statuses)
+    const controlSet = new Set(input.controls)
+    const conversations = [...this.conversations.values()]
+      .filter(
+        (conversation) =>
+          conversation.organizationId === input.organizationId &&
+          statusSet.has(conversation.status) &&
+          controlSet.has(conversation.control)
+      )
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id))
+    const rows: InboxRow[] = []
+    for (const conversation of conversations) {
+      const assignment = [...this.assignments.values()].find(
+        (candidate) =>
+          candidate.organizationId === input.organizationId &&
+          candidate.conversationId === conversation.id &&
+          candidate.status === "ACTIVE"
+      )
+      if (input.assigned === "assigned" && !assignment) continue
+      if (input.assigned === "unassigned" && assignment) continue
+      const customer = this.customers.get(conversation.customerId)
+      if (!customer || customer.organizationId !== input.organizationId) continue
+      const lastMessage = [...this.messages.values()]
+        .filter(
+          (message) =>
+            message.organizationId === input.organizationId &&
+            message.conversationId === conversation.id
+        )
+        .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt) || b.id.localeCompare(a.id))[0] ?? null
+      const assignee = assignment ? (this.workforce.get(assignment.workforceMemberId) ?? null) : null
+      const openHandoff = [...this.handoffs.values()]
+        .filter(
+          (handoff) =>
+            handoff.organizationId === input.organizationId &&
+            handoff.conversationId === conversation.id &&
+            handoff.status === "OPEN"
+        )
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null
+      rows.push({
+        conversation: clone(conversation),
+        customer: clone(customer),
+        lastMessage: lastMessage ? clone(lastMessage) : null,
+        activeAssignment: assignment ? clone(assignment) : null,
+        assignee: assignee && assignee.organizationId === input.organizationId ? clone(assignee) : null,
+        openHandoff: openHandoff ? clone(openHandoff) : null,
+      })
+      if (rows.length >= input.limit) break
+    }
+    return rows
   }
 
   private documentView(document: KnowledgeDocument): KnowledgeDocument {

@@ -853,6 +853,15 @@ export interface AiRun extends AiRunInput {
 
 export type HandoffStatus = "OPEN" | "CLAIMED" | "CLOSED"
 
+export interface InboxRow {
+  conversation: Conversation
+  customer: Customer
+  lastMessage: Message | null
+  activeAssignment: Assignment | null
+  assignee: WorkforceMember | null
+  openHandoff: Handoff | null
+}
+
 export interface Handoff {
   id: string
   organizationId: string
