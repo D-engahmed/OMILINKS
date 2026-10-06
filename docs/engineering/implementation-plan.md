@@ -362,3 +362,10 @@ Production readiness requires:
 - support runbook.
 
 Documentation without executable evidence does not qualify.
+
+
+## Financial & Commercial Integration
+
+Commercial gate: Billing and finance are not documentation-only. Launch readiness requires measured cost attribution, payment/reconciliation evidence, and a reproducible cash-to-launch / first-customer / break-even model before commercial scaling.
+
+Cross-reference: [Financial Model](../finance/financial-model.md) and [Finance & Commercial Control Tickets](../Tickets/12-finance-commercial-control.md). Economic assumptions remain assumptions until replaced by measured evidence.
