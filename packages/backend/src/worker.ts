@@ -5,6 +5,7 @@ import { PostgresStore } from "./infrastructure/postgres-store.js"
 import { WorkerRuntime } from "./infrastructure/event-runtime.js"
 import { createDefaultEventConsumers } from "./infrastructure/event-consumers.js"
 import { createWorkflowRuntimeOptions } from "./infrastructure/workflow-consumer.js"
+import { log } from "./shared/logger.js"
 
 const config = loadConfig()
 
@@ -31,4 +32,4 @@ process.on("SIGTERM", () => void stop())
 process.on("SIGINT", () => void stop())
 
 await runtime.start(250)
-console.log("OMNILINKS event worker runtime started")
+log("info", "OMNILINKS event worker runtime started")

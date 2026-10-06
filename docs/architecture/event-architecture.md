@@ -6,7 +6,7 @@
 
 There are three distinct concepts:
 
-~~~text
+```text
 Domain fact:
   something happened.
 
@@ -15,13 +15,13 @@ Work request:
 
 Integration notification:
   an external boundary changed.
-~~~
+```
 
 These must not be mixed.
 
 ## 2. Transactional Outbox
 
-~~~mermaid
+```mermaid
 sequenceDiagram
 participant APP as Application Service
 participant DB as PostgreSQL
@@ -36,7 +36,7 @@ PUB->>O: Read pending
 PUB->>BUS: Publish
 BUS-->>PUB: Ack
 PUB->>O: Mark published
-~~~
+```
 
 A committed business mutation always creates its required event intent in the same transaction.
 
@@ -44,11 +44,11 @@ A committed business mutation always creates its required event intent in the sa
 
 Assume at-least-once.
 
-~~~text
+```text
 publish succeeds
 consumer crashes before ack
 message delivered again
-~~~
+```
 
 Therefore every consumer must be idempotent.
 
@@ -56,14 +56,14 @@ Therefore every consumer must be idempotent.
 
 Where needed:
 
-~~~text
+```text
 consumer_id
 event_id
 first_seen_at
 processed_at
 result_reference
 status
-~~~
+```
 
 Unique constraint on consumer + event prevents duplicate effects.
 
@@ -73,11 +73,11 @@ No global order.
 
 Partition by aggregate when necessary:
 
-~~~text
+```text
 conversation_id
 workflow_run_id
 subscription_id
-~~~
+```
 
 Example: conversation message processing may require in-order handling while independent conversations process concurrently.
 
@@ -85,7 +85,7 @@ Example: conversation message processing may require in-order handling while ind
 
 Envelope:
 
-~~~json
+```json
 {
   "event_id": "uuid",
   "event_type": "conversation.message.received",
@@ -98,11 +98,11 @@ Envelope:
   "data": {},
   "metadata": {}
 }
-~~~
+```
 
 ## 7. Event Routing
 
-~~~mermaid
+```mermaid
 flowchart TD
 EVENT[Event] --> ROUTER[Event Router]
 ROUTER --> AI[AI]
@@ -111,7 +111,7 @@ ROUTER --> BILL[Billing]
 ROUTER --> QA[Quality]
 ROUTER --> ANALYTICS[Analytics]
 ROUTER --> INT[Integrations]
-~~~
+```
 
 Consumers should subscribe only to event types they need.
 
@@ -119,13 +119,13 @@ Consumers should subscribe only to event types they need.
 
 Failure classes:
 
-~~~text
+```text
 transient -> retry
 permanent -> dead letter
 unknown side effect -> reconcile
 authorization -> no retry
 schema invalid -> quarantine
-~~~
+```
 
 ## 9. Dead Letter
 
@@ -150,12 +150,12 @@ It passes through normal consumer idempotency and authorization.
 
 Compatibility:
 
-~~~text
+```text
 add optional field -> compatible
 change field meaning -> new version
 remove required field -> breaking/new version
 change units/semantic -> new version
-~~~
+```
 
 ## 12. Event Security
 

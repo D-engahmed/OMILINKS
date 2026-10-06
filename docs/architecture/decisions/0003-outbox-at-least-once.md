@@ -10,7 +10,7 @@ A business transaction and event publication can fail independently.
 
 Persist business state and outbox event in the same database transaction; publish asynchronously; assume at-least-once delivery.
 
-~~~mermaid
+```mermaid
 sequenceDiagram
 participant APP as Application
 participant DB as PostgreSQL
@@ -22,7 +22,7 @@ APP->>O: Event
 DB-->>APP: Commit
 O->>BUS: Publish
 BUS-->>O: Ack
-~~~
+```
 
 Consumers are idempotent.
 

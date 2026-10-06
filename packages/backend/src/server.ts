@@ -6,6 +6,7 @@ import { MemoryStore, type Store } from "./infrastructure/store.js"
 import { PostgresStore } from "./infrastructure/postgres-store.js"
 import { DevIdentityProvider } from "./application/identity.js"
 import { createNodeServer } from "./node-server.js"
+import { log } from "./shared/logger.js"
 
 const config = loadConfig()
 
@@ -22,9 +23,7 @@ if (config.databaseUrl) {
 } else if (config.environment === "production") {
   throw new Error("DATABASE_URL is required in production")
 } else {
-  console.warn(
-    "DATABASE_URL is not set: using the in-memory store (data is lost on restart)."
-  )
+  log("warn", "DATABASE_URL is not set: using the in-memory store (data is lost on restart).")
   store = new MemoryStore()
 }
 
@@ -43,7 +42,7 @@ const server = createNodeServer(handle, {
 })
 
 server.listen(config.port, () => {
-  console.log(`OMNILINKS backend listening on http://localhost:${config.port}`)
+  log("info", "OMNILINKS backend listening", { port: config.port, environment: config.environment })
 })
 
 async function shutdown(): Promise<void> {

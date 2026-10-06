@@ -47,7 +47,7 @@ OMILINKS/
 └── turbo.json
 ```
 
-The codebase is implemented as vertical phases. Phase 0-2 establish the tenant and conversation/AI core; Phase 3 provides the Web Widget channel boundary with durable inbound-event deduplication; Phase 4 provides deterministic workforce routing, queues, capacity, presence, and assignment safety; Phase 5 provides a PostgreSQL-backed durable event and worker runtime with retries, leases, dead-letter replay, and queue routing; Phase 6 provides the AI control plane, model registry/failover, guardrails, durable AI traceability, cost attribution, and evaluation; Phase 7 provides the durable workflow engine (versioned definitions, idempotent triggers, WAIT/APPROVAL states, bounded retries; kernel steps only); Phase 8 provides the quality kernel (versioned scorecards, deterministic sampling, evidence-linked human review, AI-proposal fencing, remediations). Later domains remain target architecture until their implementation and tests land.
+The codebase is implemented as vertical phases. Phase 0-2 establish the tenant and conversation/AI core; Phase 3 provides the Web Widget channel boundary with durable inbound-event deduplication; Phase 4 provides deterministic workforce routing, queues, capacity, presence, and assignment safety; Phase 5 provides a PostgreSQL-backed durable event and worker runtime with retries, leases, dead-letter replay, and queue routing; Phase 6 provides the AI control plane, model registry/failover, guardrails, durable AI traceability, cost attribution, and evaluation; Phase 7 provides the durable workflow engine (versioned definitions, idempotent triggers, WAIT/APPROVAL states, bounded retries; kernel steps only); Phase 8 provides the quality kernel (versioned scorecards, deterministic sampling, evidence-linked human review, AI-proposal fencing, remediations); the operator inbox in `apps/web` provides the authenticated console (inbox list, conversation detail, handoff visibility, idempotent human reply). Later domains remain target architecture until their implementation and tests land.
 
 ## Documentation
 
@@ -83,8 +83,14 @@ Automation providers such as n8n are integrations, not the source of truth for c
 
 ```bash
 pnpm install
+docker compose up -d                                  # PostgreSQL
+pnpm --filter @workspace/backend db:migrate           # apply migrations
+pnpm --filter @workspace/backend db:seed              # idempotent demo tenant
 pnpm dev
 pnpm lint
 pnpm typecheck
 pnpm build
 ```
+
+Reset the database with `docker compose down -v` followed by migrate + seed.
+See `.env.example` for `DATABASE_URL`, `TEST_DATABASE_URL`, and ports.

@@ -4,7 +4,7 @@
 
 ## 1. Canonical Boundaries
 
-~~~mermaid
+```mermaid
 flowchart TB
 REQ[Requirements] --> DOM[Domain]
 DOM --> API[API]
@@ -19,7 +19,7 @@ BILL -. gates .-> WORK
 OBS[Observability] -. traces .-> API
 OBS -. traces .-> EVT
 OBS -. traces .-> WORK
-~~~
+```
 
 ## 2. Primary Contracts
 
@@ -59,7 +59,7 @@ Do not let provider SDK types redefine domain semantics.
 
 A behavioral change asks:
 
-~~~text
+```text
 does requirement change?
 does domain invariant change?
 does API change?
@@ -67,7 +67,7 @@ does event schema change?
 does data schema change?
 does security policy change?
 does test contract change?
-~~~
+```
 
 All applicable artifacts update together.
 

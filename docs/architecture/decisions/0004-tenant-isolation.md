@@ -10,11 +10,11 @@ Cross-tenant data exposure is a catastrophic failure and global get-by-ID method
 
 Tenant-owned repositories require organization context.
 
-~~~text
+```text
 getConversation(organizationId, conversationId)
 getCustomer(organizationId, customerId)
 listUsage(organizationId, filter)
-~~~
+```
 
 Database RLS may be added as defense in depth.
 

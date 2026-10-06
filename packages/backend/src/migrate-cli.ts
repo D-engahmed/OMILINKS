@@ -1,6 +1,7 @@
 import pg from "pg"
 
 import { migrate } from "./infrastructure/migrate.js"
+import { log } from "./shared/logger.js"
 
 const url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL
 
@@ -12,10 +13,9 @@ const pool = new pg.Pool({ connectionString: url, max: 1 })
 
 try {
   const applied = await migrate(pool)
-  console.log(
-    applied.length
-      ? "Applied migrations: " + applied.join(", ")
-      : "No pending migrations"
+  log(
+    "info",
+    applied.length ? "Applied migrations: " + applied.join(", ") : "No pending migrations"
   )
 } finally {
   await pool.end()

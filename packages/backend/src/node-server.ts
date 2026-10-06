@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http"
 
 import { AppError } from "./shared/errors.js"
 import { errorResponse, getRequestId } from "./shared/http.js"
+import { log } from "./shared/logger.js"
 
 async function readBody(
   incoming: IncomingMessage,
@@ -69,7 +70,9 @@ export function createNodeServer(
       outgoing.writeHead(response.status, responseHeaders)
       outgoing.end(text)
     } catch (error) {
-      if (!(error instanceof AppError)) console.error(error)
+      if (!(error instanceof AppError)) {
+        log("error", "unhandled request error", { requestId, error })
+      }
 
       const response = errorResponse(error, requestId)
       outgoing.writeHead(response.status, {

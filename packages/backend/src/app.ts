@@ -540,6 +540,17 @@ async function route(
     })
   }
 
+  if (method === "GET" && url.pathname === "/api/v1/inbox") {
+    return json({
+      items: await appApplication.getInbox(context, {
+        statuses: url.searchParams.getAll("status"),
+        controls: url.searchParams.getAll("control"),
+        assigned: url.searchParams.get("assigned") ?? undefined,
+        limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : undefined,
+      }),
+    })
+  }
+
   if (method === "GET" && url.pathname === "/api/v1/handoffs") {
     const status = url.searchParams.get("status")
 
@@ -550,7 +561,8 @@ async function route(
     return json({
       items: await appApplication.listHandoffs(
         context,
-        (status as HandoffStatus | null) ?? undefined
+        (status as HandoffStatus | null) ?? undefined,
+        url.searchParams.get("conversationId") ?? undefined
       ),
     })
   }

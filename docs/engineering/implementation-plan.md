@@ -298,7 +298,38 @@ Exit criteria:
 - migration safety;
 - support runbook.
 
-## 14. Vertical Slice Rule
+## 14. Operator Experience (cross-cutting, shipped incrementally)
+
+Implemented:
+
+- operator login/session shell in `apps/web` (token in memory only, organization
+  switcher for multi-org users);
+- enriched inbox endpoint `GET /api/v1/inbox` (conversation + customer +
+  last message + active assignment/assignee + open handoff) with status,
+  control, and assignment filters;
+- per-conversation handoff scoping on `GET /api/v1/handoffs`;
+- inbox list with 5s polling, conversation detail with message polling,
+  handoff banner, idempotent human reply (`clientMessageId`), and claim
+  via the existing assignment transaction;
+- web CI (lint/typecheck/build).
+
+Partially implemented:
+
+- message content uses `dir="auto"` bubbles; full RTL shell and Arabic-first
+  QA remain open.
+
+Target (not started):
+
+- outbound delivery boundary to providers;
+- WhatsApp adapter;
+- quality analytics/calibration UI.
+
+Deferred:
+
+- WebSockets/realtime transport (correct polling first);
+- advanced inbox analytics.
+
+## 15. Vertical Slice Rule
 
 Do not build every table first.
 

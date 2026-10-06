@@ -20,8 +20,6 @@
 12 Finance & Commercial Control
 ```
 
-> Finance is cross-cutting: the financial gates below must influence launch and scaling decisions even though the track is listed after production hardening.
-
 ## Status semantics
 
 - BASELINE: represented by the current implementation/engineering plan; re-validate with executable evidence before treating it as production-ready.
@@ -70,6 +68,7 @@ dataset version -> baseline -> metric -> regression threshold -> release evidenc
 ```text
 duplicate delivery + retry + timeout + lease loss + dead letter + replay + unknown external outcome
 ```
+
 
 ## Financial ticket rule
 

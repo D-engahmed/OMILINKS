@@ -7,6 +7,7 @@ import type {
   PublishOutboxBatchInput,
   Store,
 } from "./store.js"
+import { log } from "../shared/logger.js"
 
 export interface EventSubscription {
   consumerId: string
@@ -117,7 +118,7 @@ export class WorkerRuntime {
 
     this.classConcurrency = options.classConcurrency ?? {}
     this.onError = options.onError ?? ((error) => {
-      console.error("OMNILINKS worker runtime error", error)
+      log("error", "OMNILINKS worker runtime error", { error })
     })
     this.tickers = options.tickers ?? []
   }

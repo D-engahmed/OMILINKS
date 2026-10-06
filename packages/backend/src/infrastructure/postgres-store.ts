@@ -55,6 +55,7 @@ import type {
   WorkflowStepRun,
   WorkflowWait,
   WorkflowApproval,
+  InboxRow,
   QualityScorecard,
   QualityScorecardVersion,
   QualitySampleRule,
@@ -94,6 +95,7 @@ import type {
   FailWorkflowStepInput,
   CreateWorkflowApprovalInput,
   ResolveWorkflowApprovalInput,
+  GetInboxViewInput,
   CreateQualityScorecardVersionInput,
   CreateQualitySampleRuleInput,
   RecordQualitySampleInput,
@@ -3728,16 +3730,88 @@ export class PostgresStore implements Store {
 
   async listHandoffs(
     organizationId: string,
-    status?: HandoffStatus
+    status?: HandoffStatus,
+    conversationId?: string
   ): Promise<Handoff[]> {
     return this.tenantTx(organizationId, async (client) => {
       const result = await client.query(
         `SELECT * FROM handoffs
-          WHERE organization_id = $1 AND ($2::text IS NULL OR status = $2)
+          WHERE organization_id = $1
+            AND ($2::text IS NULL OR status = $2)
+            AND ($3::uuid IS NULL OR conversation_id = $3)
           ORDER BY created_at ASC, id ASC`,
-        [organizationId, status ?? null]
+        [organizationId, status ?? null, conversationId ?? null]
       )
       return result.rows.map(toHandoff)
+    })
+  }
+
+  async getInboxView(input: GetInboxViewInput): Promise<InboxRow[]> {
+    return this.tenantTx(input.organizationId, async (client) => {
+      const assignedFilter =
+        input.assigned === "any"
+          ? "TRUE"
+          : input.assigned === "assigned"
+            ? "EXISTS (SELECT 1 FROM assignments a WHERE a.organization_id = c.organization_id AND a.conversation_id = c.id AND a.status = 'ACTIVE')"
+            : "NOT EXISTS (SELECT 1 FROM assignments a WHERE a.organization_id = c.organization_id AND a.conversation_id = c.id AND a.status = 'ACTIVE')"
+      const conversations = await client.query(
+        `SELECT * FROM conversations c
+          WHERE organization_id = $1
+            AND status = ANY ($2)
+            AND control = ANY ($3)
+            AND ${assignedFilter}
+          ORDER BY updated_at DESC, id DESC
+          LIMIT $4`,
+        [input.organizationId, input.statuses, input.controls, input.limit]
+      )
+      const rows = conversations.rows.map(toConversation)
+      if (rows.length === 0) return []
+      const ids = rows.map((row) => row.id)
+      const customerIds = [...new Set(rows.map((row) => row.customerId))]
+      const [customers, messages, assignments, handoffs] = await Promise.all([
+        client.query(`SELECT * FROM customers WHERE organization_id = $1 AND id = ANY ($2)`, [input.organizationId, customerIds]),
+        client.query(
+          `SELECT DISTINCT ON (conversation_id) * FROM messages
+           WHERE organization_id = $1 AND conversation_id = ANY ($2)
+           ORDER BY conversation_id ASC, occurred_at DESC, id DESC`,
+          [input.organizationId, ids]
+        ),
+        client.query(
+          `SELECT * FROM assignments
+           WHERE organization_id = $1 AND conversation_id = ANY ($2) AND status = 'ACTIVE'`,
+          [input.organizationId, ids]
+        ),
+        client.query(
+          `SELECT DISTINCT ON (conversation_id) * FROM handoffs
+           WHERE organization_id = $1 AND conversation_id = ANY ($2) AND status = 'OPEN'
+           ORDER BY conversation_id ASC, created_at DESC, id DESC`,
+          [input.organizationId, ids]
+        ),
+      ])
+      const customerById = new Map(customers.rows.map(toCustomer).map((customer) => [customer.id, customer]))
+      const messageByConversation = new Map(messages.rows.map(toMessage).map((message) => [message.conversationId, message]))
+      const assignmentByConversation = new Map(assignments.rows.map(toAssignment).map((assignment) => [assignment.conversationId, assignment]))
+      const handoffByConversation = new Map(handoffs.rows.map(toHandoff).map((handoff) => [handoff.conversationId, handoff]))
+      const memberIds = [...new Set([...assignmentByConversation.values()].map((assignment) => assignment.workforceMemberId))]
+      const members = memberIds.length === 0
+        ? []
+        : (await client.query(`SELECT * FROM workforce_members WHERE organization_id = $1 AND id = ANY ($2)`, [input.organizationId, memberIds])).rows.map(toWorkforceMember)
+      const memberById = new Map(members.map((member) => [member.id, member]))
+      const view: InboxRow[] = []
+      for (const conversation of rows) {
+        const customer = customerById.get(conversation.customerId)
+        if (!customer) continue
+        const assignment = assignmentByConversation.get(conversation.id) ?? null
+        view.push({
+          conversation,
+          customer,
+          lastMessage: messageByConversation.get(conversation.id) ?? null,
+          activeAssignment: assignment,
+          assignee: assignment ? (memberById.get(assignment.workforceMemberId) ?? null) : null,
+          openHandoff: handoffByConversation.get(conversation.id) ?? null,
+        })
+      }
+      return view
     })
   }
 

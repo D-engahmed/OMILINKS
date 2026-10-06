@@ -10,14 +10,14 @@ Model output is probabilistic/untrusted and can contain prompt injection or inco
 
 All AI side effects go through independently authorized tools/domain services.
 
-~~~mermaid
+```mermaid
 flowchart LR
 MODEL[Model Output] --> TOOL[Tool Runtime]
 TOOL --> AUTH[Authorization]
 AUTH --> RISK[Risk / Approval]
 RISK --> DOMAIN[Domain Service]
 DOMAIN --> DB[(PostgreSQL)]
-~~~
+```
 
 ## Consequences
 

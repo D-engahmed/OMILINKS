@@ -10,7 +10,7 @@ Customer operations require strong relational integrity across tenant, conversat
 
 PostgreSQL owns transactional business state. Search/vector, cache and analytics stores are derived.
 
-~~~mermaid
+```mermaid
 flowchart LR
 DOMAIN[Domain] --> PG[(PostgreSQL)]
 PG --> OUTBOX[Outbox]
@@ -18,7 +18,7 @@ OUTBOX --> DERIVED[Derived Systems]
 DERIVED --> SEARCH[Search]
 DERIVED --> ANALYTICS[Analytics]
 DERIVED --> CACHE[Cache]
-~~~
+```
 
 ## Consequences
 

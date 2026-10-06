@@ -4,13 +4,16 @@ import { tokenize } from "./text.js"
 
 export interface ScoredChunk {
   chunk: KnowledgeChunk
-  /** BM25 score: only meaningful for ranking within one query. */
+  /*
+   BM25 score: only meaningful for ranking within one query. 
+  */
   score: number
-  /**
+  /*
    * Share of the query's in-corpus term weight (IDF) that the chunk contains,
    * in [0, 1]. Used as the relevance gate because, unlike BM25, it is
    * comparable across queries and corpus sizes.
    */
+
   coverage: number
 }
 
@@ -46,10 +49,13 @@ export class Bm25Retriever implements Retriever {
       )
     }
 
-    // Only terms that exist somewhere in the knowledge base count toward the
-    // denominator. Conversational filler ("long", "take") is absent from every
-    // document and must not make an answerable question look irrelevant; the
-    // model's can_answer and the citation requirement are the second gate.
+    /*
+     * Only terms that exist somewhere in the knowledge base count toward the
+     * denominator. Conversational filler ("long", "take") is absent from every
+     * document and must not make an answerable question look irrelevant; the
+     * model's can_answer and the citation requirement are the second gate.
+     */
+
     let totalWeight = 0
     for (const term of queryTerms) {
       if (docs.some((doc) => doc.frequency.has(term))) {
@@ -93,7 +99,9 @@ export class Bm25Retriever implements Retriever {
 
 export interface LabeledQuestion {
   question: string
-  /** Chunk ids that contain the answer; any one of them counts as a hit. */
+  /*
+   Chunk ids that contain the answer; any one of them counts as a hit. 
+  */
   relevantChunkIds: string[]
 }
 
@@ -104,11 +112,12 @@ export interface RetrievalEvaluation {
   misses: string[]
 }
 
-/**
+/*
  * Measures retrieval quality on a labeled set. This is the harness the
  * pipeline's relevance threshold and any future embedding retriever must be
  * judged by; it says nothing until fed real, representative questions.
  */
+
 export function evaluateRetrieval(
   retriever: Retriever,
   chunks: KnowledgeChunk[],

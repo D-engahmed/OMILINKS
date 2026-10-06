@@ -2,6 +2,8 @@ import { authorize } from "../domain/authorization.js"
 import type {
   ChannelIntegration,
   ChannelProvider,
+  ConversationStatus,
+  ControlOwner,
   Principal,
   RoutingPolicyConfig,
   PresenceState,
@@ -47,7 +49,7 @@ export class Application {
   constructor(
     private readonly store: Store,
     private readonly options: ApplicationOptions
-  ) {}
+  ) { }
 
   get sessionTtlSeconds(): number {
     return this.options.sessionTtlSeconds
@@ -68,8 +70,11 @@ export class Application {
     const verified = await this.options.identity.verify(input)
     const user = verified ? await this.store.findUserByEmail(verified.email) : null
 
-    // Same response for "bad proof" and "unknown user" so accounts cannot be
-    // enumerated through this endpoint.
+    /*
+    * Same response for "bad proof" and "unknown user" so accounts cannot be
+    * enumerated through this endpoint.
+    */
+
     if (!user || user.status !== "ACTIVE") {
       throw new AppError(401, "INVALID_CREDENTIALS", "Invalid credentials.")
     }
@@ -118,8 +123,11 @@ export class Application {
       )
     }
 
-    // The owner email comes from the identity provider, never straight from
-    // the request body.
+    /*
+     * The owner email comes from the identity provider, never straight from
+     * the request body.
+     */
+
     const verified = await this.options.identity.verify({
       email: input.ownerEmail,
       credential: input.credential,
@@ -555,9 +563,52 @@ export class Application {
     return await this.store.listMessages(ctx.organizationId, conversationId, limit)
   }
 
-  async listHandoffs(ctx: AuthenticatedContext, status: HandoffStatus | undefined) {
+  async listHandoffs(ctx: AuthenticatedContext, status: HandoffStatus | undefined, conversationId?: string) {
     authorize(ctx.principal.membership, "conversation.read")
-    return await this.store.listHandoffs(ctx.organizationId, status)
+    if (conversationId !== undefined && !isUuid(conversationId)) {
+      throw new AppError(400, "VALIDATION_ERROR", "conversationId must be a valid id.")
+    }
+    return await this.store.listHandoffs(ctx.organizationId, status, conversationId)
+  }
+
+  async getInbox(
+    ctx: AuthenticatedContext,
+    input: { statuses?: string[]; controls?: string[]; assigned?: string; limit?: number }
+  ) {
+    authorize(ctx.principal.membership, "conversation.read")
+    const validStatuses: ConversationStatus[] = ["OPEN", "ASSIGNED", "WAITING_CUSTOMER", "PENDING_REVIEW", "RESOLVED", "REOPENED", "SPAM"]
+    const validControls: ControlOwner[] = ["human", "ai", "queue"]
+    const statuses = input.statuses === undefined || input.statuses.length === 0
+      ? (["OPEN", "ASSIGNED", "WAITING_CUSTOMER", "PENDING_REVIEW", "REOPENED"] as ConversationStatus[])
+      : input.statuses
+    const controls = input.controls === undefined || input.controls.length === 0
+      ? (["human", "ai", "queue"] as ControlOwner[])
+      : input.controls
+    for (const status of statuses) {
+      if (!(validStatuses as string[]).includes(status)) {
+        throw new AppError(400, "VALIDATION_ERROR", "Invalid conversation status filter.")
+      }
+    }
+    for (const control of controls) {
+      if (!(validControls as string[]).includes(control)) {
+        throw new AppError(400, "VALIDATION_ERROR", "Invalid conversation control filter.")
+      }
+    }
+    const assigned = input.assigned ?? "any"
+    if (assigned !== "any" && assigned !== "assigned" && assigned !== "unassigned") {
+      throw new AppError(400, "VALIDATION_ERROR", "Invalid assignment filter.")
+    }
+    const limit = input.limit ?? 50
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+      throw new AppError(400, "VALIDATION_ERROR", "limit must be between 1 and 200.")
+    }
+    return await this.store.getInboxView({
+      organizationId: ctx.organizationId,
+      statuses: statuses as ConversationStatus[],
+      controls: controls as ControlOwner[],
+      assigned,
+      limit,
+    })
   }
 
   private workflows(): WorkflowService {

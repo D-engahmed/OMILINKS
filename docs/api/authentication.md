@@ -8,16 +8,15 @@ Authentication establishes a principal.
 
 Authorization establishes:
 
-~~~text
-principal
-+ organization
-+ permission
-+ scope
-+ resource
-+ resource state
-+ entitlement
-= allowed operation
-~~~
+> principal
+> + organization
+> + permission
+> + scope
+> + resource
+> + resource state
+> + entitlement
+> = allowed operation
+
 
 A valid token is never proof that a resource may be accessed.
 
@@ -33,7 +32,7 @@ A valid token is never proof that a resource may be accessed.
 
 ## 3. HTTP Security Pipeline
 
-~~~mermaid
+```mermaid
 sequenceDiagram
 participant C as Client
 participant E as Edge
@@ -51,7 +50,7 @@ Z-->>E: Allow / deny
 E->>U: Execute
 U-->>E: Result
 E-->>C: Response
-~~~
+```
 
 ## 4. Tenant Context
 
@@ -59,11 +58,11 @@ The tenant context must be derived from server-known membership/binding.
 
 Never trust:
 
-~~~json
+```json
 {
   "organizationId": "requested-by-client"
 }
-~~~
+```
 
 as an access grant.
 
@@ -73,14 +72,14 @@ For users with multiple memberships, the target organization must be one of thei
 
 Claims may identify:
 
-~~~text
-subject
-session
-issuer
-issued_at
-expires_at
-auth_strength
-~~~
+
+> - subject
+> - session
+> - issuer
+> - issued_at
+> - expires_at
+> - auth_strength
+
 
 Do not put a permanently trusted organization role into a token if authorization may change before token expiry.
 
@@ -88,37 +87,34 @@ Prefer server-side membership lookup/revalidation for sensitive actions.
 
 ## 6. Session Revocation
 
-Revocation mechanisms:
-
-- session version;
-- revoked-at threshold;
-- session denylist for high-risk incidents;
-- credential status.
+> ***Revocation mechanisms:***
+> - session version;
+> - revoked -at threshold;
+> - session denylist for high -risk incidents;
+> - credential status.
 
 The design must allow a compromised session to be invalidated before natural expiry.
 
 ## 7. API Key Storage
 
-Store:
+> ***Store:***
+> - key_id
+> - prefix
+> - hash
+> - organization
+> - scope
+> - permissions
+> - created_at
+> - last_used_at
+> - expires_at
+> - revoked_at
 
-~~~text
-key_id
-prefix
-hash
-organization
-scope
-permissions
-created_at
-last_used_at
-expires_at
-revoked_at
-~~~
 
 The full key should normally be shown only at creation.
 
 ## 8. Authorization Decision
 
-~~~mermaid
+```mermaid
 flowchart TD
 P[Principal] --> M[Membership / Service Binding]
 M --> ROLE[Permissions]
@@ -131,13 +127,13 @@ STATE[Resource State] --> CHECK
 ENT[Entitlement] --> CHECK
 CHECK -->|allow| USE[Use Case]
 CHECK -->|deny| ERROR[Safe Error]
-~~~
+```
 
 ## 9. HTTP Error Contract
 
 Use:
 
-~~~json
+```json
 {
   "error": {
     "code": "FORBIDDEN",
@@ -146,7 +142,7 @@ Use:
     "details": {}
   }
 }
-~~~
+```
 
 Never include another tenant's resource identity in a denial.
 
@@ -166,7 +162,7 @@ Secure, HttpOnly and SameSite controls should be explicit in implementation.
 
 Different classes require different controls:
 
-~~~text
+```text
 authentication
 public reads
 writes
@@ -175,7 +171,7 @@ exports
 AI
 bulk
 webhooks
-~~~
+```
 
 A tenant-level AI limit should not consume the same bucket as login attempts.
 
@@ -195,7 +191,7 @@ Require recent/strong authentication before:
 
 Record:
 
-~~~text
+```text
 request_id
 principal
 organization
@@ -204,7 +200,7 @@ resource
 authorization result
 timestamp
 correlation_id
-~~~
+```
 
 Do not log credentials.
 

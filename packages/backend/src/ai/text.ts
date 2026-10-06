@@ -68,10 +68,11 @@ export function tokenize(input: string): string[] {
     .filter((token) => token.length > 0)
 }
 
-/**
+/*
  * Splits text into retrieval chunks on paragraph then sentence boundaries,
  * never exceeding maxChars. Deterministic, no overlap (kept simple on purpose).
  */
+
 export function chunkText(content: string, maxChars = 800): string[] {
   const paragraphs = content
     .replace(/\r\n/g, "\n")

@@ -1,4 +1,4 @@
-/**
+/*
  * Stable internal contract for language models. Business logic depends on this
  * interface only; providers are replaceable adapters.
  */

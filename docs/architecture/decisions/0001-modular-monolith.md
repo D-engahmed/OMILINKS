@@ -10,7 +10,7 @@ OMILINKS has many domains but the implementation is currently a scaffold. Premat
 
 Implement the initial system as a modular monolith with explicit domain/application/infrastructure boundaries and durable asynchronous workers.
 
-~~~mermaid
+```mermaid
 flowchart LR
 API[API] --> APP[Application]
 APP --> DOMAIN[Domains]
@@ -19,7 +19,7 @@ DOMAIN --> OUTBOX[Outbox]
 OUTBOX --> WORK[Workers]
 WORK --> AI[AI]
 WORK --> INT[Integrations]
-~~~
+```
 
 ## Consequences
 
@@ -40,7 +40,7 @@ Negative:
 
 Extract a module only when measurable evidence exists:
 
-~~~text
+```text
 independent scaling requirement
 +
 failure isolation requirement
@@ -48,4 +48,4 @@ failure isolation requirement
 team ownership boundary
 +
 stable API/event contract
-~~~
+```
