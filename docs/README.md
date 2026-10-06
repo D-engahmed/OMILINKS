@@ -18,6 +18,7 @@
 | security | threat/control model |
 | data | persistence, consistency, retention, recovery |
 | product | UX and screen behavior |
+| finance | financial model, unit economics, cash flow and break-even |
 | engineering | coding, Git, testing, release |
 | engineering/traceability | requirement-to-evidence chain |
 | Tickets | ordered engineering backlog and delivery simulation |
