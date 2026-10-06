@@ -138,7 +138,7 @@ storeTest("the AI answers from tenant knowledge and the run is fully traceable",
   assert.equal(run.outcome, "ANSWERED")
   assert.equal(run.provider, "fake")
   assert.equal(run.model, "fake-1")
-  assert.equal(run.promptVersion, "support-v1")
+  assert.equal(run.promptVersion, "support-v2-ctx1")
   assert.equal(run.inputTokens, 100)
   assert.equal(run.outputTokens, 20)
   assert.equal(run.inboundMessageId, received.message.id)

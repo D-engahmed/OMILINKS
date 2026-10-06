@@ -17,7 +17,7 @@ The architecture is designed so modules can be extracted later without changing 
 
 ## 2. System Context
 
-~~~mermaid
+```mermaid
 flowchart TB
 CUST[Customers] --> CHANNEL[Channel Providers]
 OPS[Operations Users] --> WEB[Operations Web]
@@ -47,7 +47,7 @@ INT --> CHANNEL
 INT --> PAY[Payment Provider]
 INT --> N8N[Automation Provider]
 KNOW --> SEARCH[Search / Vector]
-~~~
+```
 
 ## 3. Runtime Planes
 
@@ -87,13 +87,13 @@ Separating these concepts improves operational reasoning even when deployment re
 
 ## 4. Core Dependency Direction
 
-~~~text
+```text
 transport
  -> application
    -> domain
      -> ports
        <- infrastructure/adapters
-~~~
+```
 
 Domain modules never depend on provider SDKs.
 
@@ -120,7 +120,7 @@ Asynchronous:
 
 ## 6. Canonical Conversation Path
 
-~~~mermaid
+```mermaid
 sequenceDiagram
 participant P as Provider
 participant W as Webhook
@@ -142,7 +142,7 @@ R->>A: Assign AI when eligible
 R->>H: Assign human when required
 A->>D: Create canonical response
 D->>O: Outbound event
-~~~
+```
 
 Provider acknowledgement occurs before expensive asynchronous handling.
 
@@ -166,7 +166,7 @@ Derived systems:
 
 ## 8. AI Boundary
 
-~~~mermaid
+```mermaid
 flowchart LR
 CONV[Conversation] --> RUN[AI Run]
 RUN --> POLICY[Policy Snapshot]
@@ -178,7 +178,7 @@ MODEL --> GUARD[Guardrail]
 GUARD --> TOOL[Tool Runtime]
 TOOL --> DOMAIN[Application / Domain]
 DOMAIN --> DB[(PostgreSQL)]
-~~~
+```
 
 The model cannot directly reach domain persistence.
 
@@ -186,13 +186,13 @@ The model cannot directly reach domain persistence.
 
 Transactional write:
 
-~~~text
+```text
 business mutation
 +
 outbox event
 =
 one database transaction
-~~~
+```
 
 Event publication after commit is asynchronous.
 
@@ -202,7 +202,7 @@ This creates eventual delivery but prevents a committed state with no correspond
 
 Target isolation:
 
-~~~text
+```text
 channel provider failure
  -> one channel degraded
 
@@ -217,19 +217,19 @@ billing provider failure
 
 queue failure
  -> async work delayed; transactional state remains
-~~~
+```
 
 ## 11. Scaling Strategy
 
 First:
 
-~~~text
+```text
 API replicas
 worker replicas
 managed PostgreSQL
 Redis/queue
 object storage
-~~~
+```
 
 Then independently scale:
 

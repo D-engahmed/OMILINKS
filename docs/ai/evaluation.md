@@ -6,7 +6,7 @@ AI quality is a property of the complete execution path, not model text alone.
 
 ## 1. Evaluation Target
 
-~~~text
+```text
 model
 + prompt version
 + routing policy
@@ -15,7 +15,7 @@ model
 + guardrails
 + workflow
 + channel
-~~~
+```
 
 Changing any component can change behavior.
 
@@ -30,7 +30,7 @@ Changing any component can change behavior.
 
 ## 3. Case Contract
 
-~~~json
+```json
 {
   "caseId": "case_001",
   "datasetVersion": "v12",
@@ -42,7 +42,7 @@ Changing any component can change behavior.
   "riskTier": "medium",
   "expectedOutcome": "resolved"
 }
-~~~
+```
 
 ## 4. Reproducibility
 
@@ -61,7 +61,7 @@ A score without these references is not reliably reproducible.
 
 ## 5. Evaluation Pipeline
 
-~~~mermaid
+```mermaid
 flowchart TD
 DATA[Versioned Dataset] --> CASE[Evaluation Case]
 CASE --> RUN[Evaluation Runner]
@@ -79,7 +79,7 @@ GATE --> RELEASE[Release Candidate]
 RELEASE --> SAMPLE[Production Sampling]
 SAMPLE --> NEWCASE[Regression Case]
 NEWCASE --> DATA
-~~~
+```
 
 ## 6. Quality Dimensions
 
@@ -151,14 +151,14 @@ Sampling only successful conversations produces survivorship bias.
 
 ## 11. Regression Case Promotion
 
-~~~mermaid
+```mermaid
 flowchart LR
 INC[Production Failure] --> REPRO[Minimal Reproduction]
 REPRO --> LABEL[Expected Behavior]
 LABEL --> DATASET[Dataset Version]
 DATASET --> CI[Automated Regression]
 CI --> RELEASE[Release Gate]
-~~~
+```
 
 A resolved production failure becomes a permanent regression case.
 

@@ -28,14 +28,14 @@ An ADR is required when a change affects:
 
 ## Lifecycle
 
-~~~mermaid
+```mermaid
 stateDiagram-v2
     [*] --> PROPOSED
     PROPOSED --> ACCEPTED
     PROPOSED --> REJECTED
     ACCEPTED --> SUPERSEDED
     ACCEPTED --> DEPRECATED
-~~~
+```
 
 Accepted ADRs remain historical even when superseded.
 

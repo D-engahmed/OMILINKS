@@ -6,17 +6,17 @@ The Tool Runtime is the hard boundary between model-generated intent and real bu
 
 ## 1. Core Principle
 
-~~~text
+```text
 model output != authorization
 model output != validated arguments
 model output != successful business action
-~~~
+```
 
 Every tool call passes independent registry, schema, scope, authorization, entitlement, risk and idempotency checks.
 
 ## 2. Tool Contract
 
-~~~json
+```json
 {
   "toolId": "customer.update",
   "version": 3,
@@ -26,11 +26,11 @@ Every tool call passes independent registry, schema, scope, authorization, entit
   "retryPolicy": "reconcile-first",
   "requiredPermissions": ["customer.write"]
 }
-~~~
+```
 
 ## 3. Execution Pipeline
 
-~~~mermaid
+```mermaid
 flowchart TD
 INTENT[Model Tool Intent] --> LOOKUP[Tool Registry]
 LOOKUP --> SCHEMA[Validate Version + Arguments]
@@ -46,7 +46,7 @@ WAIT --> IDEM
 IDEM --> EXEC[Adapter Execution]
 EXEC --> RESULT[Normalize + Sanitize]
 RESULT --> AUDIT[Persist Invocation]
-~~~
+```
 
 Any hard failure stops execution.
 
@@ -62,14 +62,14 @@ Never silently replace v1 semantics under the v1 identifier.
 
 Effective permission combines:
 
-~~~text
+```text
 platform security
 + tenant policy
 + agent policy
 + principal permissions
 + resource ownership
 + tool risk policy
-~~~
+```
 
 The administrator who configured an AI agent does not transfer administrator permissions to that agent.
 
@@ -77,11 +77,11 @@ The administrator who configured an AI agent does not transfer administrator per
 
 Example request:
 
-~~~json
+```json
 {
   "customerId": "cust_123"
 }
-~~~
+```
 
 The runtime compares the target resource organization with the run organization. A mismatch means DENY.
 
@@ -91,13 +91,13 @@ Side-effecting tools define a semantic execution key.
 
 Example components:
 
-~~~text
+```text
 organization_id
 tool_id
 tool_version
 run_id
 semantic_request_key
-~~~
+```
 
 Repeated delivery checks for an existing completed invocation before another side effect.
 
@@ -105,7 +105,7 @@ Repeated delivery checks for an existing completed invocation before another sid
 
 Timeout after an external write is UNKNOWN, not FAILED.
 
-~~~mermaid
+```mermaid
 flowchart TD
 CALL[External Call] --> TIMEOUT{Timeout?}
 TIMEOUT -->|no| KNOWN[Known Outcome]
@@ -115,7 +115,7 @@ RECON --> FOUND[Effect Exists]
 RECON --> ABSENT[Effect Absent]
 FOUND --> COMPLETE[Record Success]
 ABSENT --> RETRY[Retry Only if Safe]
-~~~
+```
 
 Blind retry is prohibited for high-impact side effects.
 
@@ -135,14 +135,14 @@ Changing a material argument invalidates the previous approval.
 
 ## 10. Credential Boundary
 
-~~~mermaid
+```mermaid
 flowchart LR
 MODEL[Model] --> RUNTIME[Tool Runtime]
 RUNTIME --> REF[Credential Ref]
 REF --> SM[Secret Manager]
 SM --> ADAPTER[Provider Adapter]
 ADAPTER --> PROVIDER[External API]
-~~~
+```
 
 The model, browser and generic event stream never receive raw credentials.
 
@@ -156,21 +156,21 @@ Remove secrets, unrelated records, stack traces, internal authorization metadata
 
 Internal domain mutation:
 
-~~~text
+```text
 authorize
  -> application command
  -> database transaction
  -> durable result
-~~~
+```
 
 External mutation:
 
-~~~text
+```text
 create invocation identity
  -> provider call
  -> reconcile unknown outcome
  -> persist canonical result
-~~~
+```
 
 ## 13. Failure Taxonomy
 

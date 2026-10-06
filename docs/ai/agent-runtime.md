@@ -6,7 +6,7 @@ The Agent Runtime is the durable execution engine for autonomous and semi-autono
 
 ## 1. Runtime Boundary
 
-~~~text
+```text
 Conversation / Workflow
   -> StartAIRun
     -> snapshot policy
@@ -17,13 +17,13 @@ Conversation / Workflow
               -> authorize tool
                 -> execute tool
                   -> continue or finalize
-~~~
+```
 
 The model proposes outputs and actions. The runtime and domain services decide whether anything can actually happen.
 
 ## 2. Required Run Context
 
-~~~json
+```json
 {
   "runId": "uuid",
   "organizationId": "uuid",
@@ -35,13 +35,13 @@ The model proposes outputs and actions. The runtime and domain services decide w
   "deadlineAt": "2026-09-28T21:00:00Z",
   "correlationId": "req_123"
 }
-~~~
+```
 
 A run is invalid if organization, policy version, conversation control version, or correlation context is missing.
 
 ## 3. Runtime State Machine
 
-~~~mermaid
+```mermaid
 stateDiagram-v2
     [*] --> CREATED
     CREATED --> POLICY_SNAPSHOT
@@ -75,7 +75,7 @@ stateDiagram-v2
     BLOCKED --> COMPLETED
     TIMED_OUT --> COMPLETED
     FAILED --> COMPLETED
-~~~
+```
 
 All state transitions are persisted. In-memory state is an optimization, not the source of truth.
 
@@ -107,7 +107,7 @@ Every record is organization-scoped.
 
 ## 6. Step Record
 
-~~~json
+```json
 {
   "stepId": "uuid",
   "runId": "uuid",
@@ -123,7 +123,7 @@ Every record is organization-scoped.
   "latencyMs": 1840,
   "errorClass": null
 }
-~~~
+```
 
 Sequence numbers are monotonic inside a run.
 
@@ -133,19 +133,19 @@ Never hold a database transaction open across an LLM or external provider call.
 
 Preferred execution:
 
-~~~text
+```text
 TX-1: create AI run + initial step + start command
 COMMIT
 worker invokes provider
 TX-2: persist provider result + next state
 COMMIT
-~~~
+```
 
 External calls have their own invocation identity so a DB retry cannot automatically repeat a provider side effect.
 
 ## 8. Context Assembly
 
-~~~mermaid
+```mermaid
 flowchart TD
 RUN[AI Run] --> POLICY[Context Policy]
 POLICY --> HISTORY[Conversation Projection]
@@ -159,20 +159,20 @@ KNOW --> BOUND
 WORKFLOW --> BOUND
 TOOLS --> BOUND
 BOUND --> PROMPT[Model Context]
-~~~
+```
 
 Never serialize arbitrary database entities directly into prompts.
 
 ## 9. Prompt Layering
 
-~~~text
+```text
 platform policy
  -> tenant policy
  -> agent policy
  -> task instructions
  -> authorized context
  -> untrusted customer/document content
-~~~
+```
 
 Customer messages, retrieved documents and tool outputs remain untrusted data even when presented inside the prompt.
 
@@ -182,12 +182,12 @@ The conversation contains a monotonic `controlVersion`.
 
 Example:
 
-~~~text
+```text
 AI started with controlVersion = 41
 human takeover changes controlVersion = 42
 AI later attempts send with version 41
 runtime rejects as stale
-~~~
+```
 
 The check is repeated immediately before every customer-visible side effect.
 
@@ -236,12 +236,12 @@ Cancellation is persisted and checked before continuation and before side effect
 
 To prevent two workers executing one run concurrently, use a short lease:
 
-~~~text
+```text
 run_id
 worker_id
 lease_until
 heartbeat_at
-~~~
+```
 
 Lease loss prevents the worker from starting new side effects.
 
@@ -263,13 +263,13 @@ Never blindly replay an unknown payment/message/write operation.
 
 A tool result is returned to the model only after:
 
-~~~text
+```text
 authorization
  -> entitlement
  -> execution
  -> output sanitization
  -> audit
-~~~
+```
 
 Tool output is untrusted input for the next reasoning step.
 

@@ -49,7 +49,7 @@ export class Application {
   constructor(
     private readonly store: Store,
     private readonly options: ApplicationOptions
-  ) {}
+  ) { }
 
   get sessionTtlSeconds(): number {
     return this.options.sessionTtlSeconds
@@ -70,8 +70,11 @@ export class Application {
     const verified = await this.options.identity.verify(input)
     const user = verified ? await this.store.findUserByEmail(verified.email) : null
 
-    // Same response for "bad proof" and "unknown user" so accounts cannot be
-    // enumerated through this endpoint.
+    /*
+    * Same response for "bad proof" and "unknown user" so accounts cannot be
+    * enumerated through this endpoint.
+    */
+
     if (!user || user.status !== "ACTIVE") {
       throw new AppError(401, "INVALID_CREDENTIALS", "Invalid credentials.")
     }
@@ -120,8 +123,11 @@ export class Application {
       )
     }
 
-    // The owner email comes from the identity provider, never straight from
-    // the request body.
+    /*
+     * The owner email comes from the identity provider, never straight from
+     * the request body.
+     */
+
     const verified = await this.options.identity.verify({
       email: input.ownerEmail,
       credential: input.credential,

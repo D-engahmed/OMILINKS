@@ -4,11 +4,11 @@
 
 ## 1. Environment Model
 
-~~~text
+```text
 development
 staging
 production
-~~~
+```
 
 Each environment has separate:
 
@@ -21,7 +21,7 @@ Each environment has separate:
 
 ## 2. Production Topology
 
-~~~mermaid
+```mermaid
 flowchart TB
 DNS[DNS / TLS] --> EDGE[Load Balancer / CDN]
 EDGE --> WEB[Web App]
@@ -49,7 +49,7 @@ BILL --> PAY[Payment Provider]
 
 API --> OBS[Observability]
 WORK --> OBS
-~~~
+```
 
 ## 3. Stateless Compute
 
@@ -65,7 +65,7 @@ No business state should require:
 
 Scale independently by bottleneck:
 
-~~~text
+```text
 API:
 requests / CPU / latency
 
@@ -86,21 +86,21 @@ ingestion/indexing backlog
 
 Billing:
 reconciliation queue
-~~~
+```
 
 ## 5. Readiness vs Liveness
 
 Liveness asks:
 
-~~~text
+```text
 Can the process continue?
-~~~
+```
 
 Readiness asks:
 
-~~~text
+```text
 Can this instance safely serve normal work?
-~~~
+```
 
 External provider outage should not automatically mark the API dead if degraded operation remains safe.
 
@@ -133,13 +133,13 @@ Feature flags are not authorization.
 
 Rolling deployment must support:
 
-~~~text
+```text
 old code
 +
 new code
 +
 compatible schema
-~~~
+```
 
 Destructive schema changes happen only after all old consumers are removed.
 
@@ -153,7 +153,7 @@ Use separate queues/concurrency limits where noisy-neighbor risk is high.
 
 Recovery:
 
-~~~text
+```text
 restore database
  -> verify schema
  -> restore object references
@@ -161,7 +161,7 @@ restore database
  -> reconcile payments/providers
  -> verify tenant isolation
  -> resume traffic
-~~~
+```
 
 ## 11. Security
 

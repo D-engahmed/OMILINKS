@@ -6,13 +6,13 @@ Cost control optimizes total business cost under correctness, safety, latency an
 
 ## 1. Cost Components
 
-~~~text
+```text
 model inference
 + embedding
 + media processing
 + tool/provider usage
 + workflow execution
-~~~
+```
 
 Measured values and estimates must remain separate.
 
@@ -32,7 +32,7 @@ The most restrictive applicable policy wins.
 
 ## 3. Preflight Admission
 
-~~~mermaid
+```mermaid
 flowchart TD
 RUN[AI Run Request] --> ESTIMATE[Estimate Usage]
 ESTIMATE --> ENT[Entitlement]
@@ -48,18 +48,18 @@ POLICY --> HANDOFF[Handoff]
 POLICY --> STOP[Stop]
 EXEC --> ACTUAL[Actual Usage]
 ACTUAL --> METER[Usage Meter]
-~~~
+```
 
 ## 4. Run Budget Contract
 
-~~~json
+```json
 {
   "maxSteps": 12,
   "maxToolCalls": 5,
   "maxDurationMs": 30000,
   "maxEstimatedCostUsd": 0.20
 }
-~~~
+```
 
 These are architectural examples, not final commercial defaults.
 
@@ -69,9 +69,9 @@ Preflight produces an estimate.
 
 Provider/runtime metadata produces measured usage where available.
 
-~~~text
+```text
 estimated_cost != actual_cost
-~~~
+```
 
 Where actual provider billing is unavailable, store actual cost as unknown and preserve the estimate separately.
 

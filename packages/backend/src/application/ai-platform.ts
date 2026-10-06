@@ -195,6 +195,8 @@ export class AiPlatformService {
       historyLimit: context.agentPolicy.config.maxHistoryMessages,
       maxTokens: context.agentPolicy.config.maxTokens,
       promptVersion: context.agentPolicy.config.promptVersion,
+      agentName: context.agent.name,
+      agentPurpose: context.agent.purpose,
       governance: {
         agentId: context.agent.id,
         agentPolicyVersionId: context.agentPolicy.id,

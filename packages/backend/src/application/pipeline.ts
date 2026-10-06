@@ -1,13 +1,13 @@
 import type { ModelGateway } from "../ai/gateway.js"
 import {
   buildChatMessages,
-  buildSystemPrompt,
   handoffNotice,
   parseModelAnswer,
-  PROMPT_VERSION,
   summarizeHandoff,
   wantsHuman,
 } from "../ai/prompt.js"
+import { PROMPT_VERSION } from "../ai/context.js"
+import { buildAiContext } from "../ai/context.js"
 import { Bm25Retriever, type Retriever, type ScoredChunk } from "../ai/retrieval.js"
 import type { GuardrailDecision } from "../ai/guardrails.js"
 import type {
@@ -46,6 +46,8 @@ export interface PipelineOptions {
     model: string
   }) => number
   promptVersion?: string
+  agentName?: string
+  agentPurpose?: string
   governance?: {
     agentId: string
     agentPolicyVersionId: string
@@ -331,9 +333,18 @@ export class ConversationPipeline {
     let text: string
 
     try {
+      const turns = buildChatMessages(history)
+      const customer = await this.store.getCustomer(organizationId, conversation.customerId)
+      const assembled = buildAiContext({
+        agentName: this.options.agentName ?? "Support Assistant",
+        agentPurpose: this.options.agentPurpose ?? "help customers with support questions",
+        customerDisplayName: customer?.displayName ?? "Customer",
+        history: turns,
+        knowledge: context,
+      })
       const result = await gateway.generate({
-        system: buildSystemPrompt(context),
-        messages: buildChatMessages(history),
+        system: assembled.system,
+        messages: turns,
         maxTokens: this.maxTokens,
       })
       text = result.text

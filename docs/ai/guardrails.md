@@ -6,7 +6,7 @@ Guardrails are independent enforcement layers around model generation. Prompt in
 
 ## 1. Trust Hierarchy
 
-~~~text
+```text
 platform security policy
 > domain authorization
 > tenant policy
@@ -14,13 +14,13 @@ platform security policy
 > workflow policy
 > model instruction
 > customer/document/tool content
-~~~
+```
 
 Lower-trust content can provide facts but cannot redefine higher-trust policy.
 
 ## 2. Guardrail Pipeline
 
-~~~mermaid
+```mermaid
 flowchart LR
 IN[External Input] --> CLASSIFY[Classify Risk + Data]
 CLASSIFY --> CONTEXT[Authorized Context]
@@ -33,7 +33,7 @@ TOOL --> ACTION[Action Policy]
 ACTION -->|allow| SIDE[Side Effect]
 ACTION -->|block| BLOCK[Block]
 ACTION -->|handoff| HUMAN[Human Handoff]
-~~~
+```
 
 ## 3. Prompt Injection
 
@@ -52,13 +52,13 @@ Defenses:
 
 Context eligibility is:
 
-~~~text
+```text
 candidate data
 INTERSECT tenant scope
 INTERSECT resource permission
 INTERSECT agent context policy
 INTERSECT retention/visibility policy
-~~~
+```
 
 Retrieval must enforce this before model exposure.
 
@@ -75,11 +75,11 @@ Validate:
 
 Example:
 
-~~~text
+```text
 model says: refund completed
 tool result: refund pending
 authoritative state: pending
-~~~
+```
 
 The model statement is not sufficient evidence of completion.
 
@@ -106,7 +106,7 @@ Every run can be bounded by:
 - token budget;
 - valid conversation control version.
 
-~~~mermaid
+```mermaid
 flowchart TD
 RUN[AI Run] --> STEP[Step Counter]
 RUN --> CALLS[Tool Counter]
@@ -120,7 +120,7 @@ DEADLINE --> LIMIT
 CONTROL --> LIMIT
 LIMIT -->|yes| STOP[Stop / Handoff]
 LIMIT -->|no| CONTINUE[Continue]
-~~~
+```
 
 ## 8. Handoff Conditions
 
@@ -140,7 +140,7 @@ The model cannot veto a required handoff.
 
 ## 9. Guardrail Decision Contract
 
-~~~json
+```json
 {
   "decision": "allow|transform|block|handoff",
   "policyVersion": 7,
@@ -148,7 +148,7 @@ The model cannot veto a required handoff.
   "reasons": ["approval_required"],
   "checks": ["tenant_scope", "tool_policy", "output_policy"]
 }
-~~~
+```
 
 High-risk decisions are persisted.
 

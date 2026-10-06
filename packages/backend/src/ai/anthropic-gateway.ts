@@ -8,7 +8,7 @@ interface AnthropicOptions {
   fetchImpl?: typeof fetch
 }
 
-/**
+/*
  * Adapter for the Anthropic Messages API, written from the public API shape.
  * It has only been exercised against a mocked fetch; it has NOT been run
  * against the live API. Error messages never include the API key or the
