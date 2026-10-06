@@ -1,6 +1,10 @@
 # AI Tool Runtime — Implementation Specification
 
 > Status: **Target implementation blueprint**
+>
+> Related: agent-runtime.md, guardrails.md, human-handoff.md, context-engine.md.
+>
+> Phase tags: **[MVP]** is needed for the first production tenant. **[Later]** is designed now and built later.
 
 The Tool Runtime is the hard boundary between model-generated intent and real business side effects.
 
@@ -133,6 +137,8 @@ Approval is bound to:
 
 Changing a material argument invalidates the previous approval.
 
+Approval is not handoff. An approval authorizes one exact action. It does not transfer conversation control (human-handoff.md §1).
+
 ## 10. Credential Boundary
 
 ```mermaid
@@ -217,8 +223,41 @@ Invocation telemetry includes:
 - provider timeout;
 - unknown external outcome;
 - secret leakage;
-- stale run/control version.
+- stale run/control version;
+- duplicate `handoff.request`;
+- tenant allowlist attempting to remove `handoff.request`;
+- AI-initiated tool write while the conversation is `HUMAN_PENDING`;
+- human-initiated tool action checked against the human's permissions;
+- action history built from an UNKNOWN outcome;
+- model-proposed memory write in version 1 (rejected).
 
-## 16. Acceptance
+## 16. Conversation Control and Tool Writes [MVP]
+
+The Tool Runtime reads the conversation `controlOwner` and `controlVersion` for every side-effecting tool.
+
+- When the conversation is `HUMAN_PENDING` or `HUMAN`, AI-initiated tool writes are denied with `FORBIDDEN` and a `control_owner` subcode, whatever the model output says.
+- Read tools remain available to holding-mode runs only if handoff policy allows them.
+- When a human agent triggers an action from the agent interface, the same pipeline runs with the human as the principal. Permissions are those of the human, not of the AI agent (§5).
+
+## 17. Reserved Platform Tools
+
+| Tool | Risk | Behavior |
+|---|---|---|
+| `handoff.request` | low | Creates a handoff request through the domain service. Idempotent per run. Cannot be removed from the allowlist by tenant or agent policy. Returns "queued" to the model only after the request is persisted |
+| `memory.remember` **[Later, not in version 1]** | medium | Writes `model_derived` records only. Schema-bound. Subject to the same validation as the post-run extractor (context-engine.md §8) |
+
+Rules:
+
+- A `handoff.request` call is a proposal evaluated by policy (guardrails §8). Policy can also create a handoff without it.
+- Reserved tools still pass every check in §3.
+
+## 18. Tool Results, Memory and Pre-Loaded Context
+
+- Action history used as customer memory is built from persisted invocations with a known outcome. An UNKNOWN outcome is not a fact until reconciled (§8).
+- Tool output entering the next prompt is untrusted data. It is never written to derived memory as an instruction.
+- Volatile or deep customer data (order status, balances) is fetched by read tools at call time, each call independently authorized, instead of being pre-loaded into the prompt (context-engine.md §12).
+- Read tools that return customer data apply output projection (§11) and respect identity-link eligibility.
+
+## 19. Acceptance
 
 No model-generated action is considered successful until the Tool Runtime and domain layer produce a durable authoritative result.
