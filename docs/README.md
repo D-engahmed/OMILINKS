@@ -20,7 +20,7 @@
 | product | UX and screen behavior |
 | engineering | coding, Git, testing, release |
 | engineering/traceability | requirement-to-evidence chain |
-| Tickets | ordered engineering backlog and delivery simulation |
+| [Tickets](Tickets/README.md) | ordered engineering backlog and delivery simulation |
 
 ## Ticket Queue
 
