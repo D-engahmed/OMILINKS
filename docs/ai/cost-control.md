@@ -209,3 +209,9 @@ Track:
 ## 17. Acceptance
 
 Cost control is complete when every expensive path has admission control, attribution, bounded execution and an explicit outcome when budget is exhausted.
+
+## Financial & Commercial Integration
+
+Financial integration: AI cost control is part of gross-margin protection. Every run must preserve estimate vs actual cost, pricing version, attribution, budget decision, fallback cost, and billable/absorbed outcome where applicable.
+
+Cross-reference: [Financial Model](../finance/financial-model.md) and [Finance & Commercial Control Tickets](../Tickets/12-finance-commercial-control.md). Economic assumptions remain assumptions until replaced by measured evidence.
