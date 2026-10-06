@@ -145,3 +145,10 @@ Examples:
 ## 8. Acceptance
 
 A production-critical operation must be traceable and measurable without requiring raw customer payload logging.
+
+
+## Financial & Commercial Integration
+
+Financial observability is mandatory for production economics: cash-impacting events, usage cost, provider cost, payment state, reconciliation lag, failed/unknown outcomes, and forecast-vs-actual variance must be observable without exposing customer message content.
+
+Cross-reference: [Financial Model](../finance/financial-model.md) and [Finance & Commercial Control Tickets](../Tickets/12-finance-commercial-control.md). Economic assumptions remain assumptions until replaced by measured evidence.

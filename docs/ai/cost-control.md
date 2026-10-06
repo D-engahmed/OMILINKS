@@ -245,6 +245,7 @@ Track:
 
 ## 17. Self-Hosted Inference Economics
 
+<<<<<<< HEAD
 A self-hosted model has no per-token vendor price, but it is not free. Its cost is capacity: accelerator hours, storage, operations and idle time.
 
 Rules:
@@ -276,3 +277,12 @@ Rules:
 Cost control is complete when every expensive path has admission control, attribution, bounded execution and an explicit outcome when budget is exhausted.
 
 This includes self-hosted capacity, background jobs and shadow traffic.
+=======
+Cost control is complete when every expensive path has admission control, attribution, bounded execution and an explicit outcome when budget is exhausted.
+
+## Financial & Commercial Integration
+
+Financial integration: AI cost control is part of gross-margin protection. Every run must preserve estimate vs actual cost, pricing version, attribution, budget decision, fallback cost, and billable/absorbed outcome where applicable.
+
+Cross-reference: [Financial Model](../finance/financial-model.md) and [Finance & Commercial Control Tickets](../Tickets/12-finance-commercial-control.md). Economic assumptions remain assumptions until replaced by measured evidence.
+>>>>>>> 58dfe387e1fc8d8543ee2c9df4a9b369a3d4aec7

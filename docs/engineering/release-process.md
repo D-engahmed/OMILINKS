@@ -159,3 +159,10 @@ Store:
 ## 12. Acceptance
 
 A release is complete only when the deployed artifact, database state, feature state and operational health are traceable.
+
+
+## Financial & Commercial Integration
+
+Release gate: changes affecting billing, usage, provider pricing, cost attribution, entitlements, or financial reporting require migration safety, idempotency/failure tests, reconciliation evidence, and synchronized documentation.
+
+Cross-reference: [Financial Model](../finance/financial-model.md) and [Finance & Commercial Control Tickets](../Tickets/12-finance-commercial-control.md). Economic assumptions remain assumptions until replaced by measured evidence.

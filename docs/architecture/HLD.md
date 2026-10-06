@@ -262,3 +262,10 @@ Implementation should add the target module boundaries incrementally rather than
 ## 14. Acceptance
 
 The architecture is complete when a feature can be located in one domain, one application boundary, one persistence strategy, one event strategy and one explicit failure model.
+
+
+## Financial & Commercial Integration
+
+Economic boundary: PostgreSQL remains source of truth for billable usage, subscription/payment state, audit records, and financial attribution. Expensive asynchronous work requires admission, attribution, bounded execution, and reconciliation.
+
+Cross-reference: [Financial Model](../finance/financial-model.md) and [Finance & Commercial Control Tickets](../Tickets/12-finance-commercial-control.md). Economic assumptions remain assumptions until replaced by measured evidence.

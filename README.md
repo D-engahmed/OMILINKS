@@ -94,3 +94,10 @@ pnpm build
 
 Reset the database with `docker compose down -v` followed by migrate + seed.
 See `.env.example` for `DATABASE_URL`, `TEST_DATABASE_URL`, and ports.
+
+
+## Financial & Commercial Integration
+
+Financial and commercial control are first-class engineering constraints. The ordered ticket system in docs/Tickets is authoritative for execution; finance tickets connect build cost, go-live cash, acquisition cost, COGS, MRR, runway, break-even, and capital decisions.
+
+Cross-reference: [Financial Model](../finance/financial-model.md) and [Finance & Commercial Control Tickets](../Tickets/12-finance-commercial-control.md). Economic assumptions remain assumptions until replaced by measured evidence.

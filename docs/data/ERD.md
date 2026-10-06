@@ -274,3 +274,10 @@ Production data checks should periodically verify:
 ## 20. Acceptance
 
 The data model is implementation-ready when ownership, keys, constraints, indexes, transactions, concurrency and data classification are explicit.
+
+
+## Financial & Commercial Integration
+
+Financial data model rules: financial facts require immutable identifiers, tenant scope, source references, pricing-version context, timestamps, idempotency boundaries, reconciliation status, and retention appropriate to financial records.
+
+Cross-reference: [Financial Model](../finance/financial-model.md) and [Finance & Commercial Control Tickets](../Tickets/12-finance-commercial-control.md). Economic assumptions remain assumptions until replaced by measured evidence.

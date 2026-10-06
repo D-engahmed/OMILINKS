@@ -330,3 +330,19 @@ Before DONE, explain:
         -> scale decision
 
 The objective is not perfect prediction. The objective is to make important assumptions visible, measurable, challengeable, and replaceable with evidence.
+
+# Enterprise Execution Contract — Applies to Every Ticket Above
+
+The short Outcome/Acceptance text is not the implementation specification. Every ticket must be executed through discovery, design, implementation, evidence, and explanation.
+
+## Mandatory pre-work
+
+Read the linked source documents and inspect current code/tests. Record current behavior, target behavior, contradictions, assumptions, dependencies, and what is explicitly out of scope. Do not infer implementation status from documentation alone.
+
+## No copy/paste implementation rule
+
+Before coding, write a compact design note: current state, desired state, invariants, sequence/state diagram when useful, data changes, failure matrix, test matrix, observability plan, cost/revenue impact, and acceptance-evidence plan. AI may assist implementation, but the engineer must own and explain the design.
+
+## DONE gate
+
+DONE requires specification, implementation, positive tests, negative tests, failure handling, observability, migration safety, recovery, documentation synchronization, review, CI, and acceptance evidence. Documentation/code contradictions block completion until explicitly resolved.
