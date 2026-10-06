@@ -282,3 +282,10 @@ Track:
 ## 20. Acceptance
 
 Billing is complete when subscription, payment, entitlement and usage state are authoritative, idempotent, concurrency-safe and historically reproducible.
+
+
+## Financial & Commercial Integration
+
+Billing domain must distinguish plan/entitlement/subscription/usage/payment/invoice state; usage is immutable and idempotent; payment callbacks are untrusted until reconciled; historical pricing context is immutable; billing decisions are authorization-relevant.
+
+Cross-reference: [Financial Model](../finance/financial-model.md) and [Finance & Commercial Control Tickets](../Tickets/12-finance-commercial-control.md). Economic assumptions remain assumptions until replaced by measured evidence.
