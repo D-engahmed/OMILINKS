@@ -107,3 +107,10 @@
 **Acceptance:** prove the outcome with implementation evidence, tests, negative cases, observability, and documentation updates where applicable.
 
 **Delivery:** issue -> branch -> commit -> PR -> CI -> QA -> merge -> release evidence
+
+
+## Financial Integration
+
+Quality: QA evidence must connect to resolution rate, handoff reduction, retention, and support cost without creating unbounded review cost.
+
+This ticket is not complete when the code exists. Record the economic effect, expected cost behavior, duplicate/retry risk, measurement instrumentation, and the downstream finance ticket/report that consumes the evidence. Use [Finance & Commercial Control](./12-finance-commercial-control.md) and [Financial Model](../finance/financial-model.md).
