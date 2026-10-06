@@ -1,0 +1,31 @@
+# OmniLinks local development infrastructure (OML-T0006).
+#
+#   docker compose up -d        # start PostgreSQL
+#   pnpm --filter @workspace/backend db:migrate   # apply migrations
+#   pnpm --filter @workspace/backend db:seed      # idempotent demo tenant
+#   DATABASE_URL=postgres://omnilinks:omnilinks@localhost:5432/omnilinks pnpm --filter @workspace/backend start
+#
+# Reset: docker compose down -v && docker compose up -d && migrate again.
+# Redis is intentionally absent: no consumer needs it yet (leases, queues,
+# and deduplication are PostgreSQL-backed). Add it when a cache or
+# rate-limit consumer lands, not before.
+
+services:
+  postgres:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: omnilinks
+      POSTGRES_PASSWORD: omnilinks
+      POSTGRES_DB: omnilinks
+    volumes:
+      - omnilinks-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omnilinks"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  omnilinks-postgres:

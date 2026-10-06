@@ -83,8 +83,14 @@ Automation providers such as n8n are integrations, not the source of truth for c
 
 ```bash
 pnpm install
+docker compose up -d                                  # PostgreSQL
+pnpm --filter @workspace/backend db:migrate           # apply migrations
+pnpm --filter @workspace/backend db:seed              # idempotent demo tenant
 pnpm dev
 pnpm lint
 pnpm typecheck
 pnpm build
 ```
+
+Reset the database with `docker compose down -v` followed by migrate + seed.
+See `.env.example` for `DATABASE_URL`, `TEST_DATABASE_URL`, and ports.
