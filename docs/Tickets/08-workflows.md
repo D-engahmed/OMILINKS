@@ -167,3 +167,10 @@
 **Acceptance:** prove the outcome with implementation evidence, tests, negative cases, observability, and documentation updates where applicable.
 
 **Delivery:** issue -> branch -> commit -> PR -> CI -> QA -> merge -> release evidence
+
+
+## Financial Integration
+
+Workflows: execution volume and side effects create variable cost; idempotency prevents duplicate billable work.
+
+This ticket is not complete when the code exists. Record the economic effect, expected cost behavior, duplicate/retry risk, measurement instrumentation, and the downstream finance ticket/report that consumes the evidence. Use [Finance & Commercial Control](./12-finance-commercial-control.md) and [Financial Model](../finance/financial-model.md).
