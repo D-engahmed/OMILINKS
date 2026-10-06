@@ -251,3 +251,9 @@ T1113..T1115
 ```
 
 Treat this directory as the source of truth for the development queue. Documentation does not prove implementation.
+
+## Financial Integration
+
+Ticket system: every engineering ticket is also a cost/risk decision and must preserve traceability to financial evidence.
+
+This ticket is not complete when the code exists. Record the economic effect, expected cost behavior, duplicate/retry risk, measurement instrumentation, and the downstream finance ticket/report that consumes the evidence. Use [Finance & Commercial Control](./12-finance-commercial-control.md) and [Financial Model](../finance/financial-model.md).
