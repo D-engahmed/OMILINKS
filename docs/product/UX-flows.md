@@ -232,3 +232,10 @@ Avoid collecting full customer message content.
 ## 17. Acceptance
 
 UX is complete only when every important domain state has a truthful visual representation and every operator action maps to a real backend authorization/state transition.
+
+
+## Financial & Commercial Integration
+
+Billing UX must represent truth from backend subscription/payment state. Financial-impacting actions must show authoritative status, pending/reconciling states, safe retry behavior, and never infer entitlement from a browser redirect alone.
+
+Cross-reference: [Financial Model](../finance/financial-model.md) and [Finance & Commercial Control Tickets](../Tickets/12-finance-commercial-control.md). Economic assumptions remain assumptions until replaced by measured evidence.
