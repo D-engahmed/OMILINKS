@@ -253,3 +253,10 @@ Verification: restore drill evidence.
 ## Definition of Functional Completeness
 
 A requirement is not considered implemented because a route, UI component or database table exists. The behavior must satisfy the complete requirement chain and its negative/failure cases.
+
+
+## Financial & Commercial Integration
+
+Financial requirements add: usage events must be attributable and idempotent; billing state must be server-authoritative; financial records require reconciliation and immutable pricing context; production financial claims require evidence from source records.
+
+Cross-reference: [Financial Model](../finance/financial-model.md) and [Finance & Commercial Control Tickets](../Tickets/12-finance-commercial-control.md). Economic assumptions remain assumptions until replaced by measured evidence.
