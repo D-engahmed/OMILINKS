@@ -37,3 +37,9 @@ Security and tenant-isolation invariants outrank convenience. Documentation is n
 specification + implementation + negative tests + failure handling
 + observability + migration safety + recovery + release evidence
 ```
+
+## Financial & Commercial Integration
+
+Financial control is cross-cutting. Architecture, requirements, domains, APIs/events, integrations, data, security, product, AI, engineering, and Tickets must remain consistent with docs/finance/financial-model.md and the finance ticket track.
+
+Cross-reference: [Financial Model](../finance/financial-model.md) and [Finance & Commercial Control Tickets](../Tickets/12-finance-commercial-control.md). Economic assumptions remain assumptions until replaced by measured evidence.
