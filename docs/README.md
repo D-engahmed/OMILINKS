@@ -23,9 +23,9 @@
 | engineering/traceability | requirement-to-evidence chain |
 | [Tickets](Tickets/README.md) | ordered engineering backlog and delivery simulation |
 
-## Current Launch Strategy
+## Business and Launch Execution
 
-See [Launch Strategy Review (20 October 2026)](product/launch-strategy-review-2026-10-20.md) for the proposed beachhead, revised pilot gates, repository-integrity blocker, and pros/cons. This is a proposed operating plan; technical and commercial gates require evidence before they can be marked complete.
+Start with [Business Execution Plan — First Paid BPO Pilot](product/business-execution-plan-2026-10-20.md) for the lean discovery sprint, paid-pilot gates, product scope, ticket dependencies, and unit-economics scorecard. The [Launch Strategy Review](product/launch-strategy-review-2026-10-20.md) explains the strategic trade-offs. Both are proposals until the gate evidence is recorded.
 
 ## Ticket Queue
 
