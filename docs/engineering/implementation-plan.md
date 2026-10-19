@@ -4,7 +4,7 @@
 
 ## 1. Current Repository Reality
 
-**Blocking source-of-truth exception at reviewed snapshot.** At default-branch commit [0203ba6](https://github.com/D-engahmed/OMILINKS/commit/0203ba6a057d1de9f853228764f89149e4474771), the Git tree does not contain packages/backend, even though the README, workspace CI, Docker Compose instructions, and this plan describe the backend package. The merge commit's second parent, [58dfe38](https://github.com/D-engahmed/OMILINKS/commit/58dfe387e1fc8d8543ee2c9df4a9b369a3d4aec7), does contain that package. This appears to be a merge-tree/source-reconciliation regression; inspect and restore it through a normal PR rather than resetting or force-pushing the branch.
+**Blocking source-of-truth exception at reviewed snapshot.** At current default-branch commit [ea96ef4](https://github.com/D-engahmed/OMILINKS/commit/ea96ef4c811f957ea3de65fdf9331452ab187ffc), the Git tree does not contain packages/backend, even though the README, workspace CI, Docker Compose instructions, and this plan describe the backend package. The historical code-containing snapshot [58dfe38](https://github.com/D-engahmed/OMILINKS/commit/58dfe387e1fc8d8543ee2c9df4a9b369a3d4aec7) does contain that package. This appears to be a merge-tree/source-reconciliation regression; inspect and restore it through a normal PR rather than resetting or force-pushing the branch.
 
 Accordingly, the phase descriptions below are historical/recoverable implementation evidence and target contracts until they are verified from a clean checkout of the canonical branch. A ticket marked BASELINE is not proof that the feature is present on current main, tested, or deployed. Local uncommitted work is outside this repository snapshot.
 
@@ -16,6 +16,10 @@ Accordingly, the phase descriptions below are historical/recoverable implementat
 4. Merge through review. Do not proceed to Billing on the strength of documentation alone.
 
 Follow [Launch Strategy Review (20 October 2026)](../product/launch-strategy-review-2026-10-20.md) for the revised commercial-launch sequence. The domain dependency graph below is not a substitute for a customer-validated launch plan.
+
+## 1A. Commercial Critical Path — Starts in Parallel
+
+The domain phases below describe engineering dependencies, not the business launch sequence. Start prospecting and buyer discovery immediately, in parallel with Gate 0 recovery. Use [Business Execution Plan](../product/business-execution-plan-2026-10-20.md) and [OML-T1200–OML-T1211](../Tickets/13-business-validation-and-paid-pilot.md). Do not begin new channel-specific feature work until there is a credible buyer/pilot path and the canonical code baseline is reproducible. The code-recovery gate blocks software delivery, not low-cost customer discovery.
 
 ## 2. Implementation Order
 
