@@ -4,11 +4,18 @@
 
 ## 1. Current Repository Reality
 
-The repository is implemented in vertical phases. Phase 0-2 establish the tenant, identity, customer, conversation and initial AI core. Phase 3 establishes the Web Widget channel boundary. Phase 4 establishes workforce and deterministic routing. Phase 5 establishes a PostgreSQL-backed event and worker runtime.
+**Blocking source-of-truth exception at reviewed snapshot.** At default-branch commit [0203ba6](https://github.com/D-engahmed/OMILINKS/commit/0203ba6a057d1de9f853228764f89149e4474771), the Git tree does not contain packages/backend, even though the README, workspace CI, Docker Compose instructions, and this plan describe the backend package. The merge commit's second parent, [58dfe38](https://github.com/D-engahmed/OMILINKS/commit/58dfe387e1fc8d8543ee2c9df4a9b369a3d4aec7), does contain that package. This appears to be a merge-tree/source-reconciliation regression; inspect and restore it through a normal PR rather than resetting or force-pushing the branch.
 
-The later domains remain target architecture until their implementation and tests land.
+Accordingly, the phase descriptions below are historical/recoverable implementation evidence and target contracts until they are verified from a clean checkout of the canonical branch. A ticket marked BASELINE is not proof that the feature is present on current main, tested, or deployed. Local uncommitted work is outside this repository snapshot.
 
-This distinction is intentional.
+### Mandatory gate before feature work
+
+1. Reconcile backend source and the newer documentation on a fix branch.
+2. Reproduce install, lint, typecheck, build, memory-store tests, PostgreSQL integration tests, web/widget builds, and migration checks from a clean checkout.
+3. Reconcile ticket status against the resulting code and test evidence.
+4. Merge through review. Do not proceed to Billing on the strength of documentation alone.
+
+Follow [Launch Strategy Review (20 October 2026)](../product/launch-strategy-review-2026-10-20.md) for the revised commercial-launch sequence. The domain dependency graph below is not a substitute for a customer-validated launch plan.
 
 ## 2. Implementation Order
 
