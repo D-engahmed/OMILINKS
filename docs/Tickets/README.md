@@ -2,7 +2,7 @@
 
 > Canonical execution backlog for the OmniLinks engineering simulation. Tickets are ordered by dependency, not by convenience.
 
-> **Blocking snapshot warning (20 October 2026):** current main commit [0203ba6](https://github.com/D-engahmed/OMILINKS/commit/0203ba6a057d1de9f853228764f89149e4474771) has no packages/backend directory, while its second parent [58dfe38](https://github.com/D-engahmed/OMILINKS/commit/58dfe387e1fc8d8543ee2c9df4a9b369a3d4aec7) contains it. Treat source recovery and clean-main verification as a blocking precondition. Do not interpret BASELINE as “present and verified on current main” until that gate is closed. See [Launch Strategy Review](../product/launch-strategy-review-2026-10-20.md).
+> **Blocking snapshot warning (20 October 2026):** current main commit [ea96ef4](https://github.com/D-engahmed/OMILINKS/commit/ea96ef4c811f957ea3de65fdf9331452ab187ffc) has no packages/backend directory, while the historical code-containing snapshot [58dfe38](https://github.com/D-engahmed/OMILINKS/commit/58dfe387e1fc8d8543ee2c9df4a9b369a3d4aec7) contains it. Treat source recovery and clean-main verification as a blocking precondition. Do not interpret BASELINE as “present and verified on current main” until that gate is closed. See [Launch Strategy Review](../product/launch-strategy-review-2026-10-20.md).
 
 ## Execution sequence
 
@@ -20,7 +20,10 @@
 10 Billing
 11 Production Hardening
 12 Finance & Commercial Control
+13 Business Validation & Paid Pilot (start in parallel; do not wait for all engineering phases)
 ```
+
+The business/pilot track in [13-business-validation-and-paid-pilot.md](13-business-validation-and-paid-pilot.md) is cross-cutting. Start its prospecting and buyer discovery immediately in parallel with repository recovery; its product-specific implementation tickets stay gated on buyer evidence and canonical code integrity.
 
 ## Status semantics
 
