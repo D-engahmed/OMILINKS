@@ -24,11 +24,11 @@ Do **not** start the next billing phase on the assumption that the prior phases 
 
 ## 1. Repository evidence and a blocking inconsistency
 
-The reviewed public default-branch snapshot is commit [0203ba6](https://github.com/D-engahmed/OMILINKS/commit/0203ba6a057d1de9f853228764f89149e4474771). Its Git tree has no packages/backend directory. The path packages/backend/package.json returns 404 on that snapshot, even though the root workspace, backend CI workflow, Docker Compose instructions, README, implementation plan, and ticket status language refer to the backend package and its capabilities.
+The reviewed current default-branch commit is [ea96ef4](https://github.com/D-engahmed/OMILINKS/commit/ea96ef4c811f957ea3de65fdf9331452ab187ffc), created by merging PR #20 on 19 October 2026. Its Git tree still has no packages/backend directory; the path packages/backend/package.json returns 404, even though the root workspace, backend CI workflow, Docker Compose instructions, README, implementation plan, and ticket status language refer to the backend package and its capabilities.
 
-The merge commit has two parents. Its second parent, [58dfe38](https://github.com/D-engahmed/OMILINKS/commit/58dfe387e1fc8d8543ee2c9df4a9b369a3d4aec7), has a tree containing packages/backend; the final main tree does not. This looks like a merge-tree/source-reconciliation regression. Do not infer intent from that observation alone, and do not reset or force-push main.
+The earlier merge commit [0203ba6](https://github.com/D-engahmed/OMILINKS/commit/0203ba6a057d1de9f853228764f89149e4474771) also has no backend in its resulting tree. However, its other parent, the historical code-containing snapshot [58dfe38](https://github.com/D-engahmed/OMILINKS/commit/58dfe387e1fc8d8543ee2c9df4a9b369a3d4aec7), contains packages/backend. This looks like a merge-tree/source-reconciliation regression. Compare history and diffs before restoring; do not infer the complete recovery from a single tree, and do not reset or force-push main.
 
-The repository also has a historical [Phase 7 workflow-engine branch](https://github.com/D-engahmed/OMILINKS/tree/feat/phase7-workflow-engine), but that is not a substitute for checking the current canonical tree. No open PRs were returned by the repository search. The latest visible main commit is dated 6 October 2026. This review cannot see uncommitted local work.
+The repository has a historical [Phase 7 workflow-engine branch](https://github.com/D-engahmed/OMILINKS/tree/feat/phase7-workflow-engine), but that is not a substitute for checking the current canonical tree. This review cannot see uncommitted local work.
 
 ### Required recovery gate
 
@@ -41,6 +41,8 @@ The repository also has a historical [Phase 7 workflow-engine branch](https://gi
 **Exit criterion:** a clean checkout of main contains the backend, the documented commands work, CI is reproducible, and every claimed baseline maps to code plus test evidence.
 
 ## 2. Recommended beachhead: one Egyptian BPO pilot
+
+For concrete founder-led steps and measurable acceptance thresholds, use the companion [Business Execution Plan — First Paid BPO Pilot](./business-execution-plan-2026-10-20.md) and ordered [Commercial Validation and Paid Pilot Tickets](../Tickets/13-business-validation-and-paid-pilot.md). Buyer discovery begins in parallel with repository recovery.
 
 The longer-term vision points toward BPO/customer-operations software. For that reason, the recommended initial design partner is **one small Egypt-based BPO or outsourced support team, operating one client program and one WhatsApp support queue**. This is a proposed decision aligned to the stated ambition—not a claim that market demand has already been validated.
 

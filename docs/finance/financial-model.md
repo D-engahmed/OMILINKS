@@ -3,6 +3,8 @@
 > Status: Planning model v0.1
 >
 > This is a decision model, not audited accounting. Every number marked as an assumption must be replaced by measured company data before investment decisions are made.
+>
+> For the current founder-led discovery and first BPO pilot, follow [Business Execution Plan](../product/business-execution-plan-2026-10-20.md) and [commercial/pilot tickets](../Tickets/13-business-validation-and-paid-pilot.md). Do not treat the 7,000 EGP ARPA or other planning inputs as validated pricing or economics.
 
 ## 1. What this model answers
 
