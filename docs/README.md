@@ -17,11 +17,15 @@
 | ai | execution, routing, guardrails, evaluation and economics |
 | security | threat/control model |
 | data | persistence, consistency, retention, recovery |
-| product | UX and screen behavior |
+| product | UX, screen behavior, and launch strategy |
 | finance | financial model, unit economics, cash flow and break-even |
 | engineering | coding, Git, testing, release |
 | engineering/traceability | requirement-to-evidence chain |
 | [Tickets](Tickets/README.md) | ordered engineering backlog and delivery simulation |
+
+## Current Launch Strategy
+
+See [Launch Strategy Review (20 October 2026)](product/launch-strategy-review-2026-10-20.md) for the proposed beachhead, revised pilot gates, repository-integrity blocker, and pros/cons. This is a proposed operating plan; technical and commercial gates require evidence before they can be marked complete.
 
 ## Ticket Queue
 
