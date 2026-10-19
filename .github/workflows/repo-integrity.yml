@@ -1,0 +1,30 @@
+name: Repository Integrity
+
+# OML-T1200: packages/backend was once deleted by a docs-only commit and the
+# deletion went unnoticed while README, pnpm-lock.yaml, and backend.yml kept
+# referring to it. This check has no path filter on purpose, so it runs for
+# every push and pull request, including ones that touch only docs.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-present:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fail if the backend package is missing
+        run: |
+          if [ ! -f packages/backend/package.json ]; then
+            echo "::error file=packages/backend/package.json::packages/backend is missing. README, pnpm-lock.yaml, and backend.yml all depend on it. Restore it before merging."
+            exit 1
+          fi
+          echo "packages/backend/package.json is present."
