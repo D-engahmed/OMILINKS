@@ -47,7 +47,27 @@ OMILINKS/
 └── turbo.json
 ```
 
-The codebase is implemented as vertical phases. Phase 0-2 establish the tenant and conversation/AI core; Phase 3 provides the Web Widget channel boundary with durable inbound-event deduplication; Phase 4 provides deterministic workforce routing, queues, capacity, presence, and assignment safety; Phase 5 provides a PostgreSQL-backed durable event and worker runtime with retries, leases, dead-letter replay, and queue routing; Phase 6 provides the AI control plane, model registry/failover, guardrails, durable AI traceability, cost attribution, and evaluation; Phase 7 provides the durable workflow engine (versioned definitions, idempotent triggers, WAIT/APPROVAL states, bounded retries; kernel steps only); Phase 8 provides the quality kernel (versioned scorecards, deterministic sampling, evidence-linked human review, AI-proposal fencing, remediations); the operator inbox in `apps/web` provides the authenticated console (inbox list, conversation detail, handoff visibility, idempotent human reply). Later domains remain target architecture until their implementation and tests land.
+## Implementation Status
+
+The codebase is built as vertical phases. Status is tracked in separate columns so that code, tests, CI and deployment are never conflated.
+
+- **On main** means the code is in the default branch.
+- **Tests** names the backend test file for that phase. The backend suite passed locally on 2026-10-20 with PostgreSQL 16 (219 of 219 tests; 124 pass and 95 are skipped without a database).
+- **CI** stays "Pending" until the backend, web, and widget workflows have run on the merge commit.
+- **Deployed** is "No" for every phase: no deployment is recorded.
+
+| Phase | Provides | On main | Tests | CI | Deployed |
+| --- | --- | --- | --- | --- | --- |
+| 0-2 | Tenant, identity, and the conversation/AI core | Yes | `foundation`, `auth`, `app`, `ai`, `phase2-completion` | Pending | No |
+| 3 | Web Widget channel boundary with durable inbound-event deduplication | Yes | `channel` | Pending | No |
+| 4 | Deterministic workforce routing, queues, capacity, presence, assignment safety | Yes | `routing` | Pending | No |
+| 5 | PostgreSQL-backed durable event and worker runtime (retries, leases, dead-letter replay, queue routing) | Yes | `event-runtime` | Pending | No |
+| 6 | AI control plane: model registry/failover, guardrails, durable AI traceability, cost attribution, evaluation | Yes | `phase6-ai` | Pending | No |
+| 7 | Durable workflow engine (versioned definitions, idempotent triggers, WAIT/APPROVAL states, bounded retries; kernel steps only) | Yes | `phase7-workflow` | Pending | No |
+| 8 | Quality kernel (versioned scorecards, deterministic sampling, evidence-linked human review, AI-proposal fencing, remediations) | Yes | `phase8-quality` | Pending | No |
+| Operator inbox | Authenticated console in `apps/web` (inbox list, conversation detail, handoff visibility, idempotent human reply) | Yes | `inbox` | Pending | No |
+
+Descriptions are carried over from the previous README and are supported only by the named test files. The Web Widget is the only channel integration in the code; other channels such as WhatsApp are not implemented. Later domains remain target architecture until their implementation and tests land.
 
 ## Documentation
 
