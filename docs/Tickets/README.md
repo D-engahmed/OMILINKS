@@ -2,6 +2,8 @@
 
 > Canonical execution backlog for the OmniLinks engineering simulation. Tickets are ordered by dependency, not by convenience.
 
+> **Blocking snapshot warning (20 October 2026):** current main commit [0203ba6](https://github.com/D-engahmed/OMILINKS/commit/0203ba6a057d1de9f853228764f89149e4474771) has no packages/backend directory, while its second parent [58dfe38](https://github.com/D-engahmed/OMILINKS/commit/58dfe387e1fc8d8543ee2c9df4a9b369a3d4aec7) contains it. Treat source recovery and clean-main verification as a blocking precondition. Do not interpret BASELINE as “present and verified on current main” until that gate is closed. See [Launch Strategy Review](../product/launch-strategy-review-2026-10-20.md).
+
 ## Execution sequence
 
 ```text
@@ -22,7 +24,7 @@
 
 ## Status semantics
 
-- BASELINE: represented by the current implementation/engineering plan; re-validate with executable evidence before treating it as production-ready.
+- BASELINE: represented by prior implementation evidence or the engineering plan; it must be revalidated from the current canonical tree and tests before being treated as present on main or production-ready.
 - TARGET: planned and not yet established by implementation/evidence.
 - DEFERRED: explicitly deferred until product, scale, or authorization requirements justify it.
 
