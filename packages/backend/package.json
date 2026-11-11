@@ -3,14 +3,15 @@
   "type": "module",
   "scripts": {
     "dev": "convex dev",
-    "setup": "convex dev --until-success"
+    "setup": "convex dev --until-success",
+    "typecheck": "tsc -p convex --noEmit"
   },
   "exports": {
     "./convex": "./convex/*.ts"
   },
   "devDependencies": {
     "@workspace/typescript-config": "workspace:*",
-    "typescript": "latest"
+    "typescript": "^5"
   },
   "dependencies": {
     "convex": "^1.49.0"
