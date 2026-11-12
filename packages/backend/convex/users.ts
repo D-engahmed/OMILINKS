@@ -13,7 +13,7 @@ export const add = mutation({
     args: {},
     handler: async (ctx) => {
         const userId = await ctx.db.insert("users", {
-            name: "Antonio",
+            name: "ahmed",
         });
 
         return userId;
