@@ -33,14 +33,16 @@ Tenant isolation is enforced by server-side authorization and tenant-scoped data
 ```text
 OMILINKS/
 ├── apps/
-│   ├── web/
-│   └── widget/
+│   ├── web/                 # Next.js operations application
+│   └── widget/              # Customer-facing widget
 ├── packages/
-│   ├── backend/
+│   ├── backend/             # Transitional Convex integration
 │   ├── ui/
 │   ├── math/
 │   ├── eslint-config/
 │   └── typescript-config/
+├── services/
+│   └── api/                 # Target Django modular monolith
 ├── docs/
 ├── package.json
 ├── pnpm-workspace.yaml
@@ -49,25 +51,29 @@ OMILINKS/
 
 ## Implementation Status
 
-The codebase is built as vertical phases. Status is tracked in separate columns so that code, tests, CI and deployment are never conflated.
+The repository is undergoing a deliberate backend migration. Status below
+describes the canonical tree, not historical implementation snapshots.
 
-- **On main** means the code is in the default branch.
-- **Tests** names the backend test file for that phase. The backend suite passed locally on 2026-10-20 with PostgreSQL 16 (219 of 219 tests; 124 pass and 95 are skipped without a database).
-- **CI** stays "Pending" until the backend, web, and widget workflows have run on the merge commit.
-- **Deployed** is "No" for every phase: no deployment is recorded.
+| Component | Current canonical state |
+| --- | --- |
+| Next.js web and widget | Present; the web app currently uses Clerk + Convex |
+| `packages/backend` | Convex starter scaffold (`users` schema/functions); transitional only |
+| `services/api` | Django foundation introduced by the Python API migration PR; business domains are not yet ported |
+| PostgreSQL | Local Compose service; target transactional source of truth for Django |
+| Product domains | Requirements and historical TypeScript implementation evidence exist; each capability must be reimplemented and tested in Django before it is considered migrated |
+| Production deployment | No production deployment is recorded |
 
-| Phase | Provides | On main | Tests | CI | Deployed |
-| --- | --- | --- | --- | --- | --- |
-| 0-2 | Tenant, identity, and the conversation/AI core | Yes | `foundation`, `auth`, `app`, `ai`, `phase2-completion` | Pending | No |
-| 3 | Web Widget channel boundary with durable inbound-event deduplication | Yes | `channel` | Pending | No |
-| 4 | Deterministic workforce routing, queues, capacity, presence, assignment safety | Yes | `routing` | Pending | No |
-| 5 | PostgreSQL-backed durable event and worker runtime (retries, leases, dead-letter replay, queue routing) | Yes | `event-runtime` | Pending | No |
-| 6 | AI control plane: model registry/failover, guardrails, durable AI traceability, cost attribution, evaluation | Yes | `phase6-ai` | Pending | No |
-| 7 | Durable workflow engine (versioned definitions, idempotent triggers, WAIT/APPROVAL states, bounded retries; kernel steps only) | Yes | `phase7-workflow` | Pending | No |
-| 8 | Quality kernel (versioned scorecards, deterministic sampling, evidence-linked human review, AI-proposal fencing, remediations) | Yes | `phase8-quality` | Pending | No |
-| Operator inbox | Authenticated console in `apps/web` (inbox list, conversation detail, handoff visibility, idempotent human reply) | Yes | `inbox` | Pending | No |
+The historical PostgreSQL-backed TypeScript backend referenced by older
+implementation tickets exists in Git history but is not present on current
+`main`. Its old test results are not current-main CI evidence. ADR-0006 and
+[the Django migration plan](docs/architecture/backend-migration-to-django.md)
+supersede the previous instruction to restore that implementation as the
+target runtime.
 
-Descriptions are carried over from the previous README and are supported only by the named test files. The Web Widget is the only channel integration in the code; other channels such as WhatsApp are not implemented. Later domains remain target architecture until their implementation and tests land.
+**Cutover rule:** keep Convex only for existing callers while migration is in
+progress. Each domain has one authoritative write path. Never dual-write the
+same business aggregate to Convex and PostgreSQL. Do not build new business
+capabilities in Convex.
 
 ## Documentation
 
@@ -101,20 +107,34 @@ Automation providers such as n8n are integrations, not the source of truth for c
 
 ## Local Development
 
+Start PostgreSQL and the Django API:
+
 ```bash
-pnpm install
-docker compose up -d                                  # PostgreSQL
-pnpm --filter @workspace/backend db:migrate           # apply migrations
-pnpm --filter @workspace/backend db:seed              # idempotent demo tenant
-pnpm dev
-pnpm lint
-pnpm typecheck
-pnpm build
+docker compose up --build -d postgres api
+docker compose exec api python manage.py migrate
 ```
 
-Reset the database with `docker compose down -v` followed by migrate + seed.
-See `.env.example` for `DATABASE_URL`, `TEST_DATABASE_URL`, and ports.
+The API is available at `http://localhost:8000`. Check
+`/health/live/` for process liveness and `/health/ready/` for database
+readiness.
 
+For Python development without Docker:
+
+```bash
+cd services/api
+python -m venv .venv
+# Windows PowerShell: .venv\\Scripts\\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
+python -m pip install -e ".[dev]"
+python manage.py migrate
+python manage.py test
+python manage.py runserver
+```
+
+The Next.js apps still use the transitional Convex provider until the
+frontend-cutover ticket is completed. Start them with the repository's pnpm
+workspace and provide the existing Clerk/Convex environment variables.
+See `.env.example` and `services/api/README.md`.
 
 ## Financial & Commercial Integration
 
