@@ -81,7 +81,8 @@ capabilities in Convex.
 2. `docs/requirements/functional-requirements.md`
 3. `docs/requirements/acceptance-criteria.md`
 4. `docs/architecture/HLD.md`
-5. Relevant `docs/domain/*`
+5. `docs/architecture/backend-migration-to-django.md`
+6. Relevant `docs/domain/*`
 6. `docs/api/*` and `docs/events/*`
 7. `docs/security/*`, `docs/ai/*`, `docs/data/*`
 8. `docs/product/*` and `docs/engineering/*`
