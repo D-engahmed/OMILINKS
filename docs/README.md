@@ -9,6 +9,7 @@
 |---|---|
 | requirements | behavior and measurable quality targets |
 | architecture | system structure and deployment boundaries |
+| [Backend migration to Django](architecture/backend-migration-to-django.md) | Python backend architecture and staged Convex cutover |
 | architecture/decisions | durable architectural decisions |
 | domain | aggregates, invariants and state transitions |
 | api | wire-level client contracts |
@@ -30,6 +31,10 @@ Start with [Business Execution Plan — First Paid BPO Pilot](product/business-e
 ## Ticket Queue
 
 The ordered ticket queue is maintained in docs/Tickets/. Start at docs/Tickets/README.md and execute in dependency order.
+
+## Backend runtime migration
+
+ADR-0006 selects Django as the target backend. The current Convex scaffold is transitional; see [the migration contract](architecture/backend-migration-to-django.md) and [Python backend tickets](Tickets/14-python-backend-migration.md). Historical ticket status is not proof of implementation on the current branch.
 
 ## Authority and implementation rule
 
