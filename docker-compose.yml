@@ -1,11 +1,10 @@
 # OmniLinks local development infrastructure (OML-T0006).
 #
-#   docker compose up -d        # start PostgreSQL
-#   pnpm --filter @workspace/backend db:migrate   # apply migrations
-#   pnpm --filter @workspace/backend db:seed      # idempotent demo tenant
-#   DATABASE_URL=postgres://omnilinks:omnilinks@localhost:5432/omnilinks pnpm --filter @workspace/backend start
+#   docker compose up --build -d postgres api
+#   docker compose exec api python manage.py migrate
 #
-# Reset: docker compose down -v && docker compose up -d && migrate again.
+# Reset: docker compose down -v && docker compose up --build -d postgres api
+#         then run the migration command above.
 # Redis is intentionally absent: no consumer needs it yet (leases, queues,
 # and deduplication are PostgreSQL-backed). Add it when a cache or
 # rate-limit consumer lands, not before.
@@ -26,6 +25,21 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  api:
+    build:
+      context: ./services/api
+    environment:
+      DJANGO_ENV: development
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-only-insecure-key-do-not-use-in-production}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,testserver,api}
+      DATABASE_URL: postgresql://omnilinks:omnilinks@postgres:5432/omnilinks
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   omnilinks-postgres:
