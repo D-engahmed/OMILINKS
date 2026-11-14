@@ -58,7 +58,7 @@ backend migration and should proceed in parallel.
 
 ## 1A. Commercial Critical Path — Starts in Parallel
 
-The domain phases below describe engineering dependencies, not the business launch sequence. Start prospecting and buyer discovery immediately, in parallel with Gate 0 recovery. Use [Business Execution Plan](../product/business-execution-plan-2026-10-20.md) and [OML-T1200–OML-T1211](../Tickets/13-business-validation-and-paid-pilot.md). Do not begin new channel-specific feature work until there is a credible buyer/pilot path and the canonical code baseline is reproducible. The code-recovery gate blocks software delivery, not low-cost customer discovery.
+The domain phases below describe engineering dependencies, not the business launch sequence. Start prospecting and buyer discovery immediately, in parallel with the Django migration. Use [Business Execution Plan](../product/business-execution-plan-2026-10-20.md) and [OML-T1200–OML-T1211](../Tickets/13-business-validation-and-paid-pilot.md). Do not begin new channel-specific feature work until there is a credible buyer/pilot path and the canonical Django baseline is reproducible. Backend migration gates block software delivery, not low-cost customer discovery.
 
 ## 2. Implementation Order
 
