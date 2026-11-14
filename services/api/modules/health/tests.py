@@ -15,7 +15,7 @@ class HealthEndpointTests(SimpleTestCase):
 
     @patch("modules.health.presentation.http.views.connection.cursor")
     def test_readiness_succeeds_when_database_is_available(self, cursor):
-        cursor.return_value.__enter__.return_value = cursor
+        cursor.return_value.__enter__.return_value = cursor.return_value
 
         response = self.client.get("/health/ready/")
 
@@ -28,6 +28,7 @@ class HealthEndpointTests(SimpleTestCase):
             },
         )
         cursor.assert_called_once()
+        cursor.return_value.execute.assert_called_once_with("SELECT 1")
 
     @patch(
         "modules.health.presentation.http.views.connection.cursor",
