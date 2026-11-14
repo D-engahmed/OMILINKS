@@ -20,10 +20,12 @@
 10 Billing
 11 Production Hardening
 12 Finance & Commercial Control
-13 Business Validation & Paid Pilot (start in parallel; do not wait for all engineering phases)
+13 Business Validation & Paid Pilot (start in parallel; do not wait for all engineering phases)\n14 Python Backend Migration (target runtime and staged Convex retirement)
 ```
 
 The business/pilot track in [13-business-validation-and-paid-pilot.md](13-business-validation-and-paid-pilot.md) is cross-cutting. Start its prospecting and buyer discovery immediately in parallel with repository recovery; its product-specific implementation tickets stay gated on buyer evidence and canonical code integrity.
+
+The active Python migration backlog is [14-python-backend-migration.md](14-python-backend-migration.md). Do not add new business logic to the transitional Convex runtime.
 
 ## Status semantics
 
