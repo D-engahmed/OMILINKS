@@ -3,10 +3,10 @@
 from unittest.mock import patch
 
 from django.db import OperationalError
-from django.test import SimpleTestCase
+from django.test import TestCase
 
 
-class HealthEndpointTests(SimpleTestCase):
+class HealthEndpointTests(TestCase):
     def test_liveness_does_not_depend_on_database(self):
         response = self.client.get("/health/live/")
 
