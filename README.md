@@ -124,7 +124,7 @@ For Python development without Docker:
 ```bash
 cd services/api
 python -m venv .venv
-# Windows PowerShell: .venv\\Scripts\\Activate.ps1
+# Windows PowerShell: .venv\Scripts\Activate.ps1
 # macOS/Linux: source .venv/bin/activate
 python -m pip install -e ".[dev]"
 python manage.py migrate
