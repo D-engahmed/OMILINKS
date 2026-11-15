@@ -32,21 +32,28 @@ def env_list(name: str, *, default: str = "") -> list[str]:
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "")
 DEBUG = env_bool("DJANGO_DEBUG", default=DJANGO_ENV == "development")
+database_url = os.getenv("DATABASE_URL")
 
-if DJANGO_ENV == "production":
+if DJANGO_ENV not in {"development", "test"}:
     if not SECRET_KEY:
-        raise ImproperlyConfigured("DJANGO_SECRET_KEY is required in production")
-    if DEBUG:
-        raise ImproperlyConfigured("DJANGO_DEBUG must be false in production")
-    if not os.getenv("DATABASE_URL"):
-        raise ImproperlyConfigured("DATABASE_URL is required in production")
+        raise ImproperlyConfigured("DJANGO_SECRET_KEY is required outside development/test")
+    if not database_url:
+        raise ImproperlyConfigured("DATABASE_URL is required outside development/test")
 elif not SECRET_KEY:
     SECRET_KEY = "local-only-insecure-key-do-not-use-in-production"
+
+if DJANGO_ENV == "production":
+    if DEBUG:
+        raise ImproperlyConfigured("DJANGO_DEBUG must be false in production")
+    if not database_url.lower().startswith(("postgres://", "postgresql://")):
+        raise ImproperlyConfigured("Production DATABASE_URL must use PostgreSQL")
 
 ALLOWED_HOSTS = env_list(
     "DJANGO_ALLOWED_HOSTS",
     default="localhost,127.0.0.1,testserver",
 )
+if DJANGO_ENV not in {"development", "test"} and not ALLOWED_HOSTS:
+    raise ImproperlyConfigured("DJANGO_ALLOWED_HOSTS is required outside development/test")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -88,7 +95,6 @@ TEMPLATES = [
     },
 ]
 
-database_url = os.getenv("DATABASE_URL")
 if database_url:
     DATABASES = {
         "default": dj_database_url.parse(
