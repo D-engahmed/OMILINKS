@@ -1,9 +1,7 @@
 name: Repository Integrity
 
-# OML-T1200: packages/backend was once deleted by a docs-only commit and the
-# deletion went unnoticed while README, pnpm-lock.yaml, and backend.yml kept
-# referring to it. This check has no path filter on purpose, so it runs for
-# every push and pull request, including ones that touch only docs.
+# Keep the transitional Convex package and the target Python API from being
+# removed by docs-only changes without the repository integrity check noticing.
 
 on:
   push:
@@ -15,16 +13,24 @@ permissions:
   contents: read
 
 jobs:
-  backend-present:
+  backend-layout:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Fail if the backend package is missing
+      - name: Verify transitional Convex package
         run: |
           if [ ! -f packages/backend/package.json ]; then
-            echo "::error file=packages/backend/package.json::packages/backend is missing. README, pnpm-lock.yaml, and backend.yml all depend on it. Restore it before merging."
+            echo "::error file=packages/backend/package.json::The transitional Convex package is still required by current frontend callers."
             exit 1
           fi
-          echo "packages/backend/package.json is present."
+          echo "Transitional Convex package is present."
+
+      - name: Verify target Django API
+        run: |
+          if [ ! -f services/api/pyproject.toml ] || [ ! -f services/api/manage.py ]; then
+            echo "::error file=services/api/pyproject.toml::The target Django API foundation is missing."
+            exit 1
+          fi
+          echo "Django API foundation is present."
