@@ -83,9 +83,9 @@ capabilities in Convex.
 4. `docs/architecture/HLD.md`
 5. `docs/architecture/backend-migration-to-django.md`
 6. Relevant `docs/domain/*`
-6. `docs/api/*` and `docs/events/*`
-7. `docs/security/*`, `docs/ai/*`, `docs/data/*`
-8. `docs/product/*` and `docs/engineering/*`
+7. `docs/api/*` and `docs/events/*`
+8. `docs/security/*`, `docs/ai/*`, `docs/data/*`
+9. `docs/product/*` and `docs/engineering/*`
 
 ## Engineering Rules
 
