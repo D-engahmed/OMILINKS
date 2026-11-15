@@ -11,7 +11,7 @@
 
 ### OML-T1301 — Django API foundation
 
-**Status:** IN REVIEW in PR 1
+**Status:** IN REVIEW — [PR #26](https://github.com/D-engahmed/OMILINKS/pull/26)
 
 **Dependencies:** OML-T0000
 
