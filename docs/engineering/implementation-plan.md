@@ -2,24 +2,63 @@
 
 > Status: **Target engineering execution plan**
 
-## 1. Current Repository Reality
+## 1. Current Repository Reality — Django Migration Supersedes Earlier Recovery Plan
 
-**Blocking source-of-truth exception at reviewed snapshot.** At current default-branch commit [ea96ef4](https://github.com/D-engahmed/OMILINKS/commit/ea96ef4c811f957ea3de65fdf9331452ab187ffc), the Git tree does not contain packages/backend, even though the README, workspace CI, Docker Compose instructions, and this plan describe the backend package. The historical code-containing snapshot [58dfe38](https://github.com/D-engahmed/OMILINKS/commit/58dfe387e1fc8d8543ee2c9df4a9b369a3d4aec7) does contain that package. This appears to be a merge-tree/source-reconciliation regression; inspect and restore it through a normal PR rather than resetting or force-pushing the branch.
+The current canonical `main` tree contains:
 
-Accordingly, the phase descriptions below are historical/recoverable implementation evidence and target contracts until they are verified from a clean checkout of the canonical branch. A ticket marked BASELINE is not proof that the feature is present on current main, tested, or deployed. Local uncommitted work is outside this repository snapshot.
+- a small Convex starter under `packages/backend` (`schema.ts` and
+  `users.ts`);
+- a Next.js application that consumes Convex through
+  `ConvexProviderWithClerk`;
+- product, domain, API, security, and engineering specifications describing
+  a PostgreSQL-backed customer-operations platform.
 
-### Mandatory gate before feature work
+The historical commit
+[58dfe38](https://github.com/D-engahmed/OMILINKS/commit/58dfe387e1fc8d8543ee2c9df4a9b369a3d4aec7)
+contains an earlier PostgreSQL-backed TypeScript implementation. It is not
+present on current `main`. The previous instruction to restore that
+implementation as the target backend is **superseded** by
+[ADR-0006](../architecture/decisions/0006-django-backend.md).
 
-1. Reconcile backend source and the newer documentation on a fix branch.
-2. Reproduce install, lint, typecheck, build, memory-store tests, PostgreSQL integration tests, web/widget builds, and migration checks from a clean checkout.
-3. Reconcile ticket status against the resulting code and test evidence.
-4. Merge through review. Do not proceed to Billing on the strength of documentation alone.
+The target backend is now the Django modular monolith in
+`services/api`. The migration contract and staged cutover are defined in
+[Backend Migration to Django](../architecture/backend-migration-to-django.md)
+and tracked in
+[Python Backend Migration Tickets](../Tickets/14-python-backend-migration.md).
 
-Follow [Launch Strategy Review (20 October 2026)](../product/launch-strategy-review-2026-10-20.md) for the revised commercial-launch sequence. The domain dependency graph below is not a substitute for a customer-validated launch plan.
+Important status correction:
+
+- historical TypeScript test results are not current-main CI evidence;
+- old BASELINE ticket labels describe historical implementation evidence,
+  not verified Python capabilities;
+- the first Django PR provides only the service foundation and health checks;
+- business domains are not migrated merely because their specifications or
+  old TypeScript implementations exist;
+- Convex remains transitional until each caller and data domain has passed
+  the documented cutover gates.
+
+### Mandatory gates before domain feature work
+
+1. Establish the Django service, local runtime, and Python CI.
+2. Establish PostgreSQL migrations, configuration, observability, and a
+   reproducible test harness.
+3. Port tenancy and identity before any tenant-owned business endpoint.
+4. Port domain capabilities in dependency order with positive, negative,
+   concurrency, idempotency, and recovery tests.
+5. Migrate frontend and worker callers domain-by-domain; never dual-write the
+   same aggregate.
+6. Remove Convex only after caller inventory, data reconciliation, parity,
+   rollback, and production smoke tests pass.
+
+Do not treat historical code or documentation as a reason to skip a gate.
+
+Follow [Launch Strategy Review (20 October 2026)](../product/launch-strategy-review-2026-10-20.md)
+for the commercial-launch sequence. Buyer discovery remains independent of
+backend migration and should proceed in parallel.
 
 ## 1A. Commercial Critical Path — Starts in Parallel
 
-The domain phases below describe engineering dependencies, not the business launch sequence. Start prospecting and buyer discovery immediately, in parallel with Gate 0 recovery. Use [Business Execution Plan](../product/business-execution-plan-2026-10-20.md) and [OML-T1200–OML-T1211](../Tickets/13-business-validation-and-paid-pilot.md). Do not begin new channel-specific feature work until there is a credible buyer/pilot path and the canonical code baseline is reproducible. The code-recovery gate blocks software delivery, not low-cost customer discovery.
+The domain phases below describe engineering dependencies, not the business launch sequence. Start prospecting and buyer discovery immediately, in parallel with the Django migration. Use [Business Execution Plan](../product/business-execution-plan-2026-10-20.md) and [OML-T1200–OML-T1211](../Tickets/13-business-validation-and-paid-pilot.md). Do not begin new channel-specific feature work until there is a credible buyer/pilot path and the canonical Django baseline is reproducible. Backend migration gates block software delivery, not low-cost customer discovery.
 
 ## 2. Implementation Order
 

@@ -243,11 +243,24 @@ Extract services only when a measurable bottleneck or team ownership boundary ju
 
 ## 12. Current Repository Alignment
 
-The repository is presently an implementation scaffold with a thin backend entry point and Next.js application shells.
+The canonical repository is in a staged backend migration:
 
-The documentation therefore defines the target architecture, not a claim that all runtime modules already exist.
+- `apps/web` and `apps/widget` remain the Next.js presentation applications.
+- `packages/backend` currently contains a small Convex starter and is used by
+  the web application through `ConvexProviderWithClerk`.
+- `services/api` is the target Django modular monolith introduced by the
+  Python backend migration.
+- PostgreSQL is the transactional source of truth for every domain after
+  that domain's verified cutover.
 
-Implementation should add the target module boundaries incrementally rather than creating placeholder directories with no ownership.
+The existing Convex path is transitional. Do not add new business capabilities
+there, and do not dual-write a domain to Convex and PostgreSQL. Move a domain's
+reads and writes only after the Django implementation, authorization,
+migration, parity tests and rollback plan are accepted.
+
+The earlier PostgreSQL-backed TypeScript implementation is historical
+repository evidence, not the runtime currently present on `main`. ADR-0006
+and `docs/architecture/backend-migration-to-django.md` define the target.
 
 ## 13. Architecture Invariants
 

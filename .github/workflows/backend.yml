@@ -1,19 +1,19 @@
-name: Backend CI
+name: Legacy Convex Compatibility
+
+# Transitional only: new backend capabilities belong in services/api.
+# Keep this job to a typecheck of the existing Convex integration until its
+# frontend callers and data have completed the documented Django cutover.
 
 on:
   push:
     paths:
       - "packages/backend/**"
-      - "packages/typescript-config/**"
-      - "packages/eslint-config/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"
   pull_request:
     paths:
       - "packages/backend/**"
-      - "packages/typescript-config/**"
-      - "packages/eslint-config/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "package.json"
@@ -22,50 +22,26 @@ permissions:
   contents: read
 
 jobs:
-  backend:
+  legacy-convex:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: omnilinks_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
-      - name: Checkout
+      - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Setup pnpm
+      - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10.33.4
           run_install: false
 
-      - name: Setup Node
+      - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
 
-      - name: Install
+      - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        run: pnpm --filter @workspace/backend lint
-
-      - name: Typecheck
+      - name: Typecheck transitional Convex package
         run: pnpm --filter @workspace/backend typecheck
-
-      - name: Test (memory and PostgreSQL stores)
-        env:
-          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/omnilinks_test
-        run: pnpm --filter @workspace/backend test
-
-      - name: Build
-        run: pnpm --filter @workspace/backend build

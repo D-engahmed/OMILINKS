@@ -45,6 +45,31 @@ src/
 
 The exact physical folder names can change. Dependency direction must not.
 
+## 1A. Django Runtime Mapping
+
+The target implementation lives in `services/api`. Map the generic layers
+above to Django as follows:
+
+| Architecture layer | Django implementation |
+|---|---|
+| Presentation | URL configuration, DRF views, serializers, authentication/permission adapters |
+| Application | Explicit use-case classes/functions, command/query handlers, transaction orchestration |
+| Domain | Framework-independent aggregates, value objects, policies, invariants and domain events |
+| Infrastructure | Django ORM models/migrations, tenant-scoped repositories, PostgreSQL, provider and worker adapters |
+
+A Django view must not become the application service. It parses the HTTP
+request, delegates to an application use case, and maps the result to the
+wire contract. ORM models are persistence mappings, not the only place where
+business invariants live.
+
+A tenant-owned repository method must require organization context, for
+example `get_conversation(organization_id, conversation_id)`. Do not expose
+a global `get_by_id` method to application code and filter after retrieval.
+
+Do not add an abstract repository around every ORM query. Use explicit ports
+where they protect domain/application code from an infrastructure boundary
+or make a required behavior independently testable.
+
 ## 2. Dependency Graph
 
 ~~~mermaid
